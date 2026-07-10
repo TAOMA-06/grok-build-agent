@@ -9,11 +9,9 @@ mod handlers;
 mod pool;
 mod terminal_host;
 
-pub use connection::resolve_grok_path;
+pub use connection::{iso_now, resolve_grok_path};
 #[cfg(test)]
 pub use events::{NoopEventBus, SharedEventBus};
-#[cfg(not(test))]
-pub use events::SharedEventBus;
 pub use pool::RuntimePool;
 
 use serde::{Deserialize, Serialize};

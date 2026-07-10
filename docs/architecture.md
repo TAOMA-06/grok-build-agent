@@ -51,8 +51,20 @@ Protocol flow:
 
 Injected as `_meta.rules` when **use harness** is enabled. Also installable as a Grok plugin for pure TUI users. Does not replace bundled skills like `/design` or `/execute-plan`; it encourages using them.
 
+### Local catalog (`src-tauri/src/db.rs`)
+
+SQLite under Application Support: workspaces, session index, drafts, UI state,
+bounded event cache. Optional hints from `~/.grok/sessions`.
+
+### Git / worktree (`src-tauri/src/git_ops.rs`)
+
+Read-only review (status, numstat, patch) via argv arrays. Worktree create/delete
+requires explicit dirty policy when the source tree is dirty. Lists merge
+`git worktree list --porcelain` with `grok worktree list --json`.
+
 ## Non-goals
 
 - Replacing Grok’s tool runner or model API
 - Full IDE features (LSP editor, debugger)
 - Cloud multi-tenant hosting of Grok
+- One-click discard / hard reset of working trees

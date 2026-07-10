@@ -167,6 +167,41 @@ pub struct SessionSummary {
     pub draft: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRecord {
+    pub id: String,
+    pub path: String,
+    pub name: String,
+    pub last_opened_at: String,
+    pub favorite: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum InspectorSelection {
+    Tool { tool_call_id: String },
+    Terminal { terminal_id: String },
+    Plan,
+    Diff {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+    },
+    Diagnostics,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUiState {
+    pub session_id: String,
+    pub scroll_top: f64,
+    pub draft: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspector_selection: Option<InspectorSelection>,
+    #[serde(default)]
+    pub collapsed_tool_ids: Vec<String>,
+}
+
 // --- Events ---------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
