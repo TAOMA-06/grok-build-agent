@@ -26,6 +26,26 @@ function unwrapPayload<T>(payload: unknown): T {
   return payload as T;
 }
 
+function activeOrFirstSessionId(envelopeSessionId?: string | null): string | null {
+  const store = useAppStore.getState();
+  if (envelopeSessionId && store.sessions[envelopeSessionId]) {
+    return envelopeSessionId;
+  }
+  // Map remote ACP id → local session
+  if (envelopeSessionId) {
+    for (const id of store.sessionOrder) {
+      const s = store.sessions[id];
+      if (
+        s?.summary.remoteSessionId === envelopeSessionId ||
+        s?.summary.sessionId === envelopeSessionId
+      ) {
+        return id;
+      }
+    }
+  }
+  return store.activeSessionId;
+}
+
 export async function probeGrok(grokPath?: string): Promise<GrokProbe> {
   return invoke<GrokProbe>("probe_grok", { grokPath: grokPath || null });
 }
@@ -89,8 +109,54 @@ function extractText(content: SessionUpdate["content"]): string {
   return "";
 }
 
-function handleSessionUpdate(update: SessionUpdate) {
+/** Batch high-frequency stream chunks per animation frame per session. */
+const pendingAssistant = new Map<string, string>();
+const pendingThought = new Map<string, string>();
+let rafScheduled = false;
+
+function flushStreams() {
+  rafScheduled = false;
   const store = useAppStore.getState();
+  for (const [sid, text] of pendingAssistant) {
+    if (text) store.appendAssistant(sid, text);
+  }
+  for (const [sid, text] of pendingThought) {
+    if (text) store.appendThought(sid, text);
+  }
+  pendingAssistant.clear();
+  pendingThought.clear();
+}
+
+function scheduleFlush() {
+  if (rafScheduled) return;
+  rafScheduled = true;
+  requestAnimationFrame(flushStreams);
+}
+
+function queueAssistant(sessionId: string, text: string) {
+  pendingAssistant.set(
+    sessionId,
+    (pendingAssistant.get(sessionId) ?? "") + text,
+  );
+  scheduleFlush();
+}
+
+function queueThought(sessionId: string, text: string) {
+  pendingThought.set(
+    sessionId,
+    (pendingThought.get(sessionId) ?? "") + text,
+  );
+  scheduleFlush();
+}
+
+function handleSessionUpdate(
+  update: SessionUpdate,
+  sessionId: string | null,
+) {
+  const store = useAppStore.getState();
+  const sid = activeOrFirstSessionId(sessionId);
+  if (!sid) return;
+
   const u = (update.update as SessionUpdate | undefined) ?? update;
   const kind =
     u.sessionUpdate ??
@@ -102,32 +168,35 @@ function handleSessionUpdate(update: SessionUpdate) {
     case "agent_message":
     case "message": {
       const text = extractText(u.content) || String(u.text ?? "");
-      if (text) store.appendAssistant(text);
+      if (text) queueAssistant(sid, text);
       break;
     }
     case "agent_thought_chunk":
     case "agent_thought":
     case "thought": {
       const text = extractText(u.content) || String(u.text ?? "");
-      if (text) store.appendThought(text);
+      if (text) queueThought(sid, text);
       break;
     }
     case "tool_call": {
+      flushStreams();
       const id = String(u.toolCallId ?? u.tool_call_id ?? crypto.randomUUID());
-      store.upsertTool({
+      store.upsertTool(sid, {
         id,
         title: String(u.title ?? u.kind ?? "tool"),
         kind: u.kind ? String(u.kind) : undefined,
         status: String(u.status ?? "running"),
         input: u.rawInput ?? u.input ?? u.raw_input,
       });
+      store.setInspector(sid, { kind: "tool", toolCallId: id });
       store.setRightPanel("tasks");
       break;
     }
     case "tool_call_update": {
+      flushStreams();
       const id = String(u.toolCallId ?? u.tool_call_id ?? "");
       if (!id) break;
-      store.upsertTool({
+      store.upsertTool(sid, {
         id,
         title: String(u.title ?? "tool"),
         kind: u.kind ? String(u.kind) : undefined,
@@ -138,17 +207,19 @@ function handleSessionUpdate(update: SessionUpdate) {
       break;
     }
     case "plan": {
+      flushStreams();
       const text =
         extractText(u.content) ||
         (typeof u.plan === "string"
           ? u.plan
           : JSON.stringify(u.plan ?? u, null, 2));
-      store.setPlan(text);
+      store.setPlan(sid, text);
+      store.setInspector(sid, { kind: "plan" });
       break;
     }
     default: {
       if (kind) {
-        store.addBlock({
+        store.addBlock(sid, {
           type: "system",
           id: crypto.randomUUID(),
           text: `update: ${kind}`,
@@ -166,7 +237,13 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
     await listen<SessionEventEnvelope | SessionUpdate>(
       "acp:session_update",
       (event) => {
-        handleSessionUpdate(unwrapPayload<SessionUpdate>(event.payload));
+        const sessionId = isSessionEventEnvelope(event.payload)
+          ? event.payload.sessionId
+          : null;
+        handleSessionUpdate(
+          unwrapPayload<SessionUpdate>(event.payload),
+          sessionId,
+        );
       },
     ),
   );
@@ -175,7 +252,10 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
     await listen<AgentStatus>("acp:status", (event) => {
       useAppStore.getState().setStatus(event.payload);
       if (!event.payload.running) {
-        useAppStore.getState().setBusy(false);
+        const store = useAppStore.getState();
+        for (const id of store.sessionOrder) {
+          store.setSessionBusy(id, false);
+        }
       }
     }),
   );
@@ -204,12 +284,15 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
       } else {
         text = JSON.stringify(p);
       }
-      useAppStore.getState().addBlock({
-        type: "system",
-        id: crypto.randomUUID(),
-        text,
-        level: "error",
-      });
+      const sid = useAppStore.getState().activeSessionId;
+      if (sid) {
+        useAppStore.getState().addBlock(sid, {
+          type: "system",
+          id: crypto.randomUUID(),
+          text,
+          level: "error",
+        });
+      }
     }),
   );
 
@@ -218,58 +301,41 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
       "acp:server_request",
       (event) => {
         const raw = unwrapPayload<ServerRequest>(event.payload);
-        // Envelope payload is the full JSON-RPC object.
         const req: ServerRequest =
           raw && typeof raw === "object" && "method" in raw
             ? (raw as ServerRequest)
             : (event.payload as ServerRequest);
 
-        // Host already filters fs/terminal; still guard unknown methods.
         if (!isPermissionMethod(req.method ?? "")) {
-          useAppStore.getState().addBlock({
-            type: "system",
-            id: crypto.randomUUID(),
-            text: `Ignored non-permission server request: ${req.method}`,
-            level: "warn",
-          });
+          const sid = useAppStore.getState().activeSessionId;
+          if (sid) {
+            useAppStore.getState().addBlock(sid, {
+              type: "system",
+              id: crypto.randomUUID(),
+              text: `Ignored non-permission server request: ${req.method}`,
+              level: "warn",
+            });
+          }
           return;
         }
 
         const options = extractPermissionOptions(req.params);
-        const connectionId =
-          isSessionEventEnvelope(event.payload)
-            ? event.payload.connectionId
-            : "local";
-        const prompt = buildPermissionPrompt({
-          request: req,
-          connectionId,
-        });
+        const connectionId = isSessionEventEnvelope(event.payload)
+          ? event.payload.connectionId
+          : "local";
+        buildPermissionPrompt({ request: req, connectionId });
         useAppStore.getState().setPermission(req, options);
 
         const settings = useAppStore.getState().settings;
         if (settings.alwaysApprove) {
           const allow =
-            options.find((o) => o.kind === "allow_once" || o.kind === "allow_always") ??
-            options[0];
-          if (!allow) {
-            useAppStore.getState().addBlock({
-              type: "system",
-              id: crypto.randomUUID(),
-              text: "Always-approve enabled but agent sent no permission options",
-              level: "error",
-            });
-            return;
-          }
+            options.find(
+              (o) => o.kind === "allow_once" || o.kind === "allow_always",
+            ) ?? options[0];
+          if (!allow) return;
           void respondServerRequest(req.id, {
             outcome: { outcome: "selected", optionId: allow.optionId },
           }).finally(() => useAppStore.getState().setPermission(null));
-        } else if (prompt && options.length === 0) {
-          useAppStore.getState().addBlock({
-            type: "system",
-            id: crypto.randomUUID(),
-            text: "Permission request missing agent option IDs",
-            level: "warn",
-          });
         }
       },
     ),
@@ -280,17 +346,16 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
       "acp:extension",
       (event) => {
         const p = unwrapPayload<{ method?: string }>(event.payload);
-        const method =
-          p?.method ??
-          (isSessionEventEnvelope(event.payload)
-            ? event.payload.kind
-            : "extension");
-        useAppStore.getState().addBlock({
-          type: "system",
-          id: crypto.randomUUID(),
-          text: `extension: ${method}`,
-          level: "info",
-        });
+        const method = p?.method ?? "extension";
+        const sid = useAppStore.getState().activeSessionId;
+        if (sid) {
+          useAppStore.getState().addBlock(sid, {
+            type: "system",
+            id: crypto.randomUUID(),
+            text: `extension: ${method}`,
+            level: "info",
+          });
+        }
       },
     ),
   );
@@ -301,12 +366,15 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
       (event) => {
         const p = unwrapPayload<{ method?: string }>(event.payload);
         const method = p?.method ?? "notification";
-        useAppStore.getState().addBlock({
-          type: "system",
-          id: crypto.randomUUID(),
-          text: `notify: ${method}`,
-          level: "info",
-        });
+        const sid = useAppStore.getState().activeSessionId;
+        if (sid) {
+          useAppStore.getState().addBlock(sid, {
+            type: "system",
+            id: crypto.randomUUID(),
+            text: `notify: ${method}`,
+            level: "info",
+          });
+        }
       },
     ),
   );

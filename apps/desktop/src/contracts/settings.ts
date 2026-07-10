@@ -28,7 +28,8 @@ export type RightPanel =
   | "settings"
   | "diff"
   | "worktree"
-  | "plugins";
+  | "plugins"
+  | "diagnostics";
 
 export type OnboardingStep =
   | "welcome"

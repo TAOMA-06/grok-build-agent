@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import {
   loadSettings,
-  probeGrok,
   respondServerRequest,
   restartAgent,
   runtimeHealth,
@@ -12,8 +12,27 @@ import {
   stopAgent,
   subscribeAcpEvents,
 } from "./acp/client";
+import {
+  createWorktree,
+  deleteWorktree,
+  gitFilePatch,
+  gitReview,
+  listSessions,
+  listWorkspaces,
+  listWorktrees,
+  saveDraft,
+  upsertSession,
+  upsertWorkspace,
+  worktreeDeletePreview,
+} from "./api/catalog";
+import { t } from "./i18n/en";
 import { useAppStore } from "./store";
-import type { ChatBlock, RightPanel, Settings } from "./types";
+import type {
+  ChatBlock,
+  RightPanel,
+  SessionSummary,
+  Settings,
+} from "./types";
 import "./App.css";
 
 function safeJson(v: unknown): string {
@@ -25,48 +44,67 @@ function safeJson(v: unknown): string {
   }
 }
 
-function BlockView({ block }: { block: ChatBlock }) {
+function BlockView({
+  block,
+  onSelectTool,
+}: {
+  block: ChatBlock;
+  onSelectTool?: (id: string) => void;
+}) {
   switch (block.type) {
     case "user":
       return (
         <div className="block user">
-          <div className="label">You</div>
-          <div className="body">{block.text}</div>
+          <div className="label">{t.you}</div>
+          <div className="body pre">{block.text}</div>
         </div>
       );
     case "assistant":
       return (
         <div className="block assistant">
-          <div className="label">Grok</div>
+          <div className="label">{t.grok}</div>
           <div className="body pre">{block.text}</div>
         </div>
       );
     case "thought":
       return (
         <details className="block thought">
-          <summary>Thinking</summary>
+          <summary>{t.thinking}</summary>
           <div className="body pre muted">{block.text}</div>
         </details>
       );
-    case "tool":
+    case "tool": {
+      const large =
+        safeJson(block.tool.output).length > 800 ||
+        safeJson(block.tool.input).length > 800;
       return (
-        <div className={`block tool status-${block.tool.status}`}>
+        <button
+          type="button"
+          className={`block tool status-${block.tool.status}`}
+          style={{ width: "100%", textAlign: "left" }}
+          onClick={() => onSelectTool?.(block.tool.id)}
+        >
           <div className="label">
-            Tool · {block.tool.title}
+            {t.tool} · {block.tool.title}
             <span className="pill">{block.tool.status}</span>
           </div>
           {block.tool.input != null && (
-            <pre className="code">{safeJson(block.tool.input)}</pre>
+            <pre className={`code ${large ? "tool-collapsed" : ""}`}>
+              {safeJson(block.tool.input)}
+            </pre>
           )}
           {block.tool.output != null && (
-            <pre className="code out">{safeJson(block.tool.output)}</pre>
+            <pre className={`code out ${large ? "tool-collapsed" : ""}`}>
+              {safeJson(block.tool.output)}
+            </pre>
           )}
-        </div>
+        </button>
       );
+    }
     case "plan":
       return (
         <div className="block plan">
-          <div className="label">Plan</div>
+          <div className="label">{t.plan}</div>
           <div className="body pre">{block.text}</div>
         </div>
       );
@@ -80,7 +118,7 @@ function BlockView({ block }: { block: ChatBlock }) {
       return (
         <div className="block tool">
           <div className="label">
-            Subtask · {block.title}
+            {t.subtask} · {block.title}
             <span className="pill">{block.status}</span>
           </div>
         </div>
@@ -88,94 +126,40 @@ function BlockView({ block }: { block: ChatBlock }) {
   }
 }
 
-function Onboarding({
-  onDone,
-}: {
-  onDone: (s: Settings) => void;
-}) {
-  const { settings, setSettings, health, setHealth } = useAppStore();
+function Onboarding() {
+  const { settings, setSettings, health, setHealth, replaceSettings } =
+    useAppStore();
   const [step, setStep] = useState(0);
   const [checking, setChecking] = useState(false);
 
   const refresh = useCallback(async () => {
     setChecking(true);
     try {
-      const h = await runtimeHealth(settings.grokPath || undefined);
-      setHealth(h);
-      if (h.grok.path && !settings.grokPath) {
-        setSettings({ grokPath: h.grok.path });
-      }
+      setHealth(await runtimeHealth(settings.grokPath || undefined));
     } finally {
       setChecking(false);
     }
-  }, [settings.grokPath, setHealth, setSettings]);
+  }, [settings.grokPath, setHealth]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  async function pickWorkspace() {
-    const selected = await open({ directory: true, multiple: false });
-    if (typeof selected === "string") {
-      setSettings({ cwd: selected });
-    }
-  }
-
   async function finish() {
-    const next: Settings = {
-      ...settings,
-      onboardingDone: true,
-    };
+    const next = { ...settings, onboardingDone: true };
+    replaceSettings(next);
     await saveSettings(next);
-    onDone(next);
   }
 
   return (
     <div className="onboarding">
       <div className="onboarding-card">
-        <div className="brand-row">
-          <span className="logo">GB</span>
-          <div>
-            <h1>Grok Build Desktop</h1>
-            <p className="muted">
-              Hermes-style desktop shell · Grok Build as the agent runtime
-            </p>
-          </div>
-        </div>
-
-        <div className="steps">
-          <button
-            type="button"
-            className={step === 0 ? "step active" : "step"}
-            onClick={() => setStep(0)}
-          >
-            1. Runtime
-          </button>
-          <button
-            type="button"
-            className={step === 1 ? "step active" : "step"}
-            onClick={() => setStep(1)}
-          >
-            2. Workspace
-          </button>
-          <button
-            type="button"
-            className={step === 2 ? "step active" : "step"}
-            onClick={() => setStep(2)}
-          >
-            3. Agent
-          </button>
-        </div>
-
+        <h2>{t.onboardingTitle}</h2>
+        <p className="hint">{t.appSubtitle}</p>
         {step === 0 && (
-          <section className="panel-body">
-            <h2>Detect Grok Build CLI</h2>
-            <p className="muted">
-              This app does not ship the model runtime. It manages your local{" "}
-              <code>grok</code> process over ACP (like Hermes manages its Core).
-            </p>
+          <>
             <label>
-              Grok binary path (optional)
+              {t.grokPath}
               <input
                 value={settings.grokPath}
                 onChange={(e) => setSettings({ grokPath: e.target.value })}
@@ -183,34 +167,31 @@ function Onboarding({
               />
             </label>
             <label>
-              API key (optional if you use <code>grok login</code>)
+              {t.apiKey}
               <input
                 type="password"
                 value={settings.apiKey}
                 onChange={(e) => setSettings({ apiKey: e.target.value })}
-                placeholder="paste to store in Keychain"
+                placeholder="Keychain"
                 autoComplete="off"
               />
             </label>
+            <p className="hint">{t.apiKeyHint}</p>
             <div className="row-actions">
               <button type="button" className="ghost" onClick={() => void refresh()}>
-                {checking ? "Checking…" : "Re-check health"}
+                {checking ? "…" : t.recheck}
               </button>
             </div>
             <ul className="checklist">
               {(health?.checklist ?? []).map((item) => (
                 <li key={item.id} className={item.ok ? "ok" : "bad"}>
                   <strong>{item.ok ? "✓" : "✗"}</strong> {item.label}
-                  {item.detail && <span className="muted"> — {item.detail}</span>}
+                  {item.detail && (
+                    <span className="muted"> — {item.detail}</span>
+                  )}
                 </li>
               ))}
             </ul>
-            {!health?.ready && (
-              <div className="hint">
-                Install Grok Build, then run <code>grok login</code> or paste an
-                API key (stored in macOS Keychain, not settings.json).
-              </div>
-            )}
             <div className="row-actions end">
               <button
                 type="button"
@@ -218,43 +199,15 @@ function Onboarding({
                 disabled={!health?.grok.found}
                 onClick={() => setStep(1)}
               >
-                Continue
+                {t.onboardingNext}
               </button>
             </div>
-          </section>
+          </>
         )}
-
         {step === 1 && (
-          <section className="panel-body">
-            <h2>Choose a workspace</h2>
-            <p className="muted">
-              Agent sessions run with this folder as <code>cwd</code>.
-            </p>
-            <button type="button" className="ghost" onClick={() => void pickWorkspace()}>
-              Open folder…
-            </button>
-            <code className="cwd-line">{settings.cwd || "No folder selected"}</code>
-            <div className="row-actions end">
-              <button type="button" className="ghost" onClick={() => setStep(0)}>
-                Back
-              </button>
-              <button
-                type="button"
-                className="primary"
-                disabled={!settings.cwd}
-                onClick={() => setStep(2)}
-              >
-                Continue
-              </button>
-            </div>
-          </section>
-        )}
-
-        {step === 2 && (
-          <section className="panel-body">
-            <h2>Agent defaults</h2>
+          <>
             <label>
-              Model
+              {t.model}
               <input
                 value={settings.model}
                 onChange={(e) => setSettings({ model: e.target.value })}
@@ -266,175 +219,374 @@ function Onboarding({
                 checked={settings.useHarness}
                 onChange={(e) => setSettings({ useHarness: e.target.checked })}
               />
-              Inject orchestrator harness (plan + parallel subagents)
-            </label>
-            <label className="row">
-              <input
-                type="checkbox"
-                checked={settings.alwaysApprove}
-                onChange={(e) => setSettings({ alwaysApprove: e.target.checked })}
-              />
-              Always approve tools (YOLO — use carefully)
+              {t.useHarness}
             </label>
             <div className="row-actions end">
-              <button type="button" className="ghost" onClick={() => setStep(1)}>
+              <button type="button" className="ghost" onClick={() => setStep(0)}>
                 Back
               </button>
               <button type="button" className="primary" onClick={() => void finish()}>
-                Enter workbench
+                {t.onboardingNext}
               </button>
             </div>
-          </section>
+          </>
         )}
       </div>
     </div>
   );
 }
 
-function RightPanelView() {
+function DiffPanel() {
   const {
+    settings,
+    review,
+    setReview,
+    setPatchPreview,
+    patchPreview,
+    setRightPanel,
+  } = useAppStore();
+  const cwd = settings.cwd;
+
+  const refresh = useCallback(async () => {
+    if (!cwd) {
+      setReview(null);
+      return;
+    }
+    try {
+      setReview(await gitReview(cwd));
+    } catch (e) {
+      setReview({
+        workspaceRoot: cwd,
+        state: "error",
+        files: [],
+        untracked: [],
+        error: String(e),
+        refreshedAt: new Date().toISOString(),
+      });
+    }
+  }, [cwd, setReview]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function showPatch(path: string, staged: boolean) {
+    if (!cwd) return;
+    const text = await gitFilePatch(cwd, path, staged);
+    setPatchPreview({ path, text });
+  }
+
+  async function copyPath(path: string) {
+    await navigator.clipboard.writeText(path);
+  }
+
+  async function reveal(path: string) {
+    if (!cwd) return;
+    await openPath(`${cwd}/${path}`);
+  }
+
+  if (!review) {
+    return <p className="empty muted">{t.noWorkspace}</p>;
+  }
+
+  return (
+    <div className="panel-body">
+      <div className="row-actions">
+        <button type="button" className="ghost" onClick={() => void refresh()}>
+          {t.refresh}
+        </button>
+        <span className="muted">
+          {review.state === "clean" && t.cleanRepo}
+          {review.state === "dirty" && t.dirtyRepo}
+          {review.state === "not_a_repo" && t.noGitRepo}
+          {review.branch && ` · ${review.branch}`}
+          {review.head && ` @ ${review.head}`}
+        </span>
+      </div>
+      {review.files.map((f) => (
+        <div key={f.path + String(f.staged)} className="diff-file-row">
+          <button
+            type="button"
+            className="diff-file list-item"
+            onClick={() => void showPatch(f.path, f.staged)}
+          >
+            <span>
+              {f.path}
+              {f.binary ? ` (${t.binaryFile})` : ""}
+            </span>
+            <span className="diff-stats">
+              <span className="add">+{f.additions}</span>{" "}
+              <span className="del">−{f.deletions}</span>
+            </span>
+          </button>
+          <div className="row-actions">
+            <button type="button" className="ghost" onClick={() => void copyPath(f.path)}>
+              {t.copyPath}
+            </button>
+            <button type="button" className="ghost" onClick={() => void reveal(f.path)}>
+              {t.openFinder}
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                const sid = useAppStore.getState().activeSessionId;
+                if (!sid) return;
+                useAppStore.getState().setSessionDraft(
+                  sid,
+                  `Please review changes in \`${f.path}\`:\n`,
+                );
+                setRightPanel("tasks");
+              }}
+            >
+              {t.sendToAgent}
+            </button>
+          </div>
+        </div>
+      ))}
+      {patchPreview && (
+        <>
+          <div className="section-title">{patchPreview.path}</div>
+          <pre className="code">{patchPreview.text}</pre>
+        </>
+      )}
+    </div>
+  );
+}
+
+function WorktreePanel() {
+  const { settings, worktrees, setWorktrees } = useAppStore();
+  const cwd = settings.cwd;
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!cwd) return;
+    setWorktrees(await listWorktrees(cwd));
+  }, [cwd, setWorktrees]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function onCreate() {
+    if (!cwd) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const review = await gitReview(cwd);
+      let dirtyPolicy: "clean_head" | "copy_dirty" = "clean_head";
+      if (review.state === "dirty") {
+        const copy = window.confirm(
+          `${t.dirtyPolicyPrompt}\nOK = ${t.dirtyPolicyCopy}\nCancel = ${t.dirtyPolicyClean}`,
+        );
+        dirtyPolicy = copy ? "copy_dirty" : "clean_head";
+      }
+      const branch = `task-${Date.now().toString(36)}`;
+      await createWorktree({
+        workspaceRoot: cwd,
+        branch,
+        dirtyPolicy,
+      });
+      await refresh();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDelete(path: string) {
+    if (!cwd) return;
+    const preview = await worktreeDeletePreview(path);
+    const ok = window.confirm(
+      `${t.confirmDelete}\n${t.path}: ${preview.path}\n${t.branch}: ${preview.branch ?? "—"}\n${
+        preview.dirty ? t.uncommitted : t.clean
+      }`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await deleteWorktree(path, cwd, true);
+      await refresh();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel-body">
+      <div className="row-actions">
+        <button
+          type="button"
+          className="primary"
+          disabled={!cwd || busy}
+          onClick={() => void onCreate()}
+        >
+          {t.createWorktree}
+        </button>
+        <button type="button" className="ghost" onClick={() => void refresh()}>
+          {t.refresh}
+        </button>
+      </div>
+      {msg && <p className="hint">{msg}</p>}
+      {worktrees.map((w) => (
+        <div key={w.path} className="list-item">
+          <strong>{w.branch ?? w.path}</strong>
+          <span className="meta">
+            {w.path}
+            {w.dirty ? ` · ${t.uncommitted}` : ` · ${t.clean}`} · {w.source}
+          </span>
+          <div className="row-actions" style={{ marginTop: 6 }}>
+            <button
+              type="button"
+              className="danger"
+              disabled={busy}
+              onClick={() => void onDelete(w.path)}
+            >
+              {t.deleteWorktree}
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Inspector() {
+  const {
+    activeSessionId,
+    sessions,
     rightPanel,
+    setRightPanel,
     health,
-    status,
-    tools,
-    planText,
     stderr,
     settings,
     setSettings,
   } = useAppStore();
+  const session = activeSessionId ? sessions[activeSessionId] : null;
 
-  if (rightPanel === "health") {
-    return (
-      <div className="side-panel">
-        <h3>Runtime health</h3>
-        <div className={`ready-pill ${health?.ready ? "on" : "off"}`}>
-          {health?.ready ? "Ready" : "Not ready"}
-        </div>
-        <ul className="checklist compact">
-          {(health?.checklist ?? []).map((item) => (
-            <li key={item.id} className={item.ok ? "ok" : "bad"}>
-              <strong>{item.ok ? "✓" : "✗"}</strong> {item.label}
-              {item.detail && (
-                <div className="muted small">{item.detail}</div>
-              )}
-            </li>
-          ))}
-        </ul>
-        <div className="meta">
-          <div>
-            <span className="muted">Session</span>
-            <code>{status.sessionId ?? "—"}</code>
-          </div>
-          <div>
-            <span className="muted">Agent</span>
-            <code>{status.running ? "running" : "stopped"}</code>
-          </div>
-          {status.lastError && (
-            <div className="error-text">{status.lastError}</div>
-          )}
-        </div>
+  const tabs: { id: RightPanel; label: string }[] = [
+    { id: "health", label: t.health },
+    { id: "tasks", label: t.tasks },
+    { id: "plan", label: t.plan },
+    { id: "diff", label: t.diff },
+    { id: "worktree", label: t.worktrees },
+    { id: "logs", label: t.logs },
+    { id: "settings", label: t.settings },
+  ];
+
+  return (
+    <aside className="inspector" aria-label={t.inspector}>
+      <div className="tab-bar" role="tablist">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={rightPanel === tab.id}
+            className={rightPanel === tab.id ? "tab active" : "tab"}
+            onClick={() => setRightPanel(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
-    );
-  }
-
-  if (rightPanel === "tasks") {
-    return (
-      <div className="side-panel">
-        <h3>Tasks / tools</h3>
-        {tools.length === 0 ? (
-          <p className="muted">Tool calls will appear here.</p>
-        ) : (
-          <ul className="task-list">
-            {[...tools].reverse().map((t) => (
-              <li key={t.id}>
-                <span className="pill">{t.status}</span> {t.title}
+      {rightPanel === "health" && (
+        <div className="panel-body">
+          <ul className="checklist">
+            {(health?.checklist ?? []).map((item) => (
+              <li key={item.id} className={item.ok ? "ok" : "bad"}>
+                {item.label}
+                {item.detail && <span className="muted"> — {item.detail}</span>}
               </li>
             ))}
           </ul>
-        )}
-      </div>
-    );
-  }
-
-  if (rightPanel === "plan") {
-    return (
-      <div className="side-panel">
-        <h3>Plan</h3>
-        {planText ? (
-          <pre className="code plan-body">{planText}</pre>
-        ) : (
-          <p className="muted">
-            When the agent enters plan mode, the plan shows here. Approve UX
-            lands next; for now review in chat.
-          </p>
-        )}
-      </div>
-    );
-  }
-
-  if (rightPanel === "logs") {
-    return (
-      <div className="side-panel">
-        <h3>Agent stderr</h3>
-        <pre className="code log-body">
-          {stderr.length ? stderr.slice(-80).join("\n") : "No stderr yet."}
-        </pre>
-      </div>
-    );
-  }
-
-  // settings
-  return (
-    <div className="side-panel">
-      <h3>Settings</h3>
-      <label>
-        Grok path
-        <input
-          value={settings.grokPath}
-          onChange={(e) => setSettings({ grokPath: e.target.value })}
-        />
-      </label>
-      <label>
-        Model
-        <input
-          value={settings.model}
-          onChange={(e) => setSettings({ model: e.target.value })}
-        />
-      </label>
-      <label>
-        API key (Keychain)
-        <input
-          type="password"
-          value={settings.apiKey}
-          onChange={(e) => setSettings({ apiKey: e.target.value })}
-          placeholder="paste to update Keychain"
-          autoComplete="off"
-        />
-      </label>
-      <label className="row">
-        <input
-          type="checkbox"
-          checked={settings.useHarness}
-          onChange={(e) => setSettings({ useHarness: e.target.checked })}
-        />
-        Orchestrator harness
-      </label>
-      <label className="row">
-        <input
-          type="checkbox"
-          checked={settings.alwaysApprove}
-          onChange={(e) => setSettings({ alwaysApprove: e.target.checked })}
-        />
-        Always approve (YOLO)
-      </label>
-      <button
-        type="button"
-        className="primary"
-        onClick={() => void saveSettings(settings)}
-      >
-        Save
-      </button>
-    </div>
+        </div>
+      )}
+      {rightPanel === "tasks" && (
+        <div className="panel-body">
+          {(session?.tools ?? []).length === 0 && (
+            <p className="empty">{t.selectItem}</p>
+          )}
+          {(session?.tools ?? []).map((tool) => (
+            <div key={tool.id} className="block tool">
+              <div className="label">
+                {tool.title}
+                <span className="pill">{tool.status}</span>
+              </div>
+              {tool.output != null && (
+                <pre className="code">{safeJson(tool.output)}</pre>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {rightPanel === "plan" && (
+        <div className="panel-body">
+          <pre className="code">{session?.planText || "—"}</pre>
+        </div>
+      )}
+      {rightPanel === "diff" && <DiffPanel />}
+      {rightPanel === "worktree" && <WorktreePanel />}
+      {rightPanel === "logs" && (
+        <div className="panel-body">
+          <pre className="code">{stderr.join("\n") || "—"}</pre>
+        </div>
+      )}
+      {rightPanel === "settings" && (
+        <div className="panel-body">
+          <label>
+            {t.grokPath}
+            <input
+              value={settings.grokPath}
+              onChange={(e) => setSettings({ grokPath: e.target.value })}
+            />
+          </label>
+          <label>
+            {t.model}
+            <input
+              value={settings.model}
+              onChange={(e) => setSettings({ model: e.target.value })}
+            />
+          </label>
+          <label>
+            {t.apiKey}
+            <input
+              type="password"
+              value={settings.apiKey}
+              onChange={(e) => setSettings({ apiKey: e.target.value })}
+              autoComplete="off"
+            />
+          </label>
+          <label className="row">
+            <input
+              type="checkbox"
+              checked={settings.useHarness}
+              onChange={(e) => setSettings({ useHarness: e.target.checked })}
+            />
+            {t.useHarness}
+          </label>
+          <label className="row">
+            <input
+              type="checkbox"
+              checked={settings.alwaysApprove}
+              onChange={(e) => setSettings({ alwaysApprove: e.target.checked })}
+            />
+            {t.alwaysApprove}
+          </label>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => void saveSettings(settings)}
+          >
+            {t.save}
+          </button>
+        </div>
+      )}
+    </aside>
   );
 }
 
@@ -444,165 +596,196 @@ function Workbench() {
     setSettings,
     status,
     setStatus,
-    blocks,
-    busy,
-    setBusy,
+    sessions,
+    sessionOrder,
+    activeSessionId,
+    setActiveSession,
+    ensureSession,
+    setSessionDraft,
+    setSessionBusy,
+    setSessionScroll,
     addBlock,
     clearChat,
     pendingPermission,
     permissionOptions,
     setPermission,
-    rightPanel,
-    setRightPanel,
     setHealth,
+    workspaces,
+    setWorkspaces,
+    setInspector,
   } = useAppStore();
 
-  const [input, setInput] = useState("");
   const [connecting, setConnecting] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const spineRef = useRef<HTMLDivElement>(null);
+  const draftTimer = useRef<number | null>(null);
+
+  const active = activeSessionId ? sessions[activeSessionId] : null;
+  const draft = active?.draft ?? "";
+  const blocks = active?.blocks ?? [];
+  const busy = active?.busy ?? false;
 
   const refreshHealth = useCallback(async () => {
-    const h = await runtimeHealth(settings.grokPath || undefined);
-    setHealth(h);
+    setHealth(await runtimeHealth(settings.grokPath || undefined));
   }, [settings.grokPath, setHealth]);
 
   useEffect(() => {
     void refreshHealth();
-    const t = setInterval(() => void refreshHealth(), 15000);
-    return () => clearInterval(t);
+    const tmr = setInterval(() => void refreshHealth(), 15000);
+    return () => clearInterval(tmr);
   }, [refreshHealth]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [blocks, busy]);
+    void (async () => {
+      try {
+        setWorkspaces(await listWorkspaces());
+        if (settings.cwd) {
+          const rows = await listSessions(settings.cwd);
+          for (const row of rows) ensureSession(row);
+          if (rows[0]) setActiveSession(rows[0].sessionId);
+        }
+      } catch {
+        /* catalog optional at boot */
+      }
+    })();
+  }, [settings.cwd, ensureSession, setActiveSession, setWorkspaces]);
 
-  async function pickFolder() {
-    const selected = await open({ directory: true, multiple: false });
-    if (typeof selected === "string") {
-      const next = { ...settings, cwd: selected };
-      setSettings({ cwd: selected });
-      await saveSettings(next);
+  // Restore scroll per session
+  useEffect(() => {
+    const el = spineRef.current;
+    if (!el || !active) return;
+    el.scrollTop = active.scrollTop;
+  }, [activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function onScroll() {
+    if (!activeSessionId || !spineRef.current) return;
+    setSessionScroll(activeSessionId, spineRef.current.scrollTop);
+  }
+
+  function onDraftChange(value: string) {
+    if (!activeSessionId) return;
+    setSessionDraft(activeSessionId, value);
+    if (draftTimer.current) window.clearTimeout(draftTimer.current);
+    draftTimer.current = window.setTimeout(() => {
+      void saveDraft(activeSessionId, value);
+    }, 400);
+  }
+
+  async function chooseWorkspace() {
+    const dir = await open({ directory: true, multiple: false });
+    if (typeof dir !== "string") return;
+    setSettings({ cwd: dir });
+    await upsertWorkspace(dir);
+    setWorkspaces(await listWorkspaces());
+  }
+
+  async function createLocalSession() {
+    const cwd = settings.cwd || ".";
+    const now = new Date().toISOString();
+    const summary: SessionSummary = {
+      sessionId: crypto.randomUUID(),
+      workspaceRoot: cwd,
+      title: `Session ${new Date().toLocaleTimeString()}`,
+      createdAt: now,
+      updatedAt: now,
+      runState: "idle",
+      alwaysApprove: settings.alwaysApprove,
+      draft: "",
+      model: settings.model,
+      remoteSessionId: status.sessionId ?? null,
+    };
+    ensureSession(summary);
+    setActiveSession(summary.sessionId);
+    try {
+      await upsertSession(summary);
+    } catch {
+      /* ignore if not in tauri */
     }
   }
 
   async function connect() {
     if (!settings.cwd) {
-      addBlock({
-        type: "system",
-        id: crypto.randomUUID(),
-        text: "Choose a workspace folder first.",
-        level: "warn",
-      });
-      return;
+      await chooseWorkspace();
+      if (!useAppStore.getState().settings.cwd) return;
     }
     setConnecting(true);
-    clearChat();
     try {
-      await saveSettings(settings);
-      const s = await startAgent({
-        grokPath: settings.grokPath || null,
-        model: settings.model || "grok-build",
+      if (!activeSessionId) await createLocalSession();
+      const st = await startAgent({
+        cwd: useAppStore.getState().settings.cwd,
+        model: settings.model,
         alwaysApprove: settings.alwaysApprove,
-        cwd: settings.cwd,
         useHarness: settings.useHarness,
+        grokPath: settings.grokPath || null,
       });
-      setStatus(s);
-      addBlock({
-        type: "system",
-        id: crypto.randomUUID(),
-        text: `Connected · session ${s.sessionId ?? "?"} · ${s.cwd ?? settings.cwd}`,
-        level: "info",
-      });
+      setStatus(st);
+      const sid = useAppStore.getState().activeSessionId;
+      if (sid && st.sessionId) {
+        useAppStore.getState().updateSummary(sid, {
+          remoteSessionId: st.sessionId,
+          connectionId: st.connectionId ?? null,
+          runState: "idle",
+        });
+      }
       await refreshHealth();
     } catch (e) {
-      addBlock({
-        type: "system",
-        id: crypto.randomUUID(),
-        text: String(e),
-        level: "error",
-      });
+      const sid = useAppStore.getState().activeSessionId;
+      if (sid) {
+        addBlock(sid, {
+          type: "system",
+          id: crypto.randomUUID(),
+          text: String(e),
+          level: "error",
+        });
+      }
     } finally {
       setConnecting(false);
     }
   }
 
   async function disconnect() {
-    try {
-      await stopAgent();
-      setStatus({ running: false });
-      addBlock({
-        type: "system",
-        id: crypto.randomUUID(),
-        text: "Agent stopped.",
-        level: "info",
-      });
-    } catch (e) {
-      addBlock({
-        type: "system",
-        id: crypto.randomUUID(),
-        text: String(e),
-        level: "error",
-      });
-    }
+    await stopAgent();
+    setStatus({ running: false });
   }
 
   async function restart() {
-    if (!settings.cwd) return;
     setConnecting(true);
     try {
-      await saveSettings(settings);
-      const s = await restartAgent({
-        grokPath: settings.grokPath || null,
-        model: settings.model || "grok-build",
-        alwaysApprove: settings.alwaysApprove,
+      const st = await restartAgent({
         cwd: settings.cwd,
+        model: settings.model,
+        alwaysApprove: settings.alwaysApprove,
         useHarness: settings.useHarness,
+        grokPath: settings.grokPath || null,
       });
-      setStatus(s);
-      addBlock({
-        type: "system",
-        id: crypto.randomUUID(),
-        text: "Agent restarted.",
-        level: "info",
-      });
-    } catch (e) {
-      addBlock({
-        type: "system",
-        id: crypto.randomUUID(),
-        text: String(e),
-        level: "error",
-      });
+      setStatus(st);
     } finally {
       setConnecting(false);
     }
   }
 
   async function onSend() {
-    const text = input.trim();
-    if (!text || busy) return;
-    if (!status.running) {
-      addBlock({
-        type: "system",
-        id: crypto.randomUUID(),
-        text: "Connect to Grok first.",
-        level: "warn",
-      });
-      return;
-    }
-    setInput("");
-    addBlock({ type: "user", id: crypto.randomUUID(), text });
-    setBusy(true);
+    const text = draft.trim();
+    if (!text || !activeSessionId) return;
+    addBlock(activeSessionId, {
+      type: "user",
+      id: crypto.randomUUID(),
+      text,
+    });
+    setSessionDraft(activeSessionId, "");
+    void saveDraft(activeSessionId, "");
+    setSessionBusy(activeSessionId, true);
     try {
+      if (!status.running) await connect();
       await sendPrompt(text);
     } catch (e) {
-      addBlock({
+      addBlock(activeSessionId, {
         type: "system",
         id: crypto.randomUUID(),
         text: String(e),
         level: "error",
       });
     } finally {
-      setBusy(false);
+      setSessionBusy(activeSessionId, false);
     }
   }
 
@@ -619,26 +802,15 @@ function Workbench() {
           message: "User denied permission",
         });
       }
-    } catch (e) {
-      addBlock({
-        type: "system",
-        id: crypto.randomUUID(),
-        text: `Permission response failed: ${e}`,
-        level: "error",
-      });
     } finally {
       setPermission(null);
     }
   }
 
-  const connected = status.running;
-  const tabs: { id: RightPanel; label: string }[] = [
-    { id: "health", label: "Health" },
-    { id: "tasks", label: "Tasks" },
-    { id: "plan", label: "Plan" },
-    { id: "logs", label: "Logs" },
-    { id: "settings", label: "Settings" },
-  ];
+  const sessionList = useMemo(
+    () => sessionOrder.map((id) => sessions[id]).filter(Boolean),
+    [sessionOrder, sessions],
+  );
 
   return (
     <div className="workbench">
@@ -646,25 +818,27 @@ function Workbench() {
         <div className="brand">
           <span className="logo">GB</span>
           <div>
-            <div className="title">Grok Build Desktop</div>
+            <div className="title">{t.appName}</div>
             <div className="subtitle">
               {settings.model}
               {settings.useHarness ? " · harness" : ""}
               {settings.alwaysApprove ? " · yolo" : ""}
+              {" · "}
+              {t.parallelHint}
             </div>
           </div>
         </div>
         <div className="top-actions">
-          <span className={`badge ${connected ? "on" : "off"}`}>
-            {connected ? "connected" : "offline"}
+          <span className={`badge ${status.running ? "on" : "off"}`}>
+            {status.running ? t.connected : t.offline}
           </span>
-          {connected ? (
+          {status.running ? (
             <>
               <button type="button" className="ghost" onClick={() => void restart()}>
-                Restart
+                {t.restart}
               </button>
               <button type="button" className="danger" onClick={() => void disconnect()}>
-                Disconnect
+                {t.disconnect}
               </button>
             </>
           ) : (
@@ -674,121 +848,131 @@ function Workbench() {
               disabled={connecting}
               onClick={() => void connect()}
             >
-              {connecting ? "Connecting…" : "Connect"}
+              {connecting ? t.connecting : t.connect}
             </button>
           )}
         </div>
       </header>
 
-      <div className="workbench-body">
-        <aside className="left-rail">
-          <div className="rail-section">
-            <div className="rail-title">Workspace</div>
-            <button type="button" className="ghost full" onClick={() => void pickFolder()}>
-              Change folder
-            </button>
-            <code className="cwd-line">{settings.cwd || "—"}</code>
-          </div>
-          <div className="rail-section">
-            <div className="rail-title">Sessions</div>
-            <p className="muted small">
-              Current session is managed by Grok ACP. Multi-session archive lands
-              next.
-            </p>
-            {status.sessionId && (
-              <code className="session-id">{status.sessionId}</code>
-            )}
-            <button type="button" className="ghost full" onClick={() => clearChat()}>
-              Clear chat view
+      <div className="main-grid">
+        <aside className="sidebar" aria-label={t.sessions}>
+          <div className="panel-head">
+            <span>{t.workspaces}</span>
+            <button type="button" className="ghost" onClick={() => void chooseWorkspace()}>
+              {t.openWorkspace}
             </button>
           </div>
-          <div className="rail-section grow">
-            <div className="rail-title">Quick prompts</div>
-            {[
-              "Explore this repo and summarize architecture.",
-              "Plan a safe refactor for the highest-risk module.",
-              "Run tests and fix failures.",
-            ].map((q) => (
+          <div className="panel-body">
+            <div className="muted" style={{ marginBottom: 8 }}>
+              {settings.cwd || t.noWorkspace}
+            </div>
+            {workspaces.map((w) => (
               <button
-                key={q}
+                key={w.id}
                 type="button"
-                className="ghost full left"
-                onClick={() => setInput(q)}
+                className={
+                  w.path === settings.cwd ? "list-item active" : "list-item"
+                }
+                onClick={() => setSettings({ cwd: w.path })}
               >
-                {q}
+                {w.name}
+                <span className="meta">{w.path}</span>
+              </button>
+            ))}
+            <div className="section-title">{t.sessions}</div>
+            <button
+              type="button"
+              className="primary"
+              style={{ width: "100%", marginBottom: 8 }}
+              onClick={() => void createLocalSession()}
+            >
+              {t.newSession}
+            </button>
+            {sessionList.map((s) => (
+              <button
+                key={s.summary.sessionId}
+                type="button"
+                className={
+                  s.summary.sessionId === activeSessionId
+                    ? "list-item active"
+                    : "list-item"
+                }
+                onClick={() => setActiveSession(s.summary.sessionId)}
+              >
+                {s.summary.title}
+                <span className="meta">
+                  {t.runState[s.summary.runState] ?? s.summary.runState}
+                  {s.busy ? " · …" : ""}
+                </span>
               </button>
             ))}
           </div>
         </aside>
 
-        <main className="chat-col">
-          <div className="chat">
-            {blocks.length === 0 && (
-              <div className="empty">
-                <h2>Workbench</h2>
-                <p>
-                  Connect, then ask Grok to explore, plan, or implement. Thoughts,
-                  tools, and plans stream into the center; health and tasks sit on
-                  the right — same product shape as Hermes, powered by Grok Build.
-                </p>
-              </div>
-            )}
+        <main className="spine" aria-label="Execution spine">
+          <div
+            className="spine-scroll"
+            ref={spineRef}
+            onScroll={onScroll}
+          >
+            {blocks.length === 0 && <p className="empty">{t.emptySpine}</p>}
             {blocks.map((b) => (
-              <BlockView key={b.id} block={b} />
+              <BlockView
+                key={b.id}
+                block={b}
+                onSelectTool={(id) => {
+                  if (activeSessionId) {
+                    setInspector(activeSessionId, {
+                      kind: "tool",
+                      toolCallId: id,
+                    });
+                    useAppStore.getState().setRightPanel("tasks");
+                  }
+                }}
+              />
             ))}
-            {busy && <div className="typing">Agent working…</div>}
-            <div ref={bottomRef} />
           </div>
-          <footer className="composer">
+          <div className="composer">
             <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={
-                connected
-                  ? "Ask Grok to explore, plan, or implement…"
-                  : "Connect to start a session…"
-              }
-              rows={3}
+              value={draft}
+              onChange={(e) => onDraftChange(e.target.value)}
+              placeholder={t.draftPlaceholder}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   void onSend();
                 }
               }}
-              disabled={!connected || busy}
+              aria-label={t.draftPlaceholder}
             />
-            <button
-              type="button"
-              className="primary send"
-              disabled={!connected || busy || !input.trim()}
-              onClick={() => void onSend()}
-            >
-              Send ⌘↵
-            </button>
-          </footer>
+            <div className="row-actions end">
+              <button
+                type="button"
+                className="ghost"
+                disabled={!activeSessionId}
+                onClick={() => activeSessionId && clearChat(activeSessionId)}
+              >
+                {t.clear}
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy || !draft.trim()}
+                onClick={() => void onSend()}
+              >
+                {busy ? "…" : t.send}
+              </button>
+            </div>
+          </div>
         </main>
 
-        <aside className="right-rail">
-          <div className="tab-bar">
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className={rightPanel === t.id ? "tab active" : "tab"}
-                onClick={() => setRightPanel(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <RightPanelView />
-        </aside>
+        <Inspector />
       </div>
 
       {pendingPermission && (
-        <div className="permission-modal">
+        <div className="permission-modal" role="dialog" aria-modal="true">
           <div className="permission-card">
-            <h3>Permission required</h3>
+            <h3>{t.permissionTitle}</h3>
             <p>
               Method: <code>{pendingPermission.method}</code>
             </p>
@@ -800,7 +984,7 @@ function Workbench() {
                   className="danger"
                   onClick={() => void answerPermission(null)}
                 >
-                  Dismiss (no agent options)
+                  {t.permissionDismiss}
                 </button>
               ) : (
                 permissionOptions.map((opt) => {
@@ -840,48 +1024,45 @@ export default function App() {
     let unsubs: (() => void)[] = [];
     void (async () => {
       try {
-        unsubs = await subscribeAcpEvents();
         const s = await loadSettings();
         replaceSettings(s);
         setSettingsLoaded(true);
-        const h = await runtimeHealth(s.grokPath || undefined);
-        setHealth(h);
-        // Warm probe
-        await probeGrok(s.grokPath || undefined);
+        setHealth(await runtimeHealth(s.grokPath || undefined));
+        unsubs = await subscribeAcpEvents();
       } catch (e) {
         setBootError(String(e));
         setSettingsLoaded(true);
       }
     })();
-    return () => unsubs.forEach((u) => u());
-  }, [replaceSettings, setHealth, setSettingsLoaded]);
+    return () => {
+      for (const u of unsubs) u();
+    };
+  }, [replaceSettings, setSettingsLoaded, setHealth]);
 
   if (!settingsLoaded) {
     return (
-      <div className="boot">
-        <div className="logo">GB</div>
-        <p>Starting…</p>
+      <div className="onboarding">
+        <p className="muted">…</p>
       </div>
     );
   }
 
   if (bootError) {
     return (
-      <div className="boot">
-        <p className="error-text">{bootError}</p>
+      <div className="onboarding">
+        <div className="onboarding-card">
+          <p className="block system error">{bootError}</p>
+        </div>
       </div>
     );
   }
 
   if (!settings.onboardingDone) {
-    return (
-      <Onboarding
-        onDone={(s) => {
-          replaceSettings(s);
-        }}
-      />
-    );
+    return <Onboarding />;
   }
 
   return <Workbench />;
 }
+
+// silence unused Settings import lint in some tsconfigs
+void (null as unknown as Settings);
