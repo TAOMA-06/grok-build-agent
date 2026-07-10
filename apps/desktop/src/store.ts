@@ -21,6 +21,8 @@ type AppState = {
   busy: boolean;
   stderr: string[];
   pendingPermission: ServerRequest | null;
+  /** Agent-provided options for the current permission prompt (never invented). */
+  permissionOptions: { optionId: string; name: string; kind?: string }[];
   rightPanel: RightPanel;
   planText: string;
   tools: ToolCall[];
@@ -37,7 +39,10 @@ type AppState = {
   upsertTool: (tool: ToolCall) => void;
   setPlan: (text: string) => void;
   pushStderr: (line: string) => void;
-  setPermission: (req: ServerRequest | null) => void;
+  setPermission: (
+    req: ServerRequest | null,
+    options?: { optionId: string; name: string; kind?: string }[],
+  ) => void;
   clearChat: () => void;
 };
 
@@ -53,6 +58,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   busy: false,
   stderr: [],
   pendingPermission: null,
+  permissionOptions: [],
   rightPanel: "health",
   planText: "",
   tools: [],
@@ -161,7 +167,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ stderr });
   },
 
-  setPermission: (pendingPermission) => set({ pendingPermission }),
+  setPermission: (pendingPermission, options) =>
+    set({
+      pendingPermission,
+      permissionOptions: pendingPermission ? (options ?? []) : [],
+    }),
 
   clearChat: () => {
     streamAssistantId = null;

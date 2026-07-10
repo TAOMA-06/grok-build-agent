@@ -14,6 +14,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use super::events::{emit_json, SharedEventBus};
+use super::handlers;
+use super::terminal_host::TerminalHost;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{mpsc, oneshot};
@@ -41,6 +43,8 @@ pub struct ConnectionInner {
     pub last_event_at: Mutex<Option<String>>,
     /// When true, reader_loop should not clear the pool slot (explicit stop).
     pub stopping: Mutex<bool>,
+    pub terminals: TerminalHost,
+    pub capabilities: Mutex<Option<crate::contracts::AgentCapabilitySnapshot>>,
 }
 
 impl ConnectionInner {
@@ -52,7 +56,7 @@ impl ConnectionInner {
             grok_path: Some(self.grok_path.clone()),
             pid: Some(self.pid),
             session_ids: self.session_ids.lock().iter().cloned().collect(),
-            capabilities: None,
+            capabilities: self.capabilities.lock().clone(),
             last_error: self.last_error.lock().clone(),
             started_at: Some(self.started_at.clone()),
             last_event_at: self.last_event_at.lock().clone(),
@@ -138,6 +142,7 @@ impl ConnectionInner {
     pub async fn kill_child(&self) {
         *self.stopping.lock() = true;
         self.fail_all_pending(AcpError::NotRunning);
+        self.terminals.release_all().await;
         {
             let mut child = self.child.lock();
             let _ = child.start_kill();
@@ -414,6 +419,8 @@ pub async fn spawn_connection(
         started_at: iso_now(),
         last_event_at: Mutex::new(None),
         stopping: Mutex::new(false),
+        terminals: TerminalHost::new(),
+        capabilities: Mutex::new(None),
     });
 
     {
@@ -470,7 +477,7 @@ async fn reader_loop(
                 emit_error(
                     &bus,
                     &conn,
-                    format!("invalid JSON from agent: {e}; line={line}"),
+                    crate::secrets::redact_secrets(&format!("invalid JSON from agent: {e}; line={line}")),
                 );
                 continue;
             }
@@ -501,20 +508,21 @@ async fn reader_loop(
                 continue;
             }
 
-            // Server-initiated request (permission, fs, terminal, …)
-            let session_id = extract_session_id(parsed.get("params"));
-            let envelope = SessionEventEnvelope {
-                connection_id: conn.connection_id.clone(),
-                session_id,
-                sequence: conn.next_sequence(),
-                timestamp: iso_now(),
-                source: EventSource::Acp,
-                kind: "server_request".into(),
-                payload: parsed.clone(),
-            };
-            emit_json(&bus, "acp:server_request", &envelope);
-            // Also emit legacy raw shape for older UI handlers.
-            emit_json(&bus, "acp:server_request_raw", &parsed);
+            // Server-initiated request: fs/terminal handled internally; permission → UI.
+            if let Err(e) = handlers::handle_server_request(
+                &bus,
+                &conn,
+                &conn.terminals,
+                parsed.clone(),
+            )
+            .await
+            {
+                emit_error(
+                    &bus,
+                    &conn,
+                    crate::secrets::redact_secrets(&format!("server request failed: {e}")),
+                );
+            }
             continue;
         }
 

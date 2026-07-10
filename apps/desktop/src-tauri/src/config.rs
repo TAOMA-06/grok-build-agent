@@ -1,4 +1,4 @@
-//! Persistent app settings (Hermes-style config store).
+//! Persistent app settings. API keys live in Keychain (see `secrets`), not JSON.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -33,9 +33,27 @@ pub struct AppSettings {
     pub use_harness: bool,
     pub cwd: String,
     pub onboarding_done: bool,
-    /// Optional API key stored locally for headless auth (user-provided).
+    /// Present only for wire compatibility with the UI password field.
+    /// Never persisted to disk — stored in Keychain via `secrets`.
+    #[serde(default, skip_serializing)]
     pub api_key: String,
     pub theme: String,
+}
+
+/// On-disk shape without secrets.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppSettingsFile {
+    pub grok_path: String,
+    pub model: String,
+    pub always_approve: bool,
+    pub use_harness: bool,
+    pub cwd: String,
+    pub onboarding_done: bool,
+    pub theme: String,
+    /// Legacy field: migrated to Keychain then deleted.
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -70,16 +88,65 @@ fn config_path() -> Result<PathBuf, ConfigError> {
 pub fn load_settings() -> Result<AppSettings, ConfigError> {
     let path = config_path()?;
     if !path.exists() {
-        return Ok(AppSettings::default());
+        let mut s = AppSettings::default();
+        // Surface keychain presence as a non-secret placeholder for the UI field.
+        if crate::secrets::get_api_key()
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            s.api_key = String::new(); // never return secret to frontend by default
+        }
+        return Ok(s);
     }
-    let raw = fs::read_to_string(path)?;
-    let settings: AppSettings = serde_json::from_str(&raw)?;
-    Ok(settings)
+    let raw = fs::read_to_string(&path)?;
+    let file: AppSettingsFile = serde_json::from_str(&raw)?;
+
+    // One-time migration: move plaintext api_key into Keychain and rewrite file.
+    if let Some(legacy) = file.api_key.as_ref().map(|s| s.trim().to_string()) {
+        if !legacy.is_empty() {
+            let _ = crate::secrets::set_api_key(&legacy);
+            let cleaned = AppSettingsFile {
+                api_key: None,
+                ..file.clone()
+            };
+            let cleaned_raw = serde_json::to_string_pretty(&cleaned)?;
+            fs::write(&path, cleaned_raw)?;
+        }
+    }
+
+    Ok(AppSettings {
+        grok_path: file.grok_path,
+        model: file.model,
+        always_approve: file.always_approve,
+        use_harness: file.use_harness,
+        cwd: file.cwd,
+        onboarding_done: file.onboarding_done,
+        // UI loads empty; secret stays in Keychain / env.
+        api_key: String::new(),
+        theme: file.theme,
+    })
 }
 
 pub fn save_settings(settings: &AppSettings) -> Result<(), ConfigError> {
+    // Persist secret only to Keychain.
+    if !settings.api_key.is_empty() {
+        crate::secrets::set_api_key(&settings.api_key)
+            .map_err(|e| ConfigError::Message(e.to_string()))?;
+    }
+
+    let file = AppSettingsFile {
+        grok_path: settings.grok_path.clone(),
+        model: settings.model.clone(),
+        always_approve: settings.always_approve,
+        use_harness: settings.use_harness,
+        cwd: settings.cwd.clone(),
+        onboarding_done: settings.onboarding_done,
+        api_key: None,
+        theme: settings.theme.clone(),
+    };
     let path = config_path()?;
-    let raw = serde_json::to_string_pretty(settings)?;
+    let raw = serde_json::to_string_pretty(&file)?;
     fs::write(path, raw)?;
     Ok(())
 }

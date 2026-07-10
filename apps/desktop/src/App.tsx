@@ -76,6 +76,15 @@ function BlockView({ block }: { block: ChatBlock }) {
           <div className="body">{block.text}</div>
         </div>
       );
+    case "subtask":
+      return (
+        <div className="block tool">
+          <div className="label">
+            Subtask · {block.title}
+            <span className="pill">{block.status}</span>
+          </div>
+        </div>
+      );
   }
 }
 
@@ -179,7 +188,8 @@ function Onboarding({
                 type="password"
                 value={settings.apiKey}
                 onChange={(e) => setSettings({ apiKey: e.target.value })}
-                placeholder="xai-…"
+                placeholder="paste to store in Keychain"
+                autoComplete="off"
               />
             </label>
             <div className="row-actions">
@@ -197,8 +207,8 @@ function Onboarding({
             </ul>
             {!health?.ready && (
               <div className="hint">
-                Install Grok Build, then run <code>grok login</code> or set{" "}
-                <code>XAI_API_KEY</code> / paste a key above.
+                Install Grok Build, then run <code>grok login</code> or paste an
+                API key (stored in macOS Keychain, not settings.json).
               </div>
             )}
             <div className="row-actions end">
@@ -392,11 +402,13 @@ function RightPanelView() {
         />
       </label>
       <label>
-        API key
+        API key (Keychain)
         <input
           type="password"
           value={settings.apiKey}
           onChange={(e) => setSettings({ apiKey: e.target.value })}
+          placeholder="paste to update Keychain"
+          autoComplete="off"
         />
       </label>
       <label className="row">
@@ -438,6 +450,7 @@ function Workbench() {
     addBlock,
     clearChat,
     pendingPermission,
+    permissionOptions,
     setPermission,
     rightPanel,
     setRightPanel,
@@ -593,13 +606,12 @@ function Workbench() {
     }
   }
 
-  async function answerPermission(allow: boolean) {
+  async function answerPermission(optionId: string | null) {
     if (!pendingPermission) return;
     try {
-      if (allow) {
+      if (optionId) {
         await respondServerRequest(pendingPermission.id, {
-          outcome: { outcome: "selected", optionId: "allow-once" },
-          approved: true,
+          outcome: { outcome: "selected", optionId },
         });
       } else {
         await respondServerRequest(pendingPermission.id, undefined, {
@@ -782,20 +794,30 @@ function Workbench() {
             </p>
             <pre className="code">{safeJson(pendingPermission.params)}</pre>
             <div className="row-actions">
-              <button
-                type="button"
-                className="danger"
-                onClick={() => void answerPermission(false)}
-              >
-                Deny
-              </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={() => void answerPermission(true)}
-              >
-                Allow once
-              </button>
+              {permissionOptions.length === 0 ? (
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => void answerPermission(null)}
+                >
+                  Dismiss (no agent options)
+                </button>
+              ) : (
+                permissionOptions.map((opt) => {
+                  const reject =
+                    opt.kind === "reject_once" || opt.kind === "reject_always";
+                  return (
+                    <button
+                      key={opt.optionId}
+                      type="button"
+                      className={reject ? "danger" : "primary"}
+                      onClick={() => void answerPermission(opt.optionId)}
+                    >
+                      {opt.name}
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>

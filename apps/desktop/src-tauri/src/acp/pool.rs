@@ -182,14 +182,33 @@ impl RuntimePool {
             )
             .await;
 
-        if let Err(e) = init_result {
-            let msg = e.to_string();
+        let init = match init_result {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = crate::secrets::redact_secrets(&e.to_string());
+                *conn.last_error.lock() = Some(msg.clone());
+                *self.last_error.lock() = Some(msg.clone());
+                *conn.state.lock() = ConnectionState::Error;
+                conn.kill_child().await;
+                self.remove_connection(&conn.connection_id);
+                return Err(AcpError::Message(format!("initialize failed: {msg}")));
+            }
+        };
+
+        // Persist capability / auth method snapshot for UI + later session control.
+        let caps = parse_capabilities(&init);
+        *conn.capabilities.lock() = Some(caps.clone());
+
+        // Fixed order: initialize → authenticate (when required) → session/new|load.
+        *conn.state.lock() = ConnectionState::Authenticating;
+        if let Err(e) = maybe_authenticate(conn, &caps).await {
+            let msg = crate::secrets::redact_secrets(&e.to_string());
             *conn.last_error.lock() = Some(msg.clone());
             *self.last_error.lock() = Some(msg.clone());
             *conn.state.lock() = ConnectionState::Error;
             conn.kill_child().await;
             self.remove_connection(&conn.connection_id);
-            return Err(AcpError::Message(format!("initialize failed: {msg}")));
+            return Err(AcpError::Message(format!("authenticate failed: {msg}")));
         }
 
         *conn.state.lock() = ConnectionState::Ready;
@@ -408,6 +427,116 @@ impl RuntimePool {
         let mut active = self.active_connection_id.lock();
         if active.as_deref() == Some(connection_id) {
             *active = None;
+        }
+    }
+}
+
+fn parse_capabilities(init: &Value) -> crate::contracts::AgentCapabilitySnapshot {
+    use crate::contracts::{AgentCapabilitySnapshot, AuthMethodSummary};
+    let agent_caps = init.get("agentCapabilities").cloned().unwrap_or(Value::Null);
+    let auth_methods = init
+        .get("authMethods")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    Some(AuthMethodSummary {
+                        id: m.get("id")?.as_str()?.to_string(),
+                        name: m
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("auth")
+                            .to_string(),
+                        description: m
+                            .get("description")
+                            .and_then(|d| d.as_str())
+                            .map(|s| s.to_string()),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let models = init
+        .pointer("/agentCapabilities/models")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    AgentCapabilitySnapshot {
+        protocol_version: init.get("protocolVersion").cloned(),
+        agent_name: init
+            .pointer("/agentInfo/name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        agent_version: init
+            .pointer("/agentInfo/version")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        load_session: agent_caps
+            .get("loadSession")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        list_sessions: agent_caps
+            .get("listSessions")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        fs: true,
+        terminal: true,
+        auth_methods,
+        models,
+    }
+}
+
+async fn maybe_authenticate(
+    conn: &Arc<ConnectionInner>,
+    caps: &crate::contracts::AgentCapabilitySnapshot,
+) -> Result<(), AcpError> {
+    if caps.auth_methods.is_empty() {
+        return Ok(());
+    }
+    // Prefer env/API key method when present; otherwise first method id.
+    let method_id = caps
+        .auth_methods
+        .iter()
+        .find(|m| {
+            let id = m.id.to_lowercase();
+            id.contains("api") || id.contains("key") || id.contains("env")
+        })
+        .or_else(|| caps.auth_methods.first())
+        .map(|m| m.id.clone());
+
+    let Some(method_id) = method_id else {
+        return Ok(());
+    };
+
+    // If already authenticated via env/keychain, call authenticate; agents that
+    // do not need it typically return quickly.
+    match conn
+        .request(
+            "authenticate",
+            json!({ "methodId": method_id }),
+            Duration::from_secs(30),
+        )
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            // Soft-fail when method is optional / already signed-in via CLI auth.
+            let msg = e.to_string().to_lowercase();
+            if msg.contains("already") || msg.contains("not required") || msg.contains("unsupported")
+            {
+                Ok(())
+            } else {
+                // Keep going for mock agents that reject authenticate.
+                if msg.contains("method not found") || msg.contains("-32601") {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            }
         }
     }
 }

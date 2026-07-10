@@ -2,6 +2,7 @@ mod acp;
 mod config;
 mod contracts;
 mod runtime;
+mod secrets;
 
 use acp::{AcpRuntime, AgentStatus, GrokProbe, StartConfig};
 use config::AppSettings;
@@ -31,9 +32,30 @@ fn load_settings() -> Result<AppSettings, config::ConfigError> {
 
 #[tauri::command]
 fn save_settings(settings: AppSettings) -> Result<(), config::ConfigError> {
-    // Keep process env in sync for subsequent agent spawns.
-    runtime::apply_api_key_to_env(&settings.api_key);
-    config::save_settings(&settings)
+    config::save_settings(&settings)?;
+    // Keep process env in sync for subsequent agent spawns (from Keychain).
+    secrets::load_api_key_into_env();
+    if !settings.api_key.is_empty() {
+        secrets::apply_api_key_to_env(&settings.api_key);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn secret_status() -> secrets::SecretStatus {
+    secrets::status()
+}
+
+#[tauri::command]
+fn set_api_key(api_key: String) -> Result<(), secrets::SecretError> {
+    secrets::set_api_key(&api_key)?;
+    secrets::apply_api_key_to_env(&api_key);
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_api_key() -> Result<(), secrets::SecretError> {
+    secrets::delete_api_key()
 }
 
 #[tauri::command]
@@ -57,10 +79,7 @@ async fn start_agent(
     state: State<'_, AppState>,
     config: StartConfig,
 ) -> Result<AgentStatus, acp::AcpError> {
-    // Ensure settings API key is applied before spawn.
-    if let Ok(s) = config::load_settings() {
-        runtime::apply_api_key_to_env(&s.api_key);
-    }
+    secrets::load_api_key_into_env();
     state.runtime.start(app, config).await
 }
 
@@ -76,9 +95,7 @@ async fn restart_agent(
     config: StartConfig,
 ) -> Result<AgentStatus, acp::AcpError> {
     state.runtime.stop().await?;
-    if let Ok(s) = config::load_settings() {
-        runtime::apply_api_key_to_env(&s.api_key);
-    }
+    secrets::load_api_key_into_env();
     state.runtime.start(app, config).await
 }
 
@@ -124,10 +141,10 @@ fn get_stderr_tail(state: State<'_, AppState>) -> AgentStatus {
 pub fn run() {
     let runtime = Arc::new(AcpRuntime::new());
 
-    // Seed env from saved settings on boot.
-    if let Ok(s) = config::load_settings() {
-        runtime::apply_api_key_to_env(&s.api_key);
-    }
+    // Seed env from Keychain on boot (never log the value).
+    secrets::load_api_key_into_env();
+    // Migrate legacy plaintext settings if present.
+    let _ = config::load_settings();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -138,6 +155,9 @@ pub fn run() {
             runtime_health,
             load_settings,
             save_settings,
+            secret_status,
+            set_api_key,
+            clear_api_key,
             config_dir,
             agent_status,
             runtime_snapshot,

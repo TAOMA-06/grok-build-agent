@@ -111,8 +111,7 @@ fn detect_auth(home: Option<&str>) -> (bool, Option<String>, Option<String>) {
 }
 
 /// Apply optional API key into process env for the agent child (not persisted env system-wide).
+#[allow(dead_code)]
 pub fn apply_api_key_to_env(api_key: &str) {
-    if !api_key.trim().is_empty() {
-        std::env::set_var("XAI_API_KEY", api_key.trim());
-    }
+    crate::secrets::apply_api_key_to_env(api_key);
 }

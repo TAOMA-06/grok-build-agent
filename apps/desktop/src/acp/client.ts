@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { isSessionEventEnvelope } from "../contracts";
+import {
+  buildPermissionPrompt,
+  extractPermissionOptions,
+  isPermissionMethod,
+  isSessionEventEnvelope,
+} from "../contracts";
 import type {
   AgentStatus,
   GrokProbe,
@@ -218,17 +223,53 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
           raw && typeof raw === "object" && "method" in raw
             ? (raw as ServerRequest)
             : (event.payload as ServerRequest);
-        useAppStore.getState().setPermission(req);
+
+        // Host already filters fs/terminal; still guard unknown methods.
+        if (!isPermissionMethod(req.method ?? "")) {
+          useAppStore.getState().addBlock({
+            type: "system",
+            id: crypto.randomUUID(),
+            text: `Ignored non-permission server request: ${req.method}`,
+            level: "warn",
+          });
+          return;
+        }
+
+        const options = extractPermissionOptions(req.params);
+        const connectionId =
+          isSessionEventEnvelope(event.payload)
+            ? event.payload.connectionId
+            : "local";
+        const prompt = buildPermissionPrompt({
+          request: req,
+          connectionId,
+        });
+        useAppStore.getState().setPermission(req, options);
+
         const settings = useAppStore.getState().settings;
         if (settings.alwaysApprove) {
-          // Prefer first agent-provided option when available (T03 hardens this).
-          const params = req.params as { options?: { optionId?: string }[] } | undefined;
-          const optionId =
-            params?.options?.find((o) => o.optionId)?.optionId ?? "allow-once";
+          const allow =
+            options.find((o) => o.kind === "allow_once" || o.kind === "allow_always") ??
+            options[0];
+          if (!allow) {
+            useAppStore.getState().addBlock({
+              type: "system",
+              id: crypto.randomUUID(),
+              text: "Always-approve enabled but agent sent no permission options",
+              level: "error",
+            });
+            return;
+          }
           void respondServerRequest(req.id, {
-            outcome: { outcome: "selected", optionId },
-            approved: true,
+            outcome: { outcome: "selected", optionId: allow.optionId },
           }).finally(() => useAppStore.getState().setPermission(null));
+        } else if (prompt && options.length === 0) {
+          useAppStore.getState().addBlock({
+            type: "system",
+            id: crypto.randomUUID(),
+            text: "Permission request missing agent option IDs",
+            level: "warn",
+          });
         }
       },
     ),
