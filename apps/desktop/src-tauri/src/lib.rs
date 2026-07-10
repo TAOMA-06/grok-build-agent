@@ -1,5 +1,6 @@
 mod acp;
 mod config;
+mod contracts;
 mod runtime;
 
 use acp::{AcpRuntime, AgentStatus, GrokProbe, StartConfig};

@@ -1,0 +1,12 @@
+/**
+ * Shared domain contracts for Grok Build Community Desktop.
+ * UI (TypeScript) and host (Rust) must stay aligned on camelCase wire shapes.
+ */
+
+export * from "./runtime";
+export * from "./session";
+export * from "./events";
+export * from "./permission";
+export * from "./review";
+export * from "./workspace";
+export * from "./settings";

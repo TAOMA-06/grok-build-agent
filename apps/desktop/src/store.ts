@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { defaultSettings } from "./contracts";
 import type {
   AgentStatus,
   ChatBlock,
@@ -9,18 +10,7 @@ import type {
   ToolCall,
 } from "./types";
 
-export function defaultSettings(): Settings {
-  return {
-    grokPath: "",
-    model: "grok-build",
-    alwaysApprove: false,
-    useHarness: true,
-    cwd: "",
-    onboardingDone: false,
-    apiKey: "",
-    theme: "dark",
-  };
-}
+export { defaultSettings };
 
 type AppState = {
   settings: Settings;
