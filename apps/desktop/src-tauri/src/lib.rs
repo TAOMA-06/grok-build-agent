@@ -47,6 +47,11 @@ fn agent_status(state: State<'_, AppState>) -> AgentStatus {
 }
 
 #[tauri::command]
+fn runtime_snapshot(state: State<'_, AppState>) -> crate::contracts::RuntimeSnapshot {
+    state.runtime.snapshot()
+}
+
+#[tauri::command]
 async fn start_agent(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -135,6 +140,7 @@ pub fn run() {
             save_settings,
             config_dir,
             agent_status,
+            runtime_snapshot,
             start_agent,
             stop_agent,
             restart_agent,

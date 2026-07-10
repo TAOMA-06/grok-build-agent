@@ -15,21 +15,26 @@
 - **Host:** Tauri 2 (Rust)  
 - **IPC:** `invoke` commands + `listen` events  
 
-### ACP host (`src-tauri/src/acp.rs`)
+### ACP host (`src-tauri/src/acp/`)
 
-Owns the child process:
+**RuntimePool** groups child processes by `(workspaceRoot, sandbox, powerProfile)`:
 
 ```text
 grok agent [--model …] [--always-approve] stdio
+# cwd = normalized workspace; GROK_BUILD_SANDBOX / GROK_BUILD_POWER_PROFILE env
 ```
+
+Each connection can host multiple ACP sessions. Events are emitted as
+`SessionEventEnvelope` (`connectionId`, `sessionId`, `sequence`, `timestamp`, …).
 
 Protocol flow:
 
 1. `initialize` — advertise client capabilities (`fs`, `terminal`)
 2. `session/new` — workspace `cwd`, optional `_meta.rules` / `agentProfile`
-3. `session/prompt` — user turns
+3. `session/prompt` — user turns (scoped by `sessionId`)
 4. Notifications — `session/update`, `x.ai/*`, etc.
 5. Server requests — e.g. permission; UI answers via `respond_server_request`
+6. Process exit — fail/clear all pending requests; no orphan children after `stop`
 
 ### UI event map
 

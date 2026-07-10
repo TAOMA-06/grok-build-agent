@@ -1,15 +1,25 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { isSessionEventEnvelope } from "../contracts";
 import type {
   AgentStatus,
   GrokProbe,
   RuntimeHealth,
   ServerRequest,
+  SessionEventEnvelope,
   SessionUpdate,
   Settings,
   StartConfig,
 } from "../types";
 import { useAppStore } from "../store";
+
+/** Unwrap SessionEventEnvelope or return legacy raw payload. */
+function unwrapPayload<T>(payload: unknown): T {
+  if (isSessionEventEnvelope(payload)) {
+    return payload.payload as T;
+  }
+  return payload as T;
+}
 
 export async function probeGrok(grokPath?: string): Promise<GrokProbe> {
   return invoke<GrokProbe>("probe_grok", { grokPath: grokPath || null });
@@ -148,9 +158,12 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
   const unsubs: UnlistenFn[] = [];
 
   unsubs.push(
-    await listen<SessionUpdate>("acp:session_update", (event) => {
-      handleSessionUpdate(event.payload);
-    }),
+    await listen<SessionEventEnvelope | SessionUpdate>(
+      "acp:session_update",
+      (event) => {
+        handleSessionUpdate(unwrapPayload<SessionUpdate>(event.payload));
+      },
+    ),
   );
 
   unsubs.push(
@@ -163,56 +176,98 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
   );
 
   unsubs.push(
-    await listen<string>("acp:stderr", (event) => {
-      useAppStore.getState().pushStderr(event.payload);
-    }),
+    await listen<string | { line?: string; connectionId?: string }>(
+      "acp:stderr",
+      (event) => {
+        const p = event.payload;
+        const line =
+          typeof p === "string" ? p : String(p?.line ?? JSON.stringify(p));
+        useAppStore.getState().pushStderr(line);
+      },
+    ),
   );
 
   unsubs.push(
-    await listen<string>("acp:error", (event) => {
+    await listen<string | SessionEventEnvelope>("acp:error", (event) => {
+      const p = event.payload;
+      let text: string;
+      if (typeof p === "string") {
+        text = p;
+      } else if (isSessionEventEnvelope(p)) {
+        const msg = (p.payload as { message?: string })?.message;
+        text = msg ?? JSON.stringify(p.payload);
+      } else {
+        text = JSON.stringify(p);
+      }
       useAppStore.getState().addBlock({
         type: "system",
         id: crypto.randomUUID(),
-        text: event.payload,
+        text,
         level: "error",
       });
     }),
   );
 
   unsubs.push(
-    await listen<ServerRequest>("acp:server_request", (event) => {
-      const req = event.payload;
-      useAppStore.getState().setPermission(req);
-      const settings = useAppStore.getState().settings;
-      if (settings.alwaysApprove) {
-        void respondServerRequest(req.id, {
-          outcome: { outcome: "selected", optionId: "allow-once" },
-          approved: true,
-        }).finally(() => useAppStore.getState().setPermission(null));
-      }
-    }),
+    await listen<SessionEventEnvelope | ServerRequest>(
+      "acp:server_request",
+      (event) => {
+        const raw = unwrapPayload<ServerRequest>(event.payload);
+        // Envelope payload is the full JSON-RPC object.
+        const req: ServerRequest =
+          raw && typeof raw === "object" && "method" in raw
+            ? (raw as ServerRequest)
+            : (event.payload as ServerRequest);
+        useAppStore.getState().setPermission(req);
+        const settings = useAppStore.getState().settings;
+        if (settings.alwaysApprove) {
+          // Prefer first agent-provided option when available (T03 hardens this).
+          const params = req.params as { options?: { optionId?: string }[] } | undefined;
+          const optionId =
+            params?.options?.find((o) => o.optionId)?.optionId ?? "allow-once";
+          void respondServerRequest(req.id, {
+            outcome: { outcome: "selected", optionId },
+            approved: true,
+          }).finally(() => useAppStore.getState().setPermission(null));
+        }
+      },
+    ),
   );
 
   unsubs.push(
-    await listen<{ method: string }>("acp:extension", (event) => {
-      useAppStore.getState().addBlock({
-        type: "system",
-        id: crypto.randomUUID(),
-        text: `extension: ${event.payload.method}`,
-        level: "info",
-      });
-    }),
+    await listen<SessionEventEnvelope | { method: string }>(
+      "acp:extension",
+      (event) => {
+        const p = unwrapPayload<{ method?: string }>(event.payload);
+        const method =
+          p?.method ??
+          (isSessionEventEnvelope(event.payload)
+            ? event.payload.kind
+            : "extension");
+        useAppStore.getState().addBlock({
+          type: "system",
+          id: crypto.randomUUID(),
+          text: `extension: ${method}`,
+          level: "info",
+        });
+      },
+    ),
   );
 
   unsubs.push(
-    await listen<{ method: string }>("acp:notification", (event) => {
-      useAppStore.getState().addBlock({
-        type: "system",
-        id: crypto.randomUUID(),
-        text: `notify: ${event.payload.method}`,
-        level: "info",
-      });
-    }),
+    await listen<SessionEventEnvelope | { method: string }>(
+      "acp:notification",
+      (event) => {
+        const p = unwrapPayload<{ method?: string }>(event.payload);
+        const method = p?.method ?? "notification";
+        useAppStore.getState().addBlock({
+          type: "system",
+          id: crypto.randomUUID(),
+          text: `notify: ${method}`,
+          level: "info",
+        });
+      },
+    ),
   );
 
   return unsubs;
