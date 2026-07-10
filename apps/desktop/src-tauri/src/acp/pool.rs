@@ -394,7 +394,11 @@ impl RuntimePool {
             let key_str = conn.key.key_string();
             {
                 let mut idx = self.key_index.lock();
-                if idx.get(&key_str).map(|id| id == connection_id).unwrap_or(false) {
+                if idx
+                    .get(&key_str)
+                    .map(|id| id == connection_id)
+                    .unwrap_or(false)
+                {
                     idx.remove(&key_str);
                 }
             }
@@ -420,7 +424,11 @@ impl RuntimePool {
         if let Some(conn) = self.connections.lock().remove(connection_id) {
             let key_str = conn.key.key_string();
             let mut idx = self.key_index.lock();
-            if idx.get(&key_str).map(|id| id == connection_id).unwrap_or(false) {
+            if idx
+                .get(&key_str)
+                .map(|id| id == connection_id)
+                .unwrap_or(false)
+            {
                 idx.remove(&key_str);
             }
         }
@@ -433,7 +441,10 @@ impl RuntimePool {
 
 fn parse_capabilities(init: &Value) -> crate::contracts::AgentCapabilitySnapshot {
     use crate::contracts::{AgentCapabilitySnapshot, AuthMethodSummary};
-    let agent_caps = init.get("agentCapabilities").cloned().unwrap_or(Value::Null);
+    let agent_caps = init
+        .get("agentCapabilities")
+        .cloned()
+        .unwrap_or(Value::Null);
     let auth_methods = init
         .get("authMethods")
         .and_then(|v| v.as_array())
@@ -526,7 +537,9 @@ async fn maybe_authenticate(
         Err(e) => {
             // Soft-fail when method is optional / already signed-in via CLI auth.
             let msg = e.to_string().to_lowercase();
-            if msg.contains("already") || msg.contains("not required") || msg.contains("unsupported")
+            if msg.contains("already")
+                || msg.contains("not required")
+                || msg.contains("unsupported")
             {
                 Ok(())
             } else {

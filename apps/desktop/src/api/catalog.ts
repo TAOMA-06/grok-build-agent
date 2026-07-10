@@ -126,3 +126,106 @@ export async function worktreeDeletePreview(
 ): Promise<{ path: string; branch?: string; dirty: boolean }> {
   return invoke("worktree_delete_preview", { path });
 }
+
+export type PluginInfo = {
+  name: string;
+  version?: string | null;
+  enabled: boolean;
+  path?: string | null;
+  description?: string | null;
+};
+
+export type McpServerInfo = {
+  name: string;
+  command?: string | null;
+  status?: string | null;
+};
+
+export type UpdateCheck = {
+  currentVersion?: string | null;
+  latestVersion?: string | null;
+  updateAvailable: boolean;
+  channel?: string | null;
+};
+
+export type InstallProgress = {
+  phase: string;
+  detail: string;
+  ok: boolean;
+};
+
+export async function listPlugins(grokPath?: string): Promise<PluginInfo[]> {
+  return invoke("list_plugins", { grokPath: grokPath || null });
+}
+
+export async function installPlugin(
+  source: string,
+  grokPath?: string,
+): Promise<string> {
+  return invoke("install_plugin", { source, grokPath: grokPath || null });
+}
+
+export async function uninstallPlugin(
+  name: string,
+  grokPath?: string,
+): Promise<string> {
+  return invoke("uninstall_plugin", { name, grokPath: grokPath || null });
+}
+
+export async function setPluginEnabled(
+  name: string,
+  enabled: boolean,
+  grokPath?: string,
+): Promise<string> {
+  return invoke("set_plugin_enabled", {
+    name,
+    enabled,
+    grokPath: grokPath || null,
+  });
+}
+
+export async function validateHarnessPlugin(
+  path: string,
+  grokPath?: string,
+): Promise<string> {
+  return invoke("validate_harness_plugin", {
+    path,
+    grokPath: grokPath || null,
+  });
+}
+
+export async function listMcpServers(
+  grokPath?: string,
+): Promise<McpServerInfo[]> {
+  return invoke("list_mcp_servers", { grokPath: grokPath || null });
+}
+
+export async function checkCliUpdate(
+  grokPath?: string,
+): Promise<UpdateCheck> {
+  return invoke("check_cli_update", { grokPath: grokPath || null });
+}
+
+export async function runCliUpdate(grokPath?: string): Promise<string> {
+  return invoke("run_cli_update", { grokPath: grokPath || null });
+}
+
+export async function runCliLogin(grokPath?: string): Promise<string> {
+  return invoke("run_cli_login", { grokPath: grokPath || null });
+}
+
+export async function runCliLogout(grokPath?: string): Promise<string> {
+  return invoke("run_cli_logout", { grokPath: grokPath || null });
+}
+
+export async function installCliOfficial(): Promise<InstallProgress[]> {
+  return invoke("install_cli_official");
+}
+
+export async function officialInstallUrl(): Promise<string> {
+  return invoke("official_install_url");
+}
+
+export async function cancelPrompt(): Promise<unknown> {
+  return invoke("cancel_prompt");
+}

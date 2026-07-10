@@ -129,6 +129,11 @@ pub fn default_harness_rules() -> String {
 }
 
 #[cfg(test)]
+pub fn handlers_is_permission_for_test(method: &str) -> bool {
+    handlers::is_permission_method(method)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::contracts::SandboxMode;
@@ -173,11 +178,7 @@ mod tests {
     #[tokio::test]
     async fn two_workspaces_multiple_sessions_isolated() {
         let mock = mock_agent_path();
-        assert!(
-            mock.exists(),
-            "mock agent missing at {}",
-            mock.display()
-        );
+        assert!(mock.exists(), "mock agent missing at {}", mock.display());
 
         let ws_a = temp_workspace("a");
         let ws_b = temp_workspace("b");

@@ -1,7 +1,10 @@
 mod acp;
+mod cli_bridge;
 mod config;
 mod contracts;
 mod db;
+#[cfg(test)]
+mod e2e_mock;
 mod git_ops;
 mod runtime;
 mod secrets;
@@ -10,9 +13,7 @@ use acp::{AcpRuntime, AgentStatus, GrokProbe, StartConfig};
 use config::AppSettings;
 use contracts::{SessionSummary, SessionUiState};
 use db::{CachedEvent, Database, GrokSessionHint};
-use git_ops::{
-    WorktreeCreateRequest, WorktreeDeleteRequest, WorktreeSummary,
-};
+use git_ops::{WorktreeCreateRequest, WorktreeDeleteRequest, WorktreeSummary};
 use runtime::RuntimeHealth;
 use serde_json::Value;
 use std::sync::Arc;
@@ -110,10 +111,7 @@ async fn restart_agent(
 }
 
 #[tauri::command]
-async fn send_prompt(
-    state: State<'_, AppState>,
-    text: String,
-) -> Result<Value, acp::AcpError> {
+async fn send_prompt(state: State<'_, AppState>, text: String) -> Result<Value, acp::AcpError> {
     state.runtime.prompt(&text).await
 }
 
@@ -182,10 +180,7 @@ fn list_sessions(
 }
 
 #[tauri::command]
-fn upsert_session(
-    state: State<'_, AppState>,
-    summary: SessionSummary,
-) -> Result<(), db::DbError> {
+fn upsert_session(state: State<'_, AppState>, summary: SessionSummary) -> Result<(), db::DbError> {
     state.db.upsert_session(&summary)
 }
 
@@ -259,7 +254,9 @@ fn db_path(state: State<'_, AppState>) -> String {
 // --- Git review (T09) -----------------------------------------------------
 
 #[tauri::command]
-fn git_review(workspace_root: String) -> Result<crate::contracts::ReviewSnapshot, git_ops::GitError> {
+fn git_review(
+    workspace_root: String,
+) -> Result<crate::contracts::ReviewSnapshot, git_ops::GitError> {
     git_ops::refresh_review(&workspace_root)
 }
 
@@ -295,6 +292,126 @@ fn delete_worktree(
 #[tauri::command]
 fn worktree_delete_preview(path: String) -> Result<Value, git_ops::GitError> {
     git_ops::worktree_delete_preview(&path)
+}
+
+// --- Plugins / MCP / install / update (T11–T12) ---------------------------
+
+#[tauri::command]
+fn list_plugins(
+    grok_path: Option<String>,
+) -> Result<Vec<cli_bridge::PluginInfo>, cli_bridge::CliBridgeError> {
+    cli_bridge::list_plugins(grok_path.as_deref())
+}
+
+#[tauri::command]
+fn install_plugin(
+    grok_path: Option<String>,
+    source: String,
+) -> Result<String, cli_bridge::CliBridgeError> {
+    cli_bridge::install_plugin(grok_path.as_deref(), &source)
+}
+
+#[tauri::command]
+fn uninstall_plugin(
+    grok_path: Option<String>,
+    name: String,
+) -> Result<String, cli_bridge::CliBridgeError> {
+    cli_bridge::uninstall_plugin(grok_path.as_deref(), &name)
+}
+
+#[tauri::command]
+fn set_plugin_enabled(
+    grok_path: Option<String>,
+    name: String,
+    enabled: bool,
+) -> Result<String, cli_bridge::CliBridgeError> {
+    cli_bridge::set_plugin_enabled(grok_path.as_deref(), &name, enabled)
+}
+
+#[tauri::command]
+fn validate_harness_plugin(
+    grok_path: Option<String>,
+    path: String,
+) -> Result<String, cli_bridge::CliBridgeError> {
+    cli_bridge::validate_plugin(grok_path.as_deref(), &path)
+}
+
+#[tauri::command]
+fn list_mcp_servers(
+    grok_path: Option<String>,
+) -> Result<Vec<cli_bridge::McpServerInfo>, cli_bridge::CliBridgeError> {
+    cli_bridge::list_mcp(grok_path.as_deref())
+}
+
+#[tauri::command]
+fn remove_mcp_server(
+    grok_path: Option<String>,
+    name: String,
+) -> Result<String, cli_bridge::CliBridgeError> {
+    cli_bridge::remove_mcp(grok_path.as_deref(), &name)
+}
+
+#[tauri::command]
+fn check_cli_update(
+    grok_path: Option<String>,
+) -> Result<cli_bridge::UpdateCheck, cli_bridge::CliBridgeError> {
+    cli_bridge::check_update(grok_path.as_deref())
+}
+
+#[tauri::command]
+fn run_cli_update(grok_path: Option<String>) -> Result<String, cli_bridge::CliBridgeError> {
+    cli_bridge::run_update(grok_path.as_deref())
+}
+
+#[tauri::command]
+fn run_cli_login(grok_path: Option<String>) -> Result<String, cli_bridge::CliBridgeError> {
+    cli_bridge::run_login_oauth(grok_path.as_deref())
+}
+
+#[tauri::command]
+fn run_cli_logout(grok_path: Option<String>) -> Result<String, cli_bridge::CliBridgeError> {
+    cli_bridge::run_logout(grok_path.as_deref())
+}
+
+#[tauri::command]
+fn install_cli_official() -> Result<Vec<cli_bridge::InstallProgress>, cli_bridge::CliBridgeError> {
+    use std::sync::atomic::AtomicBool;
+    let cancel = Arc::new(AtomicBool::new(false));
+    cli_bridge::install_cli_from_script(cli_bridge::OFFICIAL_INSTALL_URL, cancel)
+}
+
+#[tauri::command]
+fn official_install_url() -> String {
+    cli_bridge::OFFICIAL_INSTALL_URL.to_string()
+}
+
+/// Cancel in-flight prompt best-effort via ACP session/cancel when supported.
+#[tauri::command]
+async fn cancel_prompt(state: State<'_, AppState>) -> Result<Value, acp::AcpError> {
+    let status = state.runtime.status();
+    let session_id = status
+        .session_id
+        .ok_or_else(|| acp::AcpError::Message("no active session".into()))?;
+    // Try common cancel method names; soft-fail if unsupported.
+    match state
+        .runtime
+        .request(
+            "session/cancel",
+            serde_json::json!({ "sessionId": session_id }),
+        )
+        .await
+    {
+        Ok(v) => Ok(v),
+        Err(_) => {
+            state
+                .runtime
+                .request(
+                    "session/cancel_prompt",
+                    serde_json::json!({ "sessionId": session_id }),
+                )
+                .await
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -348,6 +465,20 @@ pub fn run() {
             create_worktree,
             delete_worktree,
             worktree_delete_preview,
+            list_plugins,
+            install_plugin,
+            uninstall_plugin,
+            set_plugin_enabled,
+            validate_harness_plugin,
+            list_mcp_servers,
+            remove_mcp_server,
+            check_cli_update,
+            run_cli_update,
+            run_cli_login,
+            run_cli_logout,
+            install_cli_official,
+            official_install_url,
+            cancel_prompt,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

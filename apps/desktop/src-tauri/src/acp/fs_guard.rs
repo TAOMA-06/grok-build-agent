@@ -8,10 +8,7 @@ use std::path::{Component, Path, PathBuf};
 /// - absolute paths outside the workspace
 /// - `..` escapes after normalization
 /// - symlink targets that leave the workspace
-pub fn resolve_in_workspace(
-    workspace_root: &Path,
-    requested: &str,
-) -> Result<PathBuf, AcpError> {
+pub fn resolve_in_workspace(workspace_root: &Path, requested: &str) -> Result<PathBuf, AcpError> {
     let requested = requested.trim();
     if requested.is_empty() {
         return Err(AcpError::Message("path is empty".into()));
@@ -42,9 +39,8 @@ pub fn resolve_in_workspace(
 
     // If path exists, canonicalize to resolve symlinks and re-check boundary.
     if lexical.exists() {
-        let canon = std::fs::canonicalize(&lexical).map_err(|e| {
-            AcpError::Message(format!("cannot resolve {}: {e}", lexical.display()))
-        })?;
+        let canon = std::fs::canonicalize(&lexical)
+            .map_err(|e| AcpError::Message(format!("cannot resolve {}: {e}", lexical.display())))?;
         if !path_is_under(&canon, &root) {
             return Err(AcpError::Message(format!(
                 "symlink escapes workspace: {requested}"
@@ -104,7 +100,11 @@ fn path_is_under(path: &Path, root: &Path) -> bool {
     path.starts_with(root)
 }
 
-pub fn read_text_file(workspace_root: &Path, path: &str, limit: Option<usize>) -> Result<String, AcpError> {
+pub fn read_text_file(
+    workspace_root: &Path,
+    path: &str,
+    limit: Option<usize>,
+) -> Result<String, AcpError> {
     let resolved = resolve_in_workspace(workspace_root, path)?;
     let data = std::fs::read_to_string(&resolved)
         .map_err(|e| AcpError::Message(format!("read {}: {e}", resolved.display())))?;
@@ -119,9 +119,8 @@ pub fn read_text_file(workspace_root: &Path, path: &str, limit: Option<usize>) -
 pub fn write_text_file(workspace_root: &Path, path: &str, content: &str) -> Result<(), AcpError> {
     let resolved = resolve_in_workspace(workspace_root, path)?;
     if let Some(parent) = resolved.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            AcpError::Message(format!("mkdir {}: {e}", parent.display()))
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AcpError::Message(format!("mkdir {}: {e}", parent.display())))?;
     }
     std::fs::write(&resolved, content)
         .map_err(|e| AcpError::Message(format!("write {}: {e}", resolved.display())))?;

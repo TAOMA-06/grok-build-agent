@@ -88,6 +88,10 @@ export async function sendPrompt(text: string): Promise<unknown> {
   return invoke("send_prompt", { text });
 }
 
+export async function cancelPrompt(): Promise<unknown> {
+  return invoke("cancel_prompt");
+}
+
 export async function respondServerRequest(
   id: string | number,
   result?: unknown,

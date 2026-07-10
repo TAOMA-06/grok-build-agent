@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  rust:
+    name: Rust
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - name: fmt
+        working-directory: apps/desktop/src-tauri
+        run: cargo fmt --all -- --check
+      - name: clippy
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+      - name: test
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib
+      - name: audit (advisory)
+        continue-on-error: true
+        run: |
+          cargo install cargo-audit --locked || true
+          cargo audit --manifest-path apps/desktop/src-tauri/Cargo.toml || true
+
+  harness:
+    name: Harness plugin
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate harness if grok available
+        run: |
+          if command -v grok >/dev/null 2>&1; then
+            grok plugin validate harness
+          else
+            echo "grok CLI not on runner; skip plugin validate"
+            test -f harness/plugin.json
+          fi
+
+  sbom-note:
+    name: SBOM reminder
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Release pipeline may attach SBOM via cargo-cyclonedx / syft."
+          echo "Configure in T15 secrets before public distribution."

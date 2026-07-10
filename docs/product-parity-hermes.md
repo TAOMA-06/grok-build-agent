@@ -26,12 +26,15 @@ Reference: [Eynzof/Hermes-CN-Desktop](https://github.com/Eynzof/Hermes-CN-Deskto
 | Chat + tools + plan stream | Done |
 | Permission modal | Done |
 | Orchestrator harness | Done (basic) |
-| Plan approve UX | Planned |
-| Multi-session archive | Planned |
-| Skills / Memory / MCP UI | Planned |
-| Diff / worktree | Planned |
-| Windows installer | Planned |
-| Apple notarization | Planned |
+| Plan approve UX | Done |
+| Multi-session archive | Done (local SQLite) |
+| Skills / Plugins / MCP UI | Done (CLI-backed) |
+| Diff / worktree | Done |
+| Zero-terminal CLI install / OAuth / update | Done |
+| Mock E2E journeys | Done (Rust + Vitest) |
+| CI quality gates | Done |
+| Windows installer | Planned (out of scope v1) |
+| Apple notarization | Scaffolded (needs secrets) |
 
 ## Non-goals (Hermes-only)
 

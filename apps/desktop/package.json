@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "vitest run src/e2e",
+    "check": "tsc --noEmit && vitest run && npm run build",
     "tauri": "tauri",
     "app:dev": "tauri dev",
     "app:build": "tauri build",

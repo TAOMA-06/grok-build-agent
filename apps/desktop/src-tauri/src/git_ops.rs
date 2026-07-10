@@ -1,8 +1,6 @@
 //! Structured Git inspection (argv arrays only — never shell concatenation).
 
-use crate::contracts::{
-    GitRepoState, ReviewFileEntry, ReviewFileStatus, ReviewSnapshot,
-};
+use crate::contracts::{GitRepoState, ReviewFileEntry, ReviewFileStatus, ReviewSnapshot};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -26,10 +24,7 @@ impl Serialize for GitError {
 }
 
 fn git(cwd: &Path, args: &[&str]) -> Result<String, GitError> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()?;
+    let output = Command::new("git").args(args).current_dir(cwd).output()?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(GitError::Message(if err.is_empty() {
@@ -210,7 +205,12 @@ fn is_binary_path(path: &str) -> bool {
 }
 
 /// Text unified diff for a path (truncated).
-pub fn file_patch(workspace_root: &str, path: &str, staged: bool, max_bytes: usize) -> Result<String, GitError> {
+pub fn file_patch(
+    workspace_root: &str,
+    path: &str,
+    staged: bool,
+    max_bytes: usize,
+) -> Result<String, GitError> {
     let root = PathBuf::from(workspace_root);
     let args: Vec<&str> = if staged {
         vec!["diff", "--cached", "--", path]
@@ -395,9 +395,7 @@ pub fn list_merged_worktrees(workspace_root: &str) -> Result<Vec<WorktreeSummary
         } else {
             git_list.push(WorktreeSummary {
                 source: "merged".into(),
-                main_workspace: g
-                    .main_workspace
-                    .or_else(|| Some(workspace_root.into())),
+                main_workspace: g.main_workspace.or_else(|| Some(workspace_root.into())),
                 ..g
             });
         }
@@ -410,8 +408,7 @@ pub fn create_worktree(req: &WorktreeCreateRequest) -> Result<WorktreeSummary, G
     let dirty = worktree_dirty(&req.workspace_root);
     if dirty && req.dirty_policy != "clean_head" && req.dirty_policy != "copy_dirty" {
         return Err(GitError::Message(
-            "workspace has uncommitted changes; choose dirtyPolicy clean_head or copy_dirty"
-                .into(),
+            "workspace has uncommitted changes; choose dirtyPolicy clean_head or copy_dirty".into(),
         ));
     }
     if dirty && req.dirty_policy.is_empty() {
@@ -425,10 +422,7 @@ pub fn create_worktree(req: &WorktreeCreateRequest) -> Result<WorktreeSummary, G
             .branch
             .clone()
             .unwrap_or_else(|| format!("wt-{}", &uuid::Uuid::new_v4().to_string()[..8]));
-        root.join(".worktrees")
-            .join(name)
-            .to_string_lossy()
-            .into()
+        root.join(".worktrees").join(name).to_string_lossy().into()
     });
 
     let mut args: Vec<String> = vec!["worktree".into(), "add".into()];
@@ -592,7 +586,8 @@ mod tests {
         .unwrap();
         assert!(Path::new(&created.path).exists());
         let list = list_merged_worktrees(repo.to_str().unwrap()).unwrap();
-        let created_canon = std::fs::canonicalize(&created.path).unwrap_or(created.path.clone().into());
+        let created_canon =
+            std::fs::canonicalize(&created.path).unwrap_or(created.path.clone().into());
         assert!(
             list.iter().any(|w| {
                 let p = std::fs::canonicalize(&w.path).unwrap_or_else(|_| PathBuf::from(&w.path));

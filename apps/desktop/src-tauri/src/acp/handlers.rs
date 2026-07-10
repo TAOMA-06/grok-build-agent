@@ -1,9 +1,9 @@
 //! Route ACP server→client requests: fs/terminal internal, permission to UI.
 
+use super::connection::ConnectionInner;
 use super::events::{emit_json, SharedEventBus};
 use super::fs_guard;
 use super::terminal_host::{parse_create_params, TerminalHost};
-use super::connection::ConnectionInner;
 use super::AcpError;
 use crate::contracts::{EventSource, SessionEventEnvelope};
 use serde_json::{json, Value};
@@ -134,7 +134,10 @@ fn handle_fs(cwd: &std::path::Path, method: &str, params: &Value) -> Result<Valu
 
     match method {
         "fs/read_text_file" | "fs/readTextFile" | "fs/read_text" => {
-            let limit = params.get("limit").and_then(|v| v.as_u64()).map(|n| n as usize);
+            let limit = params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize);
             let content = fs_guard::read_text_file(cwd, path, limit)?;
             Ok(json!({ "content": content }))
         }

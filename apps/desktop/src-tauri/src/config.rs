@@ -90,11 +90,7 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
     if !path.exists() {
         let mut s = AppSettings::default();
         // Surface keychain presence as a non-secret placeholder for the UI field.
-        if crate::secrets::get_api_key()
-            .ok()
-            .flatten()
-            .is_some()
-        {
+        if crate::secrets::get_api_key().ok().flatten().is_some() {
             s.api_key = String::new(); // never return secret to frontend by default
         }
         return Ok(s);

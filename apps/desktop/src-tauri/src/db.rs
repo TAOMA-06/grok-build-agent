@@ -1,8 +1,6 @@
 //! Local SQLite catalog: workspaces, sessions, drafts, UI state, event cache.
 
-use crate::contracts::{
-    SessionRunState, SessionSummary, SessionUiState, WorkspaceRecord,
-};
+use crate::contracts::{SessionRunState, SessionSummary, SessionUiState, WorkspaceRecord};
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -114,21 +112,23 @@ impl Database {
 
     // --- Workspaces -------------------------------------------------------
 
-    pub fn upsert_workspace(&self, path: &str, name: Option<&str>) -> Result<WorkspaceRecord, DbError> {
+    pub fn upsert_workspace(
+        &self,
+        path: &str,
+        name: Option<&str>,
+    ) -> Result<WorkspaceRecord, DbError> {
         let path = path.trim();
         if path.is_empty() {
             return Err(DbError::Message("workspace path empty".into()));
         }
         let now = iso_now();
-        let display = name
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                Path::new(path)
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(path)
-                    .to_string()
-            });
+        let display = name.map(|s| s.to_string()).unwrap_or_else(|| {
+            Path::new(path)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(path)
+                .to_string()
+        });
 
         let conn = self.conn.lock();
         if let Some(existing) = conn
@@ -253,7 +253,10 @@ impl Database {
         Ok(())
     }
 
-    pub fn list_sessions(&self, workspace_root: Option<&str>) -> Result<Vec<SessionSummary>, DbError> {
+    pub fn list_sessions(
+        &self,
+        workspace_root: Option<&str>,
+    ) -> Result<Vec<SessionSummary>, DbError> {
         let conn = self.conn.lock();
         let mut out = Vec::new();
         if let Some(ws) = workspace_root {
@@ -387,7 +390,8 @@ impl Database {
             Some(s) if !s.is_empty() => serde_json::from_str(&s)?,
             _ => None,
         };
-        let collapsed_tool_ids: Vec<String> = serde_json::from_str(&collapsed_raw).unwrap_or_default();
+        let collapsed_tool_ids: Vec<String> =
+            serde_json::from_str(&collapsed_raw).unwrap_or_default();
         Ok(Some(SessionUiState {
             session_id: sid,
             scroll_top: scroll,
@@ -629,14 +633,8 @@ mod tests {
         assert_eq!(loaded.draft.as_deref(), Some("updated draft"));
         assert_eq!(db.list_sessions(Some("/tmp/proj")).unwrap().len(), 1);
 
-        db.append_event(
-            "s1",
-            1,
-            "t",
-            "chunk",
-            &serde_json::json!({"text": "a"}),
-        )
-        .unwrap();
+        db.append_event("s1", 1, "t", "chunk", &serde_json::json!({"text": "a"}))
+            .unwrap();
         assert_eq!(db.list_events("s1").unwrap().len(), 1);
 
         let ui = SessionUiState {
@@ -675,14 +673,8 @@ mod tests {
         };
         db.upsert_session(&summary).unwrap();
         for i in 0..(EVENT_CACHE_LIMIT_PER_SESSION + 50) {
-            db.append_event(
-                "s2",
-                i as u64,
-                "t",
-                "k",
-                &serde_json::json!({"i": i}),
-            )
-            .unwrap();
+            db.append_event("s2", i as u64, "t", "k", &serde_json::json!({"i": i}))
+                .unwrap();
         }
         let events = db.list_events("s2").unwrap();
         assert!(events.len() <= EVENT_CACHE_LIMIT_PER_SESSION);

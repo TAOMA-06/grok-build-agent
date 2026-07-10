@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import {
+  cancelPrompt,
   loadSettings,
   respondServerRequest,
   restartAgent,
@@ -13,16 +14,32 @@ import {
   subscribeAcpEvents,
 } from "./acp/client";
 import {
+  checkCliUpdate,
   createWorktree,
   deleteWorktree,
   gitFilePatch,
   gitReview,
+  installCliOfficial,
+  installPlugin,
+  listMcpServers,
+  listPlugins,
   listSessions,
   listWorkspaces,
   listWorktrees,
+  officialInstallUrl,
+  runCliLogin,
+  runCliLogout,
+  runCliUpdate,
   saveDraft,
+  setPluginEnabled,
+  type InstallProgress,
+  type McpServerInfo,
+  type PluginInfo,
+  type UpdateCheck,
+  uninstallPlugin,
   upsertSession,
   upsertWorkspace,
+  validateHarnessPlugin,
   worktreeDeletePreview,
 } from "./api/catalog";
 import { t } from "./i18n/en";
@@ -131,11 +148,19 @@ function Onboarding() {
     useAppStore();
   const [step, setStep] = useState(0);
   const [checking, setChecking] = useState(false);
+  const [installLog, setInstallLog] = useState<InstallProgress[]>([]);
+  const [installUrl, setInstallUrl] = useState("https://x.ai/cli/install.sh");
+  const [authMsg, setAuthMsg] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setChecking(true);
     try {
       setHealth(await runtimeHealth(settings.grokPath || undefined));
+      try {
+        setInstallUrl(await officialInstallUrl());
+      } catch {
+        /* not in tauri */
+      }
     } finally {
       setChecking(false);
     }
@@ -149,6 +174,20 @@ function Onboarding() {
     const next = { ...settings, onboardingDone: true };
     replaceSettings(next);
     await saveSettings(next);
+  }
+
+  async function doInstall() {
+    setInstallLog([]);
+    try {
+      const log = await installCliOfficial();
+      setInstallLog(log);
+      await refresh();
+    } catch (e) {
+      setInstallLog((prev) => [
+        ...prev,
+        { phase: "error", detail: String(e), ok: false },
+      ]);
+    }
   }
 
   return (
@@ -166,22 +205,28 @@ function Onboarding() {
                 placeholder="~/.grok/bin/grok"
               />
             </label>
-            <label>
-              {t.apiKey}
-              <input
-                type="password"
-                value={settings.apiKey}
-                onChange={(e) => setSettings({ apiKey: e.target.value })}
-                placeholder="Keychain"
-                autoComplete="off"
-              />
-            </label>
-            <p className="hint">{t.apiKeyHint}</p>
+            <p className="hint">
+              {t.installCliHint}
+              <br />
+              {t.installSource}: <code>{installUrl}</code>
+            </p>
             <div className="row-actions">
               <button type="button" className="ghost" onClick={() => void refresh()}>
                 {checking ? "…" : t.recheck}
               </button>
+              {!health?.grok.found && (
+                <button type="button" className="primary" onClick={() => void doInstall()}>
+                  {t.installCli}
+                </button>
+              )}
             </div>
+            {installLog.length > 0 && (
+              <pre className="code">
+                {installLog
+                  .map((l) => `${l.ok ? "✓" : "✗"} ${l.phase}: ${l.detail}`)
+                  .join("\n")}
+              </pre>
+            )}
             <ul className="checklist">
               {(health?.checklist ?? []).map((item) => (
                 <li key={item.id} className={item.ok ? "ok" : "bad"}>
@@ -206,6 +251,65 @@ function Onboarding() {
         )}
         {step === 1 && (
           <>
+            <div className="row-actions">
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      const out = await runCliLogin(settings.grokPath || undefined);
+                      setAuthMsg(out || "ok");
+                      await refresh();
+                    } catch (e) {
+                      setAuthMsg(String(e));
+                    }
+                  })();
+                }}
+              >
+                {t.loginOauth}
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      setAuthMsg(await runCliLogout(settings.grokPath || undefined));
+                      await refresh();
+                    } catch (e) {
+                      setAuthMsg(String(e));
+                    }
+                  })();
+                }}
+              >
+                {t.logout}
+              </button>
+            </div>
+            {authMsg && <p className="hint">{authMsg}</p>}
+            <label>
+              {t.apiKey}
+              <input
+                type="password"
+                value={settings.apiKey}
+                onChange={(e) => setSettings({ apiKey: e.target.value })}
+                placeholder="Keychain"
+                autoComplete="off"
+              />
+            </label>
+            <p className="hint">{t.apiKeyHint}</p>
+            <div className="row-actions end">
+              <button type="button" className="ghost" onClick={() => setStep(0)}>
+                Back
+              </button>
+              <button type="button" className="primary" onClick={() => setStep(2)}>
+                {t.onboardingNext}
+              </button>
+            </div>
+          </>
+        )}
+        {step === 2 && (
+          <>
             <label>
               {t.model}
               <input
@@ -222,7 +326,7 @@ function Onboarding() {
               {t.useHarness}
             </label>
             <div className="row-actions end">
-              <button type="button" className="ghost" onClick={() => setStep(0)}>
+              <button type="button" className="ghost" onClick={() => setStep(1)}>
                 Back
               </button>
               <button type="button" className="primary" onClick={() => void finish()}>
@@ -455,6 +559,367 @@ function WorktreePanel() {
   );
 }
 
+function SettingsPanel() {
+  const { settings, setSettings } = useAppStore();
+  const [update, setUpdate] = useState<UpdateCheck | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  return (
+    <div className="panel-body">
+      <label>
+        {t.grokPath}
+        <input
+          value={settings.grokPath}
+          onChange={(e) => setSettings({ grokPath: e.target.value })}
+        />
+      </label>
+      <label>
+        {t.model}
+        <input
+          value={settings.model}
+          onChange={(e) => setSettings({ model: e.target.value })}
+        />
+      </label>
+      <label>
+        {t.apiKey}
+        <input
+          type="password"
+          value={settings.apiKey}
+          onChange={(e) => setSettings({ apiKey: e.target.value })}
+          autoComplete="off"
+        />
+      </label>
+      <label className="row">
+        <input
+          type="checkbox"
+          checked={settings.useHarness}
+          onChange={(e) => setSettings({ useHarness: e.target.checked })}
+        />
+        {t.useHarness}
+      </label>
+      <label className="row">
+        <input
+          type="checkbox"
+          checked={settings.alwaysApprove}
+          onChange={(e) => setSettings({ alwaysApprove: e.target.checked })}
+        />
+        {t.alwaysApprove}
+      </label>
+      <div className="section-title">{t.loginOauth}</div>
+      <div className="row-actions">
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => {
+            void (async () => {
+              try {
+                setMsg(await runCliLogin(settings.grokPath || undefined));
+              } catch (e) {
+                setMsg(String(e));
+              }
+            })();
+          }}
+        >
+          {t.loginOauth}
+        </button>
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => {
+            void (async () => {
+              try {
+                setMsg(await runCliLogout(settings.grokPath || undefined));
+              } catch (e) {
+                setMsg(String(e));
+              }
+            })();
+          }}
+        >
+          {t.logout}
+        </button>
+      </div>
+      <div className="section-title">{t.checkUpdate}</div>
+      <div className="row-actions">
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => {
+            void (async () => {
+              try {
+                setUpdate(await checkCliUpdate(settings.grokPath || undefined));
+              } catch (e) {
+                setMsg(String(e));
+              }
+            })();
+          }}
+        >
+          {t.checkUpdate}
+        </button>
+        <button
+          type="button"
+          className="primary"
+          onClick={() => {
+            void (async () => {
+              try {
+                setMsg(await runCliUpdate(settings.grokPath || undefined));
+              } catch (e) {
+                setMsg(String(e));
+              }
+            })();
+          }}
+        >
+          {t.runUpdate}
+        </button>
+      </div>
+      {update && (
+        <p className="hint">
+          {update.updateAvailable ? t.updateAvailable : t.upToDate}
+          {update.currentVersion ? ` · ${update.currentVersion}` : ""}
+          {update.latestVersion ? ` → ${update.latestVersion}` : ""}
+        </p>
+      )}
+      {msg && <p className="hint">{msg}</p>}
+      <button
+        type="button"
+        className="primary"
+        onClick={() => void saveSettings(settings)}
+      >
+        {t.save}
+      </button>
+    </div>
+  );
+}
+
+function PlanPanel() {
+  const { activeSessionId, sessions, setSessionDraft, addBlock, setSessionBusy } =
+    useAppStore();
+  const session = activeSessionId ? sessions[activeSessionId] : null;
+  const [feedback, setFeedback] = useState("");
+
+  async function approve() {
+    if (!activeSessionId) return;
+    const text = t.planApproved;
+    addBlock(activeSessionId, {
+      type: "user",
+      id: crypto.randomUUID(),
+      text,
+    });
+    setSessionBusy(activeSessionId, true);
+    try {
+      await sendPrompt(text);
+    } finally {
+      setSessionBusy(activeSessionId, false);
+    }
+  }
+
+  async function requestChanges() {
+    if (!activeSessionId) return;
+    const note = feedback.trim() || "Please revise.";
+    const text = `${t.planChanges}\n${note}`;
+    setSessionDraft(activeSessionId, text);
+    addBlock(activeSessionId, {
+      type: "user",
+      id: crypto.randomUUID(),
+      text,
+    });
+    setSessionBusy(activeSessionId, true);
+    try {
+      await sendPrompt(text);
+    } finally {
+      setSessionBusy(activeSessionId, false);
+      setFeedback("");
+    }
+  }
+
+  return (
+    <div className="panel-body">
+      <pre className="code">{session?.planText || "—"}</pre>
+      {session?.planText ? (
+        <>
+          <label>
+            {t.planFeedback}
+            <textarea
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              rows={3}
+            />
+          </label>
+          <div className="row-actions">
+            <button type="button" className="danger" onClick={() => void requestChanges()}>
+              {t.rejectPlan}
+            </button>
+            <button type="button" className="primary" onClick={() => void approve()}>
+              {t.approvePlan}
+            </button>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function PluginsPanel() {
+  const { settings } = useAppStore();
+  const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [mcp, setMcp] = useState<McpServerInfo[]>([]);
+  const [source, setSource] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      setPlugins(await listPlugins(settings.grokPath || undefined));
+    } catch (e) {
+      setPlugins([]);
+      setMsg(String(e));
+    }
+    try {
+      setMcp(await listMcpServers(settings.grokPath || undefined));
+    } catch {
+      setMcp([]);
+    }
+  }, [settings.grokPath]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  return (
+    <div className="panel-body">
+      <div className="row-actions">
+        <button type="button" className="ghost" onClick={() => void refresh()}>
+          {t.refresh}
+        </button>
+        <button
+          type="button"
+          className="ghost"
+          disabled={busy}
+          onClick={() => {
+            void (async () => {
+              setBusy(true);
+              try {
+                // Repo-relative harness path from app working directory is host-resolved by CLI.
+                const out = await validateHarnessPlugin(
+                  "../../harness",
+                  settings.grokPath || undefined,
+                );
+                setMsg(out || "ok");
+              } catch (e) {
+                setMsg(String(e));
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
+        >
+          {t.validateHarness}
+        </button>
+      </div>
+      {msg && <p className="hint">{msg}</p>}
+      <div className="section-title">{t.plugins}</div>
+      <label>
+        {t.pluginSource}
+        <input
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          placeholder="https://… or /path/to/plugin"
+        />
+      </label>
+      <button
+        type="button"
+        className="primary"
+        disabled={busy || !source.trim()}
+        onClick={() => {
+          void (async () => {
+            setBusy(true);
+            try {
+              await installPlugin(source.trim(), settings.grokPath || undefined);
+              setSource("");
+              await refresh();
+            } catch (e) {
+              setMsg(String(e));
+            } finally {
+              setBusy(false);
+            }
+          })();
+        }}
+      >
+        {t.installPlugin}
+      </button>
+      {plugins.length === 0 && <p className="empty">{t.noPlugins}</p>}
+      {plugins.map((p) => (
+        <div key={p.name} className="list-item">
+          <strong>
+            {p.name}
+            {p.version ? ` @ ${p.version}` : ""}
+          </strong>
+          <span className="meta">
+            {p.enabled ? t.enable : t.disable}
+            {p.path ? ` · ${p.path}` : ""}
+          </span>
+          <div className="row-actions" style={{ marginTop: 6 }}>
+            <button
+              type="button"
+              className="ghost"
+              disabled={busy}
+              onClick={() => {
+                void (async () => {
+                  setBusy(true);
+                  try {
+                    await setPluginEnabled(
+                      p.name,
+                      !p.enabled,
+                      settings.grokPath || undefined,
+                    );
+                    await refresh();
+                  } catch (e) {
+                    setMsg(String(e));
+                  } finally {
+                    setBusy(false);
+                  }
+                })();
+              }}
+            >
+              {p.enabled ? t.disable : t.enable}
+            </button>
+            <button
+              type="button"
+              className="danger"
+              disabled={busy}
+              onClick={() => {
+                void (async () => {
+                  setBusy(true);
+                  try {
+                    await uninstallPlugin(p.name, settings.grokPath || undefined);
+                    await refresh();
+                  } catch (e) {
+                    setMsg(String(e));
+                  } finally {
+                    setBusy(false);
+                  }
+                })();
+              }}
+            >
+              {t.uninstall}
+            </button>
+          </div>
+        </div>
+      ))}
+      <div className="section-title">{t.mcp}</div>
+      {mcp.length === 0 && <p className="empty">{t.noMcp}</p>}
+      {mcp.map((m) => (
+        <div key={m.name} className="list-item">
+          <strong>{m.name}</strong>
+          <span className="meta">
+            {m.status ?? "configured"}
+            {m.command ? ` · ${m.command}` : ""}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Inspector() {
   const {
     activeSessionId,
@@ -463,8 +928,6 @@ function Inspector() {
     setRightPanel,
     health,
     stderr,
-    settings,
-    setSettings,
   } = useAppStore();
   const session = activeSessionId ? sessions[activeSessionId] : null;
 
@@ -474,6 +937,7 @@ function Inspector() {
     { id: "plan", label: t.plan },
     { id: "diff", label: t.diff },
     { id: "worktree", label: t.worktrees },
+    { id: "plugins", label: t.plugins },
     { id: "logs", label: t.logs },
     { id: "settings", label: t.settings },
   ];
@@ -524,68 +988,16 @@ function Inspector() {
           ))}
         </div>
       )}
-      {rightPanel === "plan" && (
-        <div className="panel-body">
-          <pre className="code">{session?.planText || "—"}</pre>
-        </div>
-      )}
+      {rightPanel === "plan" && <PlanPanel />}
       {rightPanel === "diff" && <DiffPanel />}
       {rightPanel === "worktree" && <WorktreePanel />}
+      {rightPanel === "plugins" && <PluginsPanel />}
       {rightPanel === "logs" && (
         <div className="panel-body">
           <pre className="code">{stderr.join("\n") || "—"}</pre>
         </div>
       )}
-      {rightPanel === "settings" && (
-        <div className="panel-body">
-          <label>
-            {t.grokPath}
-            <input
-              value={settings.grokPath}
-              onChange={(e) => setSettings({ grokPath: e.target.value })}
-            />
-          </label>
-          <label>
-            {t.model}
-            <input
-              value={settings.model}
-              onChange={(e) => setSettings({ model: e.target.value })}
-            />
-          </label>
-          <label>
-            {t.apiKey}
-            <input
-              type="password"
-              value={settings.apiKey}
-              onChange={(e) => setSettings({ apiKey: e.target.value })}
-              autoComplete="off"
-            />
-          </label>
-          <label className="row">
-            <input
-              type="checkbox"
-              checked={settings.useHarness}
-              onChange={(e) => setSettings({ useHarness: e.target.checked })}
-            />
-            {t.useHarness}
-          </label>
-          <label className="row">
-            <input
-              type="checkbox"
-              checked={settings.alwaysApprove}
-              onChange={(e) => setSettings({ alwaysApprove: e.target.checked })}
-            />
-            {t.alwaysApprove}
-          </label>
-          <button
-            type="button"
-            className="primary"
-            onClick={() => void saveSettings(settings)}
-          >
-            {t.save}
-          </button>
-        </div>
-      )}
+      {rightPanel === "settings" && <SettingsPanel />}
     </aside>
   );
 }
@@ -954,6 +1366,26 @@ function Workbench() {
               >
                 {t.clear}
               </button>
+              {busy && (
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        await cancelPrompt();
+                      } catch {
+                        /* best-effort */
+                      }
+                      if (activeSessionId) {
+                        setSessionBusy(activeSessionId, false);
+                      }
+                    })();
+                  }}
+                >
+                  {t.cancelRun}
+                </button>
+              )}
               <button
                 type="button"
                 className="primary"

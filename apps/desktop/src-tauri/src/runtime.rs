@@ -32,31 +32,30 @@ pub fn health(configured_path: Option<&str>) -> RuntimeHealth {
 
     let (authenticated, auth_method, auth_hint) = detect_auth(home.as_deref());
 
-    let mut checklist = Vec::new();
-
-    checklist.push(HealthItem {
-        id: "binary".into(),
-        label: "Grok CLI installed".into(),
-        ok: grok.found,
-        detail: grok
-            .path
-            .clone()
-            .or_else(|| grok.error.clone()),
-    });
-
-    checklist.push(HealthItem {
-        id: "version".into(),
-        label: "Version readable".into(),
-        ok: grok.version.as_ref().map(|v| !v.is_empty()).unwrap_or(false),
-        detail: grok.version.clone(),
-    });
-
-    checklist.push(HealthItem {
-        id: "auth".into(),
-        label: "Authentication".into(),
-        ok: authenticated,
-        detail: auth_hint.clone().or_else(|| auth_method.clone()),
-    });
+    let checklist = vec![
+        HealthItem {
+            id: "binary".into(),
+            label: "Grok CLI installed".into(),
+            ok: grok.found,
+            detail: grok.path.clone().or_else(|| grok.error.clone()),
+        },
+        HealthItem {
+            id: "version".into(),
+            label: "Version readable".into(),
+            ok: grok
+                .version
+                .as_ref()
+                .map(|v| !v.is_empty())
+                .unwrap_or(false),
+            detail: grok.version.clone(),
+        },
+        HealthItem {
+            id: "auth".into(),
+            label: "Authentication".into(),
+            ok: authenticated,
+            detail: auth_hint.clone().or_else(|| auth_method.clone()),
+        },
+    ];
 
     let ready = grok.found && authenticated;
 

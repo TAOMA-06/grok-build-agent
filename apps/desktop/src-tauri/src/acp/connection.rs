@@ -1,9 +1,12 @@
 //! One ACP child process connection (multi-session capable).
 
+use super::events::{emit_json, SharedEventBus};
+use super::handlers;
+use super::terminal_host::TerminalHost;
 use super::{AcpError, AgentStatus, StartConfig};
 use crate::contracts::{
-    ConnectionKey, ConnectionSnapshot, ConnectionState, EventSource, PowerProfile,
-    RuntimeSnapshot, SandboxMode, SessionEventEnvelope,
+    ConnectionKey, ConnectionSnapshot, ConnectionState, EventSource, PowerProfile, RuntimeSnapshot,
+    SandboxMode, SessionEventEnvelope,
 };
 use parking_lot::Mutex;
 use serde_json::{json, Value};
@@ -13,9 +16,6 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use super::events::{emit_json, SharedEventBus};
-use super::handlers;
-use super::terminal_host::TerminalHost;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{mpsc, oneshot};
@@ -52,7 +52,7 @@ impl ConnectionInner {
         ConnectionSnapshot {
             connection_id: self.connection_id.clone(),
             key: self.key.clone(),
-            state: self.state.lock().clone(),
+            state: *self.state.lock(),
             grok_path: Some(self.grok_path.clone()),
             pid: Some(self.pid),
             session_ids: self.session_ids.lock().iter().cloned().collect(),
@@ -224,9 +224,8 @@ pub fn normalize_workspace(cwd: &str) -> Result<PathBuf, AcpError> {
             path.display()
         )));
     }
-    let canon = std::fs::canonicalize(&path).map_err(|e| {
-        AcpError::Message(format!("canonicalize {}: {e}", path.display()))
-    })?;
+    let canon = std::fs::canonicalize(&path)
+        .map_err(|e| AcpError::Message(format!("canonicalize {}: {e}", path.display())))?;
     Ok(canon)
 }
 
@@ -331,9 +330,8 @@ pub async fn spawn_connection(
 
     if let Ok(path) = std::env::var("PATH") {
         let home = std::env::var("HOME").unwrap_or_default();
-        let extra = format!(
-            "{home}/.grok/bin:{home}/.local/bin:/usr/local/bin:/opt/homebrew/bin:{path}"
-        );
+        let extra =
+            format!("{home}/.grok/bin:{home}/.local/bin:/usr/local/bin:/opt/homebrew/bin:{path}");
         cmd.env("PATH", extra);
     }
     if let Ok(key) = std::env::var("XAI_API_KEY") {
@@ -359,9 +357,9 @@ pub async fn spawn_connection(
     }
     cmd.env("GROK_BUILD_WORKSPACE", workspace.to_string_lossy().as_ref());
 
-    let mut child = cmd.spawn().map_err(|e| {
-        AcpError::Message(format!("failed to spawn grok at {grok_path}: {e}"))
-    })?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| AcpError::Message(format!("failed to spawn grok at {grok_path}: {e}")))?;
 
     let pid = child.id().unwrap_or(0);
     let stdin = child
@@ -477,7 +475,9 @@ async fn reader_loop(
                 emit_error(
                     &bus,
                     &conn,
-                    crate::secrets::redact_secrets(&format!("invalid JSON from agent: {e}; line={line}")),
+                    crate::secrets::redact_secrets(&format!(
+                        "invalid JSON from agent: {e}; line={line}"
+                    )),
                 );
                 continue;
             }
@@ -509,13 +509,8 @@ async fn reader_loop(
             }
 
             // Server-initiated request: fs/terminal handled internally; permission → UI.
-            if let Err(e) = handlers::handle_server_request(
-                &bus,
-                &conn,
-                &conn.terminals,
-                parsed.clone(),
-            )
-            .await
+            if let Err(e) =
+                handlers::handle_server_request(&bus, &conn, &conn.terminals, parsed.clone()).await
             {
                 emit_error(
                     &bus,
@@ -579,7 +574,11 @@ async fn reader_loop(
     if !*conn.stopping.lock() {
         pool_slot.lock().remove(&conn.connection_id);
         let mut idx = key_index.lock();
-        if idx.get(&key_str).map(|id| id == &conn.connection_id).unwrap_or(false) {
+        if idx
+            .get(&key_str)
+            .map(|id| id == &conn.connection_id)
+            .unwrap_or(false)
+        {
             idx.remove(&key_str);
         }
     }
@@ -604,10 +603,6 @@ fn extract_session_id(params: Option<&Value>) -> Option<String> {
         .or_else(|| p.get("session_id"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .or_else(|| {
-            // Nested update payloads sometimes only carry session on outer params.
-            None
-        })
 }
 
 fn emit_error(bus: &SharedEventBus, conn: &ConnectionInner, message: String) {

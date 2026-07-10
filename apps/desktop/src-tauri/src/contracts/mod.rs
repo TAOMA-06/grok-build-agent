@@ -180,8 +180,12 @@ pub struct WorkspaceRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum InspectorSelection {
-    Tool { tool_call_id: String },
-    Terminal { terminal_id: String },
+    Tool {
+        tool_call_id: String,
+    },
+    Terminal {
+        terminal_id: String,
+    },
     Plan,
     Diff {
         #[serde(default, skip_serializing_if = "Option::is_none")]
