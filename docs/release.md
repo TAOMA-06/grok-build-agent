@@ -1,53 +1,90 @@
-# Release & signing (T15)
+# Release and signing
 
-## Bundle identity
+## Published artifacts
 
-- Product name: **Grok Build Desktop** (community)
-- Target bundle ID: `com.grokbuilddesktop.community`
-- Engine: Grok Build CLI only (no reimplemented tool loop)
+The tag workflow builds and publishes the supported v1 target:
 
-## Quality gates (required before tag)
+- macOS universal DMG and app ZIP (`arm64` + `x86_64`)
+- SPDX SBOM
 
-```bash
-cd apps/desktop && npm test && npm run build
-cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all -- --check
-cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
-grok plugin validate harness
-```
+The GitHub Release is created only after platform build jobs succeed. The desktop app does not redistribute Grok CLI; bootstrap installs it from the fixed official x.ai source.
 
-GitHub Actions: `.github/workflows/ci.yml` on PR/push; release on `v*` tags.
+## CI matrix
 
-## Local package
+Pull-request and main-branch CI runs frontend checks plus Rust formatting, Clippy and tests. macOS 12+ is the only supported v1 runtime and release platform.
 
-```bash
-./scripts/build-macos.sh
-# or
-cd apps/desktop && npm run app:build
-```
+## macOS signing and notarization
 
-## Apple codesign & notarization
-
-Community CI builds are **unsigned** unless you provide secrets:
+Public macOS artifacts require a Developer ID Application identity, hardened runtime, notarization, stapling and Gatekeeper validation. Required repository secrets:
 
 | Secret | Purpose |
-|--------|---------|
-| `APPLE_CERTIFICATE` | Base64 `.p12` |
-| `APPLE_CERTIFICATE_PASSWORD` | p12 password |
-| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: …` |
-| `APPLE_ID` | Apple ID email |
+| --- | --- |
+| `APPLE_CERTIFICATE` | Base64 `.p12` with certificate and private key |
+| `APPLE_CERTIFICATE_PASSWORD` | `.p12` export password |
+| `APPLE_SIGNING_IDENTITY` | Exact Developer ID Application identity |
+| `APPLE_ID` | Notarization Apple ID |
 | `APPLE_PASSWORD` | App-specific password |
-| `APPLE_TEAM_ID` | Team ID |
+| `APPLE_TEAM_ID` | Apple developer team ID |
 
-Configure Tauri `bundle.macOS.signingIdentity` / notarization when secrets are available. Staple after notarization before publishing the DMG.
+Local `npm run app:build` uses an ad-hoc signature for builder-machine testing and is not a distributable notarized artifact.
+It proves compilation and bundle layout only: the release-mode Host intentionally
+refuses to open its shared IPC credential without `APPLE_TEAM_ID` and matching
+signed Keychain entitlements.
 
-## SBOM / audit
+The bundle contains two signed executables: `grok-build-desktop` (UI Broker) and
+`grok-build-agent-host` (LaunchAgent sidecar). Both must contain the same
+`TEAMID.com.grokbuilddesktop.community.shared` Keychain access group. The Host
+is never copied out of the signed bundle.
 
-- Optional: `cargo audit` and CycloneDX/SPDX SBOM attachment on Release.
-- Run dependency review before public 1.0.
+## Release procedure
+
+1. Merge a green main branch.
+2. Update versions in `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/src-tauri/tauri.conf.json`.
+3. Create and push a signed-off tag such as `v0.1.0`.
+4. Verify the macOS universal build and its artifacts.
+5. Verify macOS signature, stapled ticket and Gatekeeper output before announcing the release.
+
+## Local quality gate
+
+```bash
+cd apps/desktop
+npm ci
+npm run check
+npm audit --omit=dev --audit-level=high
+
+cd src-tauri
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo audit
+```
+
+When Grok CLI is installed, also verify one real device-auth and ACP task, `grok inspect --json`, Goal controls, permission response, worktree review and safe apply.
+
+Local release helpers:
+
+```bash
+# Validate a signed/notarized app or DMG.
+./scripts/verify-macos-release.sh "/path/to/Grok Build Desktop.app"
+
+# Monitor the independent Host for the eight-hour release soak window.
+./scripts/soak-agent-host.sh 28800
+
+# Run the signed universal RC preflight and guided real-Grok/UI recovery smoke.
+./scripts/verify-v1-release-candidate.sh \
+  "/Applications/Grok Build Desktop.app" \
+  "/path/to/disposable/test-workspace"
+```
+
+The RC verifier records architecture, signing, LaunchAgent, database integrity,
+task/terminal states and process evidence. It deliberately requires an explicit
+`PASS` after the eight real UI checks; credentials and user-visible permission
+decisions must not be automated or silently accepted.
 
 ## Recovery expectations
 
-- Agent crash: pending requests fail; UI can reconnect.
-- CLI update failure: previous binary remains (install script not overwriting blindly on failure).
-- Auth expiry: Settings → Sign in with OAuth / API key Keychain.
+- Agent crashes preserve local task history, drafts, tool events and remote session ID; only the affected task needs retry.
+- `session/load` restores remote state when ACP advertises support; otherwise a fresh remote session retains the local transcript.
+- A failed apply preflight performs no writes.
+- CLI updates remain delegated to the official updater.
+- Desktop auto-update stays disabled until the project has stable signed update metadata for every platform.

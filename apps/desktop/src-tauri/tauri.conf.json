@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Grok Build Desktop",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "identifier": "com.grokbuilddesktop.community",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run prepare:sidecar && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -20,11 +20,12 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'"
     }
   },
   "bundle": {
     "active": true,
+    "externalBin": ["binaries/grok-build-agent-host"],
     "targets": ["dmg", "app"],
     "createUpdaterArtifacts": false,
     "category": "DeveloperTool",
@@ -54,8 +55,8 @@
           "height": 400
         }
       },
-      "signingIdentity": null,
-      "entitlements": null,
+      "signingIdentity": "-",
+      "entitlements": "entitlements.generated.plist",
       "exceptionDomain": null,
       "frameworks": [],
       "providerShortName": null

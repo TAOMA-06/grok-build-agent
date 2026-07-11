@@ -14,10 +14,52 @@ jobs:
     name: Pre-release quality
     uses: ./.github/workflows/ci.yml
 
-  build-macos:
-    name: Build macOS
+  signing-preflight:
+    name: Require Apple signing and notarization credentials
     needs: [quality]
     runs-on: macos-latest
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Refuse an unsigned public release
+        shell: bash
+        run: |
+          required=(
+            APPLE_CERTIFICATE
+            APPLE_CERTIFICATE_PASSWORD
+            APPLE_SIGNING_IDENTITY
+            APPLE_ID
+            APPLE_PASSWORD
+            APPLE_TEAM_ID
+          )
+          missing=()
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "Refusing to publish an unsigned or unnotarized build."
+            echo "Missing repository secrets: ${missing[*]}"
+            exit 1
+          fi
+
+  build-macos:
+    name: Build signed universal macOS release
+    needs: [signing-preflight]
+    runs-on: macos-latest
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,44 +81,76 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
 
-      - name: Install frontend deps
+      - name: Install frontend dependencies
         working-directory: apps/desktop
         run: npm ci
 
-      - name: Build app (host arch)
+      - name: Build signed and notarized universal app
         working-directory: apps/desktop
-        run: npm run app:build
-        env:
-          # Optional Apple signing — set repository secrets to enable.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run app:build:universal
 
-      - name: Collect artifacts
+      - name: Verify signing, Gatekeeper assessment, and notarization ticket
+        shell: bash
         run: |
+          set -euo pipefail
+          BUNDLE=apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
+          APP_PATH=$(find "$BUNDLE/macos" -maxdepth 1 -type d -name '*.app' -print -quit)
+          DMG_PATH=$(find "$BUNDLE/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)
+          test -n "$APP_PATH"
+          test -n "$DMG_PATH"
+          HOST_PATH="$APP_PATH/Contents/MacOS/grok-build-agent-host"
+          test -x "$HOST_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -q 'Authority=Developer ID Application'
+          lipo -archs "$HOST_PATH" | grep -q arm64
+          lipo -archs "$HOST_PATH" | grep -q x86_64
+          codesign -d --entitlements :- "$APP_PATH/Contents/MacOS/grok-build-desktop" 2>&1 | grep -q "$APPLE_TEAM_ID.com.grokbuilddesktop.community.shared"
+          codesign -d --entitlements :- "$HOST_PATH" 2>&1 | grep -q "$APPLE_TEAM_ID.com.grokbuilddesktop.community.shared"
+          xcrun stapler validate "$APP_PATH"
+          xcrun stapler validate "$DMG_PATH"
+          spctl --assess --type execute --verbose=4 "$APP_PATH"
+
+      - name: Create SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
+          format: spdx-json
+          output-file: dist/release/grok-build-desktop.sbom.spdx.json
+
+      - name: Collect release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE=apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
           mkdir -p dist/release
-          find apps/desktop/src-tauri/target/release/bundle -type f \( -name '*.dmg' -o -name '*.app' \) -print || true
-          cp -R apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg dist/release/ 2>/dev/null || true
-          APP_PATH=$(find apps/desktop/src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
-          if [[ -n "$APP_PATH" ]]; then
-            NAME=$(basename "$APP_PATH" .app)
-            ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "dist/release/${NAME}.zip"
-          fi
-          ls -lah dist/release || true
+          cp "$BUNDLE"/dmg/*.dmg dist/release/
+          APP_PATH=$(find "$BUNDLE/macos" -maxdepth 1 -type d -name '*.app' -print -quit)
+          NAME=$(basename "$APP_PATH" .app)
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "dist/release/${NAME}.zip"
+          cd dist/release
+          shasum -a 256 ./*.dmg ./*.zip ./*.spdx.json > SHA256SUMS
+          find . -maxdepth 1 -type f -print
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos-release
+          name: macos-universal-notarized-release
           path: dist/release/*
-          if-no-files-found: warn
+          if-no-files-found: error
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+
+  publish:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-release'
+          path: dist/release
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
         with:
           files: dist/release/*
           generate_release_notes: true
@@ -84,17 +158,3 @@ jobs:
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  release-notes:
-    name: Signing reminder
-    runs-on: ubuntu-latest
-    needs: [build-macos]
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - name: Notarization checklist
-        run: |
-          echo "Community builds are unsigned by default."
-          echo "For Gatekeeper-friendly distribution set Apple secrets:"
-          echo "  APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY"
-          echo "  APPLE_ID, APPLE_PASSWORD (app-specific), APPLE_TEAM_ID"
-          echo "Then enable notarization stapling in Tauri bundler config."

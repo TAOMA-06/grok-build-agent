@@ -61,6 +61,19 @@ def handle(req: dict) -> bool:
                 },
                 "agentInfo": {"name": "mock-acp-agent", "version": "0.0.1"},
                 "authMethods": [],
+                "_meta": {
+                    "modelState": {
+                        "currentModelId": "grok-build",
+                        "availableModels": [
+                            {"modelId": "grok-build", "name": "Grok Build"},
+                            {"modelId": "grok-fast", "name": "Grok Fast"},
+                        ],
+                    },
+                    "availableCommands": [
+                        {"name": "compact", "description": "Compact context", "input": None},
+                        {"name": "goal", "description": "Manage a goal", "input": {"hint": "<objective>"}},
+                    ],
+                },
             },
         )
         return True
@@ -68,7 +81,56 @@ def handle(req: dict) -> bool:
     if method == "session/new":
         _session_counter += 1
         sid = f"mock-session-{_session_counter}-{uuid.uuid4().hex[:8]}"
-        respond(req_id, {"sessionId": sid})
+        respond(req_id, {
+            "sessionId": sid,
+            "configOptions": [{
+                "id": "mode",
+                "name": "Session mode",
+                "category": "mode",
+                "type": "select",
+                "currentValue": "agent",
+                "options": [
+                    {"value": "agent", "name": "Agent"},
+                    {"value": "plan", "name": "Plan"},
+                    {"value": "goal", "name": "Goal"},
+                ],
+            }],
+        })
+        return True
+
+    if method == "session/load":
+        sid = params.get("sessionId") or ""
+        notify(
+            "session/update",
+            {
+                "sessionId": sid,
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": f"restored:{sid}"},
+                },
+            },
+        )
+        respond(req_id, {})
+        return True
+
+    if method == "session/cancel":
+        # ACP cancellation is a notification, so no response is emitted.
+        return True
+
+    if method in ("session/set_mode", "session/set_config_option"):
+        sid = params.get("sessionId") or ""
+        mode = params.get("mode") or params.get("value") or "agent"
+        notify(
+            "session/update",
+            {
+                "sessionId": sid,
+                "update": {
+                    "sessionUpdate": "current_mode_update",
+                    "currentModeId": mode,
+                },
+            },
+        )
+        respond(req_id, {"currentModeId": mode})
         return True
 
     if method == "session/prompt":

@@ -79,3 +79,29 @@ export type ReviewFeedback = {
   note?: string | null;
   includePatch: boolean;
 };
+
+export type GitFileAction = "stage" | "unstage" | "revert";
+
+export type GitCheckpoint = {
+  checkpointId: string;
+  head: string;
+  createdAt: string;
+  files: string[];
+  bytes: number;
+};
+
+export type GitMutationResult = {
+  checkpoint?: GitCheckpoint | null;
+};
+
+export type GitCheckpointRestorePreview = {
+  checkpoint: GitCheckpoint;
+  currentHead: string;
+  ready: boolean;
+  reason?: string | null;
+};
+
+export type GitCommitResult = {
+  commit: string;
+  summary: string;
+};

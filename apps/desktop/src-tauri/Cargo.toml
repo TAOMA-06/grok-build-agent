@@ -1,13 +1,22 @@
 [package]
 name = "grok-build-desktop"
-version = "0.1.0"
+version = "1.0.0"
 description = "Open-source desktop agent client for Grok Build (ACP)"
 authors = ["Grok Build Desktop Contributors"]
 edition = "2021"
+default-run = "grok-build-desktop"
 
 [lib]
 name = "grok_build_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "grok-build-desktop"
+path = "src/main.rs"
+
+[[bin]]
+name = "grok-build-agent-host"
+path = "src/bin/grok-build-agent-host.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -18,9 +27,18 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["sync", "process", "io-util", "rt-multi-thread", "macros", "time"] }
+async-trait = "0.1"
+hex = "0.4"
+schemars = { version = "0.8", features = ["uuid1"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["sync", "process", "io-util", "rt-multi-thread", "macros", "time", "net"] }
+libc = "0.2"
 uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "2"
 parking_lot = "0.12"
-keyring = "3"
+keyring = { version = "3", features = ["apple-native"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { version = "3.6", features = ["OSX_10_15"] }
+security-framework-sys = "2.16"

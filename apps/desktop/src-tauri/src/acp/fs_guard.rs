@@ -1,6 +1,7 @@
 //! Workspace-bounded path resolution with symlink escape checks.
 
 use super::AcpError;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 /// Resolve `requested` against `workspace_root`, rejecting:
@@ -117,13 +118,65 @@ pub fn read_text_file(
 }
 
 pub fn write_text_file(workspace_root: &Path, path: &str, content: &str) -> Result<(), AcpError> {
-    let resolved = resolve_in_workspace(workspace_root, path)?;
-    if let Some(parent) = resolved.parent() {
+    let initial = resolve_in_workspace(workspace_root, path)?;
+    if let Some(parent) = initial.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| AcpError::Message(format!("mkdir {}: {e}", parent.display())))?;
     }
-    std::fs::write(&resolved, content)
-        .map_err(|e| AcpError::Message(format!("write {}: {e}", resolved.display())))?;
+    let resolved = resolve_in_workspace(workspace_root, path)?;
+    #[cfg(unix)]
+    if resolved.exists() {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = std::fs::symlink_metadata(&resolved)?;
+        if metadata.nlink() > 1 {
+            return Err(AcpError::Message(
+                "refusing to replace a file with multiple hard links".into(),
+            ));
+        }
+    }
+    let parent = resolved
+        .parent()
+        .ok_or_else(|| AcpError::Message("write target has no parent".into()))?;
+    let canonical_parent = std::fs::canonicalize(parent)
+        .map_err(|error| AcpError::Message(format!("resolve write parent: {error}")))?;
+    let canonical_root = std::fs::canonicalize(workspace_root)
+        .map_err(|error| AcpError::Message(format!("resolve workspace: {error}")))?;
+    if !path_is_under(&canonical_parent, &canonical_root) {
+        return Err(AcpError::Message("write parent escaped workspace".into()));
+    }
+    let target_name = resolved
+        .file_name()
+        .ok_or_else(|| AcpError::Message("write target has no filename".into()))?;
+    let target = canonical_parent.join(target_name);
+    let temporary = canonical_parent.join(format!(".grok-build-write-{}", uuid::Uuid::new_v4()));
+    let result = (|| -> Result<(), AcpError> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| AcpError::Message(format!("create temporary file: {error}")))?;
+        file.write_all(content.as_bytes())
+            .map_err(|error| AcpError::Message(format!("write temporary file: {error}")))?;
+        file.sync_all()
+            .map_err(|error| AcpError::Message(format!("sync temporary file: {error}")))?;
+        let parent_after = std::fs::canonicalize(parent)
+            .map_err(|error| AcpError::Message(format!("recheck write parent: {error}")))?;
+        if parent_after != canonical_parent {
+            return Err(AcpError::Message(
+                "write parent changed during operation".into(),
+            ));
+        }
+        std::fs::rename(&temporary, &target)
+            .map_err(|error| AcpError::Message(format!("replace target atomically: {error}")))?;
+        std::fs::File::open(&canonical_parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| AcpError::Message(format!("sync write directory: {error}")))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result?;
     Ok(())
 }
 
@@ -193,5 +246,17 @@ mod tests {
         let ws = temp_ws("rw");
         write_text_file(&ws, "n/e/w.txt", "data").unwrap();
         assert_eq!(read_text_file(&ws, "n/e/w.txt", None).unwrap(), "data");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_hard_link_write_target() {
+        let ws = temp_ws("hardlink");
+        let original = ws.join("original.txt");
+        fs::write(&original, "protected").unwrap();
+        fs::hard_link(&original, ws.join("alias.txt")).unwrap();
+        let error = write_text_file(&ws, "alias.txt", "changed").unwrap_err();
+        assert!(error.to_string().contains("hard links"));
+        assert_eq!(fs::read_to_string(original).unwrap(), "protected");
     }
 }

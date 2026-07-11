@@ -48,25 +48,71 @@ impl RuntimePool {
 
     pub fn status(&self) -> AgentStatus {
         match self.active_connection() {
-            Some(c) => AgentStatus {
-                running: matches!(
-                    *c.state.lock(),
-                    ConnectionState::Ready
-                        | ConnectionState::Initializing
-                        | ConnectionState::Authenticating
-                        | ConnectionState::Starting
-                        | ConnectionState::Reconnecting
-                ),
-                connection_id: Some(c.connection_id.clone()),
-                session_id: c.active_session_id.lock().clone(),
-                cwd: Some(c.cwd.to_string_lossy().into()),
-                grok_path: Some(c.grok_path.clone()),
-                last_error: c
-                    .last_error
-                    .lock()
-                    .clone()
-                    .or_else(|| self.last_error.lock().clone()),
-            },
+            Some(c) => {
+                let caps = c.capabilities.lock().clone();
+                let current = caps
+                    .as_ref()
+                    .and_then(|cap| cap.current_model_id.clone())
+                    .or_else(|| c.key.model_id.clone());
+                let active_session_id = c.active_session_id.lock().clone();
+                let mode = active_session_id
+                    .as_deref()
+                    .map(|session_id| c.session_mode_state(session_id));
+                let available_commands = caps
+                    .as_ref()
+                    .map(|cap| cap.available_commands.clone())
+                    .unwrap_or_default();
+                let available = caps
+                    .as_ref()
+                    .map(|cap| {
+                        cap.models
+                            .iter()
+                            .map(|id| crate::contracts::SelectableModel {
+                                id: id.clone(),
+                                name: id.clone(),
+                                description: None,
+                                is_default: current.as_deref() == Some(id.as_str()),
+                                tags: vec![],
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let live_switch_supported = caps
+                    .as_ref()
+                    .map(|cap| !cap.models.is_empty())
+                    .unwrap_or(false);
+                AgentStatus {
+                    running: matches!(
+                        *c.state.lock(),
+                        ConnectionState::Ready
+                            | ConnectionState::Initializing
+                            | ConnectionState::Authenticating
+                            | ConnectionState::Starting
+                            | ConnectionState::Reconnecting
+                    ),
+                    connection_id: Some(c.connection_id.clone()),
+                    session_id: c.active_session_id.lock().clone(),
+                    cwd: Some(c.cwd.to_string_lossy().into()),
+                    grok_path: Some(c.grok_path.clone()),
+                    last_error: c
+                        .last_error
+                        .lock()
+                        .clone()
+                        .or_else(|| self.last_error.lock().clone()),
+                    model: Some(crate::contracts::SessionModelState {
+                        current_model_id: current,
+                        available_models: available,
+                        live_switch_supported,
+                        source: if live_switch_supported {
+                            "acp".into()
+                        } else {
+                            "configured".into()
+                        },
+                    }),
+                    mode,
+                    available_commands,
+                }
+            }
             None => AgentStatus {
                 running: false,
                 connection_id: None,
@@ -74,6 +120,9 @@ impl RuntimePool {
                 cwd: None,
                 grok_path: None,
                 last_error: self.last_error.lock().clone(),
+                model: None,
+                mode: None,
+                available_commands: vec![],
             },
         }
     }
@@ -125,17 +174,16 @@ impl RuntimePool {
             self.spawn_new(bus.clone(), config.clone()).await?
         };
 
-        // Initialize handshake if still starting/initializing without sessions.
+        // Initialize a new child once. Every subsequent `start` explicitly
+        // creates or restores the requested session; never silently reuse an
+        // arbitrary active session from the same workspace.
         if conn.session_ids.lock().is_empty() {
             self.initialize_and_open_session(&conn, &config).await?;
-        } else if conn.active_session_id.lock().is_none() {
-            // Reuse first session or create new.
-            let first = conn.session_ids.lock().iter().next().cloned();
-            if let Some(s) = first {
-                *conn.active_session_id.lock() = Some(s);
-            } else {
-                self.open_session(&conn, &config).await?;
-            }
+        } else if let Some(session_id) = config.resume_session_id.as_deref() {
+            self.restore_or_open_session(&conn, session_id, &config)
+                .await?;
+        } else {
+            self.open_session(&conn, &config).await?;
         }
 
         *self.active_connection_id.lock() = Some(conn.connection_id.clone());
@@ -212,7 +260,34 @@ impl RuntimePool {
         }
 
         *conn.state.lock() = ConnectionState::Ready;
-        self.open_session(conn, config).await
+        if let Some(session_id) = config.resume_session_id.as_deref() {
+            self.restore_or_open_session(conn, session_id, config).await
+        } else {
+            self.open_session(conn, config).await
+        }
+    }
+
+    /// Resume persisted ACP sessions when the agent advertises support. Some
+    /// compatible agents only implement `session/new`; in that case retain the
+    /// local transcript and attach it to a fresh remote session instead of
+    /// making a saved row impossible to open.
+    async fn restore_or_open_session(
+        &self,
+        conn: &Arc<ConnectionInner>,
+        session_id: &str,
+        config: &StartConfig,
+    ) -> Result<(), AcpError> {
+        let can_load = conn
+            .capabilities
+            .lock()
+            .as_ref()
+            .map(|caps| caps.load_session)
+            .unwrap_or(false);
+        if can_load {
+            self.load_session_on(conn, session_id).await
+        } else {
+            self.open_session(conn, config).await
+        }
     }
 
     async fn open_session(
@@ -302,8 +377,47 @@ impl RuntimePool {
                 AcpError::Message(format!("session/new missing sessionId: {session}"))
             })?;
 
+        update_session_capabilities(conn, &session_id, &session);
         conn.session_ids.lock().insert(session_id.clone());
         Ok(session_id)
+    }
+
+    async fn load_session_on(
+        &self,
+        conn: &Arc<ConnectionInner>,
+        session_id: &str,
+    ) -> Result<(), AcpError> {
+        let supports_load = conn
+            .capabilities
+            .lock()
+            .as_ref()
+            .map(|caps| caps.load_session)
+            .unwrap_or(false);
+        if !supports_load {
+            return Err(AcpError::Message(
+                "this Grok CLI does not advertise ACP session/load".into(),
+            ));
+        }
+        let session_id = session_id.trim();
+        if session_id.is_empty() {
+            return Err(AcpError::Message("session id is empty".into()));
+        }
+        let response = conn
+            .request(
+                "session/load",
+                json!({
+                    "sessionId": session_id,
+                    "cwd": conn.cwd,
+                    "mcpServers": [],
+                }),
+                Duration::from_secs(60),
+            )
+            .await
+            .map_err(|e| AcpError::Message(format!("session/load failed: {e}")))?;
+        update_session_capabilities(conn, session_id, &response);
+        conn.session_ids.lock().insert(session_id.to_string());
+        *conn.active_session_id.lock() = Some(session_id.to_string());
+        Ok(())
     }
 
     pub async fn prompt(&self, text: &str) -> Result<Value, AcpError> {
@@ -323,21 +437,212 @@ impl RuntimePool {
         session_id: &str,
         text: &str,
     ) -> Result<Value, AcpError> {
+        self.prompt_session_content(
+            connection_id,
+            session_id,
+            crate::contracts::PromptContent::text_only(text),
+        )
+        .await
+    }
+
+    pub async fn prompt_session_content(
+        &self,
+        connection_id: &str,
+        session_id: &str,
+        content: Vec<crate::contracts::PromptContent>,
+    ) -> Result<Value, AcpError> {
         let conn = self.get_connection(connection_id)?;
         if !conn.session_ids.lock().contains(session_id) {
             return Err(AcpError::Message(format!(
                 "session {session_id} not found on connection {connection_id}"
             )));
         }
+        let prompt: Vec<Value> = content.iter().map(|c| c.to_acp_value()).collect();
         conn.request(
             "session/prompt",
             json!({
                 "sessionId": session_id,
-                "prompt": [{ "type": "text", "text": text }]
+                "prompt": prompt
             }),
             DEFAULT_TIMEOUT,
         )
         .await
+    }
+
+    /// Try ACP live model switch; returns Ok(true) when the agent accepted.
+    pub async fn set_session_model(
+        &self,
+        connection_id: &str,
+        session_id: &str,
+        model_id: &str,
+    ) -> Result<crate::contracts::SessionModelState, AcpError> {
+        let conn = self.get_connection(connection_id)?;
+        if !conn.session_ids.lock().contains(session_id) {
+            return Err(AcpError::Message(format!(
+                "session {session_id} not found on connection {connection_id}"
+            )));
+        }
+        let model_id = model_id.trim();
+        if model_id.is_empty() {
+            return Err(AcpError::Message("model id empty".into()));
+        }
+
+        let mut live_ok = false;
+        // Prefer session/set_model; fall back to session/set_config_option.
+        for (method, params) in [
+            (
+                "session/set_model",
+                json!({ "sessionId": session_id, "modelId": model_id }),
+            ),
+            (
+                "session/set_config_option",
+                json!({
+                    "sessionId": session_id,
+                    "configId": "model",
+                    "value": model_id
+                }),
+            ),
+        ] {
+            match conn.request(method, params, Duration::from_secs(15)).await {
+                Ok(_) => {
+                    live_ok = true;
+                    break;
+                }
+                Err(_) => continue,
+            }
+        }
+
+        let caps = conn.capabilities.lock().clone();
+        let available = caps
+            .as_ref()
+            .map(|c| {
+                c.models
+                    .iter()
+                    .map(|id| crate::contracts::SelectableModel {
+                        id: id.clone(),
+                        name: id.clone(),
+                        description: None,
+                        is_default: id == model_id,
+                        tags: vec![],
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        Ok(crate::contracts::SessionModelState {
+            current_model_id: Some(model_id.to_string()),
+            available_models: available,
+            live_switch_supported: live_ok,
+            source: if live_ok {
+                "acp".into()
+            } else {
+                "configured".into()
+            },
+        })
+    }
+
+    pub async fn set_session_mode(
+        &self,
+        connection_id: &str,
+        session_id: &str,
+        requested_mode: &str,
+    ) -> Result<crate::contracts::ModeSwitchResult, AcpError> {
+        use crate::contracts::ModeSwitchResult;
+        let conn = self.get_connection(connection_id)?;
+        if !conn.session_ids.lock().contains(session_id) {
+            return Err(AcpError::Message(format!(
+                "session {session_id} not found on connection {connection_id}"
+            )));
+        }
+        let requested_mode = requested_mode.trim().to_lowercase();
+        if !matches!(requested_mode.as_str(), "agent" | "plan" | "goal") {
+            return Ok(ModeSwitchResult::Unsupported {
+                reason: format!("Unknown task mode: {requested_mode}"),
+            });
+        }
+        let current = conn.session_mode_state(session_id);
+        if current.current_mode == requested_mode {
+            return Ok(ModeSwitchResult::Switched { state: current });
+        }
+
+        let candidates: &[&str] = match requested_mode.as_str() {
+            "agent" => &["agent", "code", "default"],
+            "plan" => &["plan", "architect"],
+            "goal" => &["goal"],
+            _ => &[],
+        };
+        let remote_value = current
+            .available_modes
+            .iter()
+            .find(|mode| {
+                candidates
+                    .iter()
+                    .any(|candidate| mode.id.eq_ignore_ascii_case(candidate))
+            })
+            .map(|mode| mode.id.clone());
+
+        if let Some(value) = remote_value {
+            let config_id = conn.session_mode_config_ids.lock().get(session_id).cloned();
+            let (method, params) = if let Some(config_id) = config_id {
+                (
+                    "session/set_config_option",
+                    json!({ "sessionId": session_id, "configId": config_id, "value": value }),
+                )
+            } else {
+                (
+                    "session/set_mode",
+                    json!({ "sessionId": session_id, "mode": value }),
+                )
+            };
+            match conn.request(method, params, Duration::from_secs(15)).await {
+                Ok(response) => {
+                    update_session_capabilities(&conn, session_id, &response);
+                    let mut state = conn.session_mode_state(session_id);
+                    state.current_mode = requested_mode;
+                    state.live_switch_supported = true;
+                    state.source = "acp_config".into();
+                    conn.record_session_mode(session_id, state.clone());
+                    return Ok(ModeSwitchResult::Switched { state });
+                }
+                Err(error) => {
+                    return Ok(ModeSwitchResult::Unsupported {
+                        reason: format!("Grok rejected the live mode switch: {error}"),
+                    });
+                }
+            }
+        }
+
+        let command = match requested_mode.as_str() {
+            "plan" => "/plan".to_string(),
+            "goal" => "/goal".to_string(),
+            "agent" if current.current_mode == "goal" => "/goal clear".to_string(),
+            "agent" => "Exit plan mode and return to normal Agent mode. Do not make changes until I send the next instruction.".to_string(),
+            _ => String::new(),
+        };
+        Ok(ModeSwitchResult::CommandRequired {
+            command,
+            reason: "This Grok ACP session does not advertise a live mode selector.".into(),
+        })
+    }
+
+    pub fn confirm_session_mode(
+        &self,
+        connection_id: &str,
+        session_id: &str,
+        mode: &str,
+    ) -> Result<crate::contracts::SessionModeState, AcpError> {
+        let conn = self.get_connection(connection_id)?;
+        if !conn.session_ids.lock().contains(session_id) {
+            return Err(AcpError::Message(format!(
+                "session {session_id} not found on connection {connection_id}"
+            )));
+        }
+        let mut state = conn.session_mode_state(session_id);
+        state.current_mode = mode.to_string();
+        state.source = "acp_command".into();
+        state.live_switch_supported = false;
+        conn.record_session_mode(session_id, state.clone());
+        Ok(state)
     }
 
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, AcpError> {
@@ -375,6 +680,17 @@ impl RuntimePool {
     ) -> Result<(), AcpError> {
         let conn = self.get_connection(connection_id)?;
         conn.respond_to_request(id, result, error).await
+    }
+
+    pub fn cancel_session(&self, connection_id: &str, session_id: &str) -> Result<(), AcpError> {
+        let conn = self.get_connection(connection_id)?;
+        if !conn.session_ids.lock().contains(session_id) {
+            return Err(AcpError::Message(format!(
+                "session {session_id} not found on connection {connection_id}"
+            )));
+        }
+        conn.terminals.cancel_task(session_id);
+        conn.notify("session/cancel", json!({ "sessionId": session_id }))
     }
 
     pub async fn stop(&self) -> Result<(), AcpError> {
@@ -439,6 +755,63 @@ impl RuntimePool {
     }
 }
 
+fn parse_available_commands(value: &Value) -> Vec<crate::contracts::AvailableCommand> {
+    value
+        .as_array()
+        .map(|commands| {
+            commands
+                .iter()
+                .filter_map(|command| {
+                    let name = command.get("name")?.as_str()?.trim();
+                    if name.is_empty() {
+                        return None;
+                    }
+                    Some(crate::contracts::AvailableCommand {
+                        name: name.to_string(),
+                        description: command
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        input: command
+                            .get("input")
+                            .cloned()
+                            .filter(|input| !input.is_null()),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_selectable_modes(value: &Value) -> Vec<crate::contracts::SelectableMode> {
+    value
+        .as_array()
+        .map(|modes| {
+            modes
+                .iter()
+                .filter_map(|mode| {
+                    let id = mode
+                        .get("id")
+                        .or_else(|| mode.get("value"))
+                        .and_then(Value::as_str)?;
+                    Some(crate::contracts::SelectableMode {
+                        id: id.to_string(),
+                        name: mode
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or(id)
+                            .to_string(),
+                        description: mode
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn parse_capabilities(init: &Value) -> crate::contracts::AgentCapabilitySnapshot {
     use crate::contracts::{AgentCapabilitySnapshot, AuthMethodSummary};
     let agent_caps = init
@@ -467,7 +840,7 @@ fn parse_capabilities(init: &Value) -> crate::contracts::AgentCapabilitySnapshot
                 .collect()
         })
         .unwrap_or_default();
-    let models = init
+    let mut models = init
         .pointer("/agentCapabilities/models")
         .and_then(|v| v.as_array())
         .map(|arr| {
@@ -476,6 +849,33 @@ fn parse_capabilities(init: &Value) -> crate::contracts::AgentCapabilitySnapshot
                 .collect()
         })
         .unwrap_or_default();
+    let model_state = init.pointer("/_meta/modelState").unwrap_or(&Value::Null);
+    let current_model_id = model_state
+        .get("currentModelId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if let Some(available) = model_state.get("availableModels").and_then(Value::as_array) {
+        models = available
+            .iter()
+            .filter_map(|model| {
+                model
+                    .get("modelId")
+                    .or_else(|| model.get("id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect();
+    }
+    let available_commands = parse_available_commands(
+        init.pointer("/_meta/availableCommands")
+            .or_else(|| init.get("availableCommands"))
+            .unwrap_or(&Value::Null),
+    );
+    let available_modes = parse_selectable_modes(
+        init.get("availableModes")
+            .or_else(|| init.pointer("/_meta/availableModes"))
+            .unwrap_or(&Value::Null),
+    );
     AgentCapabilitySnapshot {
         protocol_version: init.get("protocolVersion").cloned(),
         agent_name: init
@@ -498,6 +898,87 @@ fn parse_capabilities(init: &Value) -> crate::contracts::AgentCapabilitySnapshot
         terminal: true,
         auth_methods,
         models,
+        current_model_id,
+        available_commands,
+        available_modes,
+    }
+}
+
+fn update_session_capabilities(conn: &Arc<ConnectionInner>, session_id: &str, response: &Value) {
+    if let Some(commands) = response
+        .get("availableCommands")
+        .or_else(|| response.pointer("/_meta/availableCommands"))
+    {
+        let commands = parse_available_commands(commands);
+        if !commands.is_empty() {
+            if let Some(capabilities) = conn.capabilities.lock().as_mut() {
+                capabilities.available_commands = commands;
+            }
+        }
+    }
+
+    let config_options = response
+        .get("configOptions")
+        .or_else(|| response.pointer("/_meta/configOptions"))
+        .and_then(Value::as_array);
+    if let Some(config) = config_options.and_then(|options| {
+        options.iter().find(|option| {
+            option.get("category").and_then(Value::as_str) == Some("mode")
+                || option
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(|id| id.eq_ignore_ascii_case("mode"))
+                    .unwrap_or(false)
+        })
+    }) {
+        let config_id = config
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("mode")
+            .to_string();
+        let available_modes = parse_selectable_modes(config.get("options").unwrap_or(&Value::Null));
+        let current_mode = config
+            .get("currentValue")
+            .and_then(Value::as_str)
+            .unwrap_or("agent")
+            .to_string();
+        conn.session_mode_config_ids
+            .lock()
+            .insert(session_id.to_string(), config_id);
+        conn.record_session_mode(
+            session_id,
+            crate::contracts::SessionModeState {
+                current_mode,
+                available_modes,
+                live_switch_supported: true,
+                source: "acp_config".into(),
+            },
+        );
+        return;
+    }
+
+    let available_modes = parse_selectable_modes(
+        response
+            .get("availableModes")
+            .or_else(|| response.pointer("/_meta/availableModes"))
+            .unwrap_or(&Value::Null),
+    );
+    if !available_modes.is_empty() {
+        let current_mode = response
+            .get("currentModeId")
+            .or_else(|| response.get("currentMode"))
+            .and_then(Value::as_str)
+            .unwrap_or("agent")
+            .to_string();
+        conn.record_session_mode(
+            session_id,
+            crate::contracts::SessionModeState {
+                current_mode,
+                available_modes,
+                live_switch_supported: true,
+                source: "acp_config".into(),
+            },
+        );
     }
 }
 
@@ -567,5 +1048,48 @@ impl Drop for RuntimePool {
         }
         self.connections.lock().clear();
         self.key_index.lock().clear();
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    #[test]
+    fn parses_grok_0293_meta_models_and_commands() {
+        let value = json!({
+            "protocolVersion": 1,
+            "agentCapabilities": { "loadSession": true },
+            "authMethods": [],
+            "_meta": {
+                "modelState": {
+                    "currentModelId": "grok-4.5",
+                    "availableModels": [
+                        { "modelId": "grok-4.5", "name": "Grok 4.5" },
+                        { "modelId": "grok-build", "name": "Grok Build" }
+                    ]
+                },
+                "availableCommands": [
+                    { "name": "compact", "description": "Compact history" },
+                    { "name": "goal", "input": { "hint": "<objective>" } }
+                ]
+            }
+        });
+        let parsed = parse_capabilities(&value);
+        assert_eq!(parsed.current_model_id.as_deref(), Some("grok-4.5"));
+        assert_eq!(parsed.models, vec!["grok-4.5", "grok-build"]);
+        assert_eq!(parsed.available_commands.len(), 2);
+        assert_eq!(parsed.available_commands[1].name, "goal");
+    }
+
+    #[test]
+    fn parses_mode_values_from_config_options() {
+        let modes = parse_selectable_modes(&json!([
+            { "value": "agent", "name": "Agent" },
+            { "value": "plan", "name": "Plan" },
+            { "value": "goal", "name": "Goal" }
+        ]));
+        assert_eq!(modes.len(), 3);
+        assert_eq!(modes[1].id, "plan");
     }
 }

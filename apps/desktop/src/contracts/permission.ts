@@ -7,6 +7,7 @@
 import type { JsonRpcId, ServerRequest } from "./events";
 import type { ConnectionId } from "./runtime";
 import type { SessionId } from "./session";
+import type { ActionRequest } from "./platform";
 
 /** ACP PermissionOptionKind values. */
 export type PermissionOptionKind =
@@ -48,6 +49,15 @@ export type PermissionDecision = {
   optionId: string;
   /** Optional free-form feedback from the user. */
   feedback?: string | null;
+};
+
+export type StoredPolicyRule = {
+  ruleId: string;
+  workspaceId: string;
+  sessionId?: string | null;
+  scope: "session" | "project";
+  action: ActionRequest;
+  createdAt: string;
 };
 
 /** Methods that must never be shown as permission modals. */

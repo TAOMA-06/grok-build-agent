@@ -7,11 +7,12 @@ mod events;
 mod fs_guard;
 mod handlers;
 mod pool;
-mod terminal_host;
+pub(crate) mod terminal_host;
 
 pub use connection::{iso_now, resolve_grok_path};
 #[cfg(test)]
-pub use events::{NoopEventBus, SharedEventBus};
+pub use events::NoopEventBus;
+pub use events::{EventBus, SharedEventBus};
 pub use pool::RuntimePool;
 
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,8 @@ impl Serialize for AcpError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartConfig {
+    #[serde(default)]
+    pub task_id: Option<String>,
     /// Path to the `grok` binary. Empty = search PATH.
     pub grok_path: Option<String>,
     pub model: Option<String>,
@@ -62,6 +65,9 @@ pub struct StartConfig {
     pub sandbox: Option<SandboxMode>,
     #[serde(default)]
     pub power_profile: Option<PowerProfile>,
+    /// Existing Grok session to restore instead of creating a new one.
+    #[serde(default)]
+    pub resume_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +80,12 @@ pub struct AgentStatus {
     pub cwd: Option<String>,
     pub grok_path: Option<String>,
     pub last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<crate::contracts::SessionModelState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<crate::contracts::SessionModeState>,
+    #[serde(default)]
+    pub available_commands: Vec<crate::contracts::AvailableCommand>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +171,7 @@ mod tests {
 
     fn start_cfg(cwd: &std::path::Path, mock: &std::path::Path) -> StartConfig {
         StartConfig {
+            task_id: Some("test-task".into()),
             grok_path: Some(mock.to_string_lossy().into()),
             model: None,
             always_approve: false,
@@ -168,6 +181,7 @@ mod tests {
             use_harness: false,
             sandbox: Some(SandboxMode::None),
             power_profile: None,
+            resume_session_id: None,
         }
     }
 

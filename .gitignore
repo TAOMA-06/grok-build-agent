@@ -34,3 +34,4 @@ apps/desktop/src-tauri/WixTools/
 # Misc
 *.local
 .cache/
+.codegraph/

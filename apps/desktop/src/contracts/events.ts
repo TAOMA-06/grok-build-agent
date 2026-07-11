@@ -58,6 +58,9 @@ export type ServerRequest = {
   id: JsonRpcId;
   method: string;
   params?: unknown;
+  /** Routing metadata added by the desktop host; never sent back to Grok. */
+  connectionId?: string;
+  sessionId?: string | null;
 };
 
 export function createEventEnvelope<T>(

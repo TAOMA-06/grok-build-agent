@@ -1,16 +1,28 @@
 import { create } from "zustand";
-import { defaultSettings } from "./contracts";
+import {
+  defaultSettings,
+  emptyComposerDraft,
+  defaultModeState,
+  emptySessionModelState,
+} from "./contracts";
 import type {
   AgentStatus,
+  AvailableCommand,
   ChatBlock,
+  ComposerAttachment,
+  ComposerDraft,
+  FailedSubmission,
   InspectorSelection,
   ReviewSnapshot,
   RightPanel,
   RuntimeHealth,
   ServerRequest,
+  SessionModelState,
+  SessionModeState,
   SessionSummary,
   Settings,
   ToolCall,
+  WorkbenchSurface,
   WorkspaceRecord,
 } from "./types";
 import type { WorktreeSummary } from "./api/catalog";
@@ -28,41 +40,28 @@ export type SessionRuntime = {
   inspector: InspectorSelection | null;
   streamAssistantId: string | null;
   streamThoughtId: string | null;
+  /** Per-session model snapshot (overrides settings default when set). */
+  modelState: SessionModelState | null;
+  modeState: SessionModeState;
+  availableCommands: AvailableCommand[];
+  attachments: ComposerAttachment[];
+  failedSubmission: FailedSubmission | null;
 };
 
-type AppState = {
+// --- Slice shapes (settings / sessions / composer / runtime / admin UI) ---
+
+type SettingsSlice = {
   settings: Settings;
   settingsLoaded: boolean;
-  status: AgentStatus;
-  health: RuntimeHealth | null;
-  stderr: string[];
-  pendingPermission: ServerRequest | null;
-  permissionOptions: { optionId: string; name: string; kind?: string }[];
-  rightPanel: RightPanel;
-  workspaces: WorkspaceRecord[];
-  sessions: Record<string, SessionRuntime>;
-  sessionOrder: string[];
-  activeSessionId: string | null;
-  review: ReviewSnapshot | null;
-  worktrees: WorktreeSummary[];
-  patchPreview: { path: string; text: string } | null;
-
   setSettings: (s: Partial<Settings>) => void;
   replaceSettings: (s: Settings) => void;
   setSettingsLoaded: (v: boolean) => void;
-  setStatus: (s: AgentStatus) => void;
-  setHealth: (h: RuntimeHealth | null) => void;
-  setRightPanel: (p: RightPanel) => void;
-  pushStderr: (line: string) => void;
-  setPermission: (
-    req: ServerRequest | null,
-    options?: { optionId: string; name: string; kind?: string }[],
-  ) => void;
-  setWorkspaces: (w: WorkspaceRecord[]) => void;
-  setReview: (r: ReviewSnapshot | null) => void;
-  setWorktrees: (w: WorktreeSummary[]) => void;
-  setPatchPreview: (p: { path: string; text: string } | null) => void;
+};
 
+type SessionSlice = {
+  sessions: Record<string, SessionRuntime>;
+  sessionOrder: string[];
+  activeSessionId: string | null;
   ensureSession: (summary: SessionSummary) => void;
   setActiveSession: (id: string | null) => void;
   updateSummary: (id: string, patch: Partial<SessionSummary>) => void;
@@ -70,18 +69,88 @@ type AppState = {
   setSessionScroll: (id: string, scrollTop: number) => void;
   setSessionBusy: (id: string, busy: boolean) => void;
   setInspector: (id: string, sel: InspectorSelection | null) => void;
+  setSessionAttachments: (id: string, attachments: ComposerAttachment[]) => void;
+  setSessionModelState: (id: string, state: SessionModelState | null) => void;
+  setSessionModeState: (id: string, state: SessionModeState) => void;
+  setSessionCommands: (id: string, commands: AvailableCommand[]) => void;
   addBlock: (sessionId: string, b: ChatBlock) => void;
+  updateBlock: (sessionId: string, blockId: string, patch: Partial<ChatBlock>) => void;
+  setFailedSubmission: (id: string, failed: FailedSubmission | null) => void;
   appendAssistant: (sessionId: string, text: string) => void;
   appendThought: (sessionId: string, text: string) => void;
   upsertTool: (sessionId: string, tool: ToolCall) => void;
   setPlan: (sessionId: string, text: string) => void;
   clearChat: (sessionId: string) => void;
   removeSession: (sessionId: string) => void;
-
-  /** Active session helpers for ACP client (legacy single-stream mapping). */
   activeBlocks: () => ChatBlock[];
   activeBusy: () => boolean;
 };
+
+type ComposerSlice = {
+  /**
+   * Provisional draft when there is no active session.
+   * Migrated into SessionRuntime on first send / session create.
+   */
+  provisionalDraft: ComposerDraft;
+  setProvisionalDraft: (patch: Partial<ComposerDraft>) => void;
+  replaceProvisionalDraft: (draft: ComposerDraft) => void;
+  clearProvisionalDraft: () => void;
+  /**
+   * Effective composer text for the current context
+   * (active session draft or provisional).
+   */
+  effectiveDraftText: () => string;
+  setEffectiveDraftText: (text: string) => void;
+  effectiveAttachments: () => ComposerAttachment[];
+  setEffectiveAttachments: (attachments: ComposerAttachment[]) => void;
+  effectiveModelId: () => string | null;
+  setEffectiveModelId: (modelId: string | null) => void;
+  effectiveMode: () => import("./types").TaskMode;
+  setEffectiveMode: (mode: import("./types").TaskMode) => void;
+};
+
+type RuntimeSlice = {
+  status: AgentStatus;
+  health: RuntimeHealth | null;
+  stderr: string[];
+  pendingPermission: ServerRequest | null;
+  pendingPlanApproval: ServerRequest | null;
+  permissionOptions: { optionId: string; name: string; kind?: string }[];
+  globalModelState: SessionModelState;
+  /** MCP/config changed; agent should be reloaded when idle. */
+  agentReloadRequired: boolean;
+  setStatus: (s: AgentStatus) => void;
+  setHealth: (h: RuntimeHealth | null) => void;
+  pushStderr: (line: string) => void;
+  setPermission: (
+    req: ServerRequest | null,
+    options?: { optionId: string; name: string; kind?: string }[],
+  ) => void;
+  setPlanApproval: (req: ServerRequest | null) => void;
+  setGlobalModelState: (s: SessionModelState) => void;
+  setAgentReloadRequired: (v: boolean) => void;
+};
+
+type AdminUiSlice = {
+  rightPanel: RightPanel;
+  surface: WorkbenchSurface;
+  workspaces: WorkspaceRecord[];
+  review: ReviewSnapshot | null;
+  worktrees: WorktreeSummary[];
+  patchPreview: { path: string; text: string } | null;
+  setRightPanel: (p: RightPanel) => void;
+  setSurface: (s: WorkbenchSurface) => void;
+  setWorkspaces: (w: WorkspaceRecord[]) => void;
+  setReview: (r: ReviewSnapshot | null) => void;
+  setWorktrees: (w: WorktreeSummary[]) => void;
+  setPatchPreview: (p: { path: string; text: string } | null) => void;
+};
+
+type AppState = SettingsSlice &
+  SessionSlice &
+  ComposerSlice &
+  RuntimeSlice &
+  AdminUiSlice;
 
 function emptyRuntime(summary: SessionSummary): SessionRuntime {
   return {
@@ -95,34 +164,48 @@ function emptyRuntime(summary: SessionSummary): SessionRuntime {
     inspector: null,
     streamAssistantId: null,
     streamThoughtId: null,
+    modelState: summary.model
+      ? {
+          currentModelId: summary.model,
+          availableModels: [],
+          liveSwitchSupported: false,
+          source: "configured",
+        }
+      : null,
+    modeState: defaultModeState(summary.mode ?? "agent"),
+    availableCommands: [],
+    attachments: [],
+    failedSubmission: null,
   };
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
+  // --- settings ---
   settings: defaultSettings(),
   settingsLoaded: false,
-  status: { running: false },
-  health: null,
-  stderr: [],
-  pendingPermission: null,
-  permissionOptions: [],
-  rightPanel: "health",
-  workspaces: [],
-  sessions: {},
-  sessionOrder: [],
-  activeSessionId: null,
-  review: null,
-  worktrees: [],
-  patchPreview: null,
-
   setSettings: (partial) => {
     set({ settings: { ...get().settings, ...partial } });
   },
   replaceSettings: (settings) => set({ settings }),
   setSettingsLoaded: (settingsLoaded) => set({ settingsLoaded }),
-  setStatus: (status) => set({ status }),
+
+  // --- runtime ---
+  status: { running: false },
+  health: null,
+  stderr: [],
+  pendingPermission: null,
+  pendingPlanApproval: null,
+  permissionOptions: [],
+  globalModelState: emptySessionModelState(),
+  agentReloadRequired: false,
+  setStatus: (status) => {
+    const patch: Partial<AppState> = { status };
+    if (status.model) {
+      patch.globalModelState = status.model;
+    }
+    set(patch);
+  },
   setHealth: (health) => set({ health }),
-  setRightPanel: (rightPanel) => set({ rightPanel }),
   pushStderr: (line) => {
     set({ stderr: [...get().stderr, line].slice(-300) });
   },
@@ -131,10 +214,120 @@ export const useAppStore = create<AppState>((set, get) => ({
       pendingPermission,
       permissionOptions: pendingPermission ? (options ?? []) : [],
     }),
+  setPlanApproval: (pendingPlanApproval) => set({ pendingPlanApproval }),
+  setGlobalModelState: (globalModelState) => set({ globalModelState }),
+  setAgentReloadRequired: (agentReloadRequired) => set({ agentReloadRequired }),
+
+  // --- admin UI ---
+  rightPanel: "health",
+  surface: "chat",
+  workspaces: [],
+  review: null,
+  worktrees: [],
+  patchPreview: null,
+  setRightPanel: (rightPanel) => set({ rightPanel }),
+  setSurface: (surface) => set({ surface }),
   setWorkspaces: (workspaces) => set({ workspaces }),
   setReview: (review) => set({ review }),
   setWorktrees: (worktrees) => set({ worktrees }),
   setPatchPreview: (patchPreview) => set({ patchPreview }),
+
+  // --- composer (provisional) ---
+  provisionalDraft: emptyComposerDraft(undefined, defaultSettings().defaultMode),
+  setProvisionalDraft: (patch) => {
+    set({ provisionalDraft: { ...get().provisionalDraft, ...patch } });
+  },
+  replaceProvisionalDraft: (provisionalDraft) => set({ provisionalDraft }),
+  clearProvisionalDraft: () => {
+    set({
+      provisionalDraft: emptyComposerDraft(
+        get().settings.model || null,
+        get().settings.defaultMode,
+      ),
+    });
+  },
+  effectiveDraftText: () => {
+    const id = get().activeSessionId;
+    if (id && get().sessions[id]) return get().sessions[id].draft;
+    return get().provisionalDraft.text;
+  },
+  setEffectiveDraftText: (text) => {
+    const id = get().activeSessionId;
+    if (id && get().sessions[id]) {
+      get().setSessionDraft(id, text);
+      return;
+    }
+    get().setProvisionalDraft({ text });
+  },
+  effectiveAttachments: () => {
+    const id = get().activeSessionId;
+    if (id && get().sessions[id]) return get().sessions[id].attachments;
+    return get().provisionalDraft.attachments;
+  },
+  setEffectiveAttachments: (attachments) => {
+    const id = get().activeSessionId;
+    if (id && get().sessions[id]) {
+      get().setSessionAttachments(id, attachments);
+      return;
+    }
+    get().setProvisionalDraft({ attachments });
+  },
+  effectiveModelId: () => {
+    const id = get().activeSessionId;
+    if (id) {
+      const s = get().sessions[id];
+      if (s?.summary.model) return s.summary.model;
+      if (s?.modelState?.currentModelId) return s.modelState.currentModelId;
+    }
+    return (
+      get().provisionalDraft.modelId ??
+      get().globalModelState.currentModelId ??
+      get().settings.model ??
+      null
+    );
+  },
+  setEffectiveModelId: (modelId) => {
+    const id = get().activeSessionId;
+    if (id && get().sessions[id]) {
+      get().updateSummary(id, {
+        model: modelId,
+        updatedAt: new Date().toISOString(),
+      });
+      const prev = get().sessions[id].modelState;
+      get().setSessionModelState(id, {
+        currentModelId: modelId,
+        availableModels: prev?.availableModels ?? get().globalModelState.availableModels,
+        liveSwitchSupported: prev?.liveSwitchSupported ?? false,
+        source: prev?.source ?? "configured",
+      });
+      return;
+    }
+    get().setProvisionalDraft({ modelId });
+  },
+  effectiveMode: () => {
+    const id = get().activeSessionId;
+    if (id && get().sessions[id]) {
+      return get().sessions[id].modeState.currentMode
+        ?? get().sessions[id].summary.mode
+        ?? "agent";
+    }
+    return get().provisionalDraft.mode ?? get().settings.defaultMode;
+  },
+  setEffectiveMode: (mode) => {
+    const id = get().activeSessionId;
+    if (id && get().sessions[id]) {
+      get().updateSummary(id, { mode, updatedAt: new Date().toISOString() });
+      const state = get().sessions[id].modeState;
+      get().setSessionModeState(id, { ...state, currentMode: mode });
+      return;
+    }
+    get().setProvisionalDraft({ mode });
+  },
+
+  // --- sessions ---
+  sessions: {},
+  sessionOrder: [],
+  activeSessionId: null,
 
   ensureSession: (summary) => {
     const sessions = { ...get().sessions };
@@ -212,6 +405,38 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
+  setSessionAttachments: (id, attachments) => {
+    const s = get().sessions[id];
+    if (!s) return;
+    set({
+      sessions: { ...get().sessions, [id]: { ...s, attachments } },
+    });
+  },
+
+  setSessionModelState: (id, modelState) => {
+    const s = get().sessions[id];
+    if (!s) return;
+    set({
+      sessions: { ...get().sessions, [id]: { ...s, modelState } },
+    });
+  },
+
+  setSessionModeState: (id, modeState) => {
+    const s = get().sessions[id];
+    if (!s) return;
+    set({
+      sessions: { ...get().sessions, [id]: { ...s, modeState } },
+    });
+  },
+
+  setSessionCommands: (id, availableCommands) => {
+    const s = get().sessions[id];
+    if (!s) return;
+    set({
+      sessions: { ...get().sessions, [id]: { ...s, availableCommands } },
+    });
+  },
+
   addBlock: (sessionId, b) => {
     const s = get().sessions[sessionId];
     if (!s) return;
@@ -221,6 +446,28 @@ export const useAppStore = create<AppState>((set, get) => ({
         [sessionId]: { ...s, blocks: [...s.blocks, b] },
       },
     });
+  },
+
+  updateBlock: (sessionId, blockId, patch) => {
+    const s = get().sessions[sessionId];
+    if (!s) return;
+    set({
+      sessions: {
+        ...get().sessions,
+        [sessionId]: {
+          ...s,
+          blocks: s.blocks.map((block) =>
+            block.id === blockId ? ({ ...block, ...patch } as ChatBlock) : block,
+          ),
+        },
+      },
+    });
+  },
+
+  setFailedSubmission: (id, failedSubmission) => {
+    const s = get().sessions[id];
+    if (!s) return;
+    set({ sessions: { ...get().sessions, [id]: { ...s, failedSubmission } } });
   },
 
   appendAssistant: (sessionId, text) => {
@@ -336,16 +583,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPlan: (sessionId, text) => {
     const s = get().sessions[sessionId];
     if (!s) return;
+    const lastBlock = s.blocks[s.blocks.length - 1];
+    const blocks = lastBlock?.type === "plan" && lastBlock.text === text
+      ? s.blocks
+      : [...s.blocks, { type: "plan" as const, id: crypto.randomUUID(), text }];
     set({
       sessions: {
         ...get().sessions,
         [sessionId]: {
           ...s,
           planText: text,
-          blocks: [
-            ...s.blocks,
-            { type: "plan", id: crypto.randomUUID(), text },
-          ],
+          blocks,
           streamAssistantId: null,
           streamThoughtId: null,
         },

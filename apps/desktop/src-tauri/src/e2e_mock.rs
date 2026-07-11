@@ -6,7 +6,9 @@ mod tests {
         handlers_is_permission_for_test, NoopEventBus, RuntimePool, SharedEventBus, StartConfig,
     };
     use crate::cli_bridge::{install_cli_from_script, OFFICIAL_INSTALL_URL};
-    use crate::contracts::{GitRepoState, SandboxMode, SessionRunState, SessionSummary};
+    use crate::contracts::{
+        GitRepoState, ModeSwitchResult, SandboxMode, SessionRunState, SessionSummary,
+    };
     use crate::db::Database;
     use crate::git_ops::{refresh_review, WorktreeCreateRequest};
     use serde_json::json;
@@ -32,6 +34,7 @@ mod tests {
 
     fn start_cfg(cwd: &std::path::Path, mock: &std::path::Path) -> StartConfig {
         StartConfig {
+            task_id: Some("e2e-task".into()),
             grok_path: Some(mock.to_string_lossy().into()),
             model: None,
             always_approve: false,
@@ -41,6 +44,7 @@ mod tests {
             use_harness: false,
             sandbox: Some(SandboxMode::None),
             power_profile: None,
+            resume_session_id: None,
         }
     }
 
@@ -64,6 +68,21 @@ mod tests {
         assert!(st.running);
         let conn = st.connection_id.clone().unwrap();
         let sess = st.session_id.clone().unwrap();
+        assert!(st
+            .available_commands
+            .iter()
+            .any(|command| command.name == "goal"));
+        let mode = pool
+            .set_session_mode(&conn, &sess, "plan")
+            .await
+            .expect("set plan mode");
+        match mode {
+            ModeSwitchResult::Switched { state } => {
+                assert_eq!(state.current_mode, "plan");
+                assert!(state.live_switch_supported);
+            }
+            other => panic!("expected live Plan switch, got {other:?}"),
+        }
 
         let summary = SessionSummary {
             session_id: "local-e2e".into(),
@@ -76,6 +95,14 @@ mod tests {
             run_state: SessionRunState::Streaming,
             remote_session_id: Some(sess.clone()),
             worktree_path: None,
+            execution_root: Some(ws.to_string_lossy().into()),
+            base_commit: None,
+            mode: crate::contracts::TaskMode::Agent,
+            permission_policy: crate::contracts::PermissionPolicy::WorkspaceEdit,
+            sandbox: crate::contracts::SandboxMode::Workspace,
+            archived: false,
+            attention_required: false,
+            applied_at: None,
             model: Some("grok-build".into()),
             always_approve: false,
             draft: Some("hello draft".into()),
@@ -91,6 +118,19 @@ mod tests {
             result.get("echoSessionId").and_then(|v| v.as_str()),
             Some(sess.as_str())
         );
+
+        let resumed = pool
+            .start_with_bus(
+                Arc::new(NoopEventBus),
+                StartConfig {
+                    resume_session_id: Some(sess.clone()),
+                    ..start_cfg(&ws, &mock)
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(resumed.session_id.as_deref(), Some(sess.as_str()));
+        pool.cancel_session(&conn, &sess).unwrap();
 
         assert!(handlers_is_permission_for_test(
             "session/request_permission"

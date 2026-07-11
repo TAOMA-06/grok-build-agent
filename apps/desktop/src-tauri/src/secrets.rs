@@ -5,6 +5,7 @@ use thiserror::Error;
 
 const SERVICE: &str = "com.grokbuilddesktop.community";
 const USER: &str = "xai_api_key";
+const HOST_IPC_USER: &str = "agent_host_ipc_v1";
 
 #[derive(Debug, Error)]
 pub enum SecretError {
@@ -22,8 +23,88 @@ impl Serialize for SecretError {
 }
 
 fn entry() -> Result<keyring::Entry, SecretError> {
-    keyring::Entry::new(SERVICE, USER)
+    entry_for(USER)
+}
+
+fn entry_for(user: &str) -> Result<keyring::Entry, SecretError> {
+    keyring::Entry::new(SERVICE, user)
         .map_err(|e| SecretError::Message(format!("keychain entry: {e}")))
+}
+
+pub fn get_or_create_host_ipc_token() -> Result<String, SecretError> {
+    #[cfg(all(target_os = "macos", not(debug_assertions)))]
+    {
+        return get_or_create_protected_host_ipc_token();
+    }
+    #[cfg(any(not(target_os = "macos"), debug_assertions))]
+    {
+        get_or_create_legacy_host_ipc_token()
+    }
+}
+
+#[cfg(any(not(target_os = "macos"), debug_assertions))]
+fn get_or_create_legacy_host_ipc_token() -> Result<String, SecretError> {
+    let entry = entry_for(HOST_IPC_USER)?;
+    match entry.get_password() {
+        Ok(token) if token.len() >= 32 => Ok(token),
+        Ok(_) | Err(keyring::Error::NoEntry) => {
+            let token = format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+            entry
+                .set_password(&token)
+                .map_err(|error| SecretError::Message(format!("keychain write failed: {error}")))?;
+            Ok(token)
+        }
+        Err(error) => Err(SecretError::Message(format!(
+            "keychain read failed: {error}"
+        ))),
+    }
+}
+
+#[cfg(all(target_os = "macos", not(debug_assertions)))]
+fn get_or_create_protected_host_ipc_token() -> Result<String, SecretError> {
+    use security_framework::passwords::{
+        generic_password, set_generic_password_options, PasswordOptions,
+    };
+    use security_framework_sys::base::errSecItemNotFound;
+
+    let team_id = option_env!("APPLE_TEAM_ID")
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            SecretError::Message(
+                "signed release is missing APPLE_TEAM_ID for the shared Keychain access group"
+                    .into(),
+            )
+        })?;
+    let access_group = format!("{team_id}.com.grokbuilddesktop.community.shared");
+    let options = || {
+        let mut options = PasswordOptions::new_generic_password(SERVICE, HOST_IPC_USER);
+        options.set_access_group(&access_group);
+        options.use_protected_keychain();
+        options
+    };
+
+    match generic_password(options()) {
+        Ok(bytes) => {
+            let token = String::from_utf8(bytes)
+                .map_err(|_| SecretError::Message("Keychain IPC token is not UTF-8".into()))?;
+            if token.len() < 32 {
+                return Err(SecretError::Message(
+                    "Keychain IPC token is unexpectedly short".into(),
+                ));
+            }
+            Ok(token)
+        }
+        Err(error) if error.code() == errSecItemNotFound => {
+            let token = format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+            set_generic_password_options(token.as_bytes(), options()).map_err(|error| {
+                SecretError::Message(format!("protected Keychain write failed: {error}"))
+            })?;
+            Ok(token)
+        }
+        Err(error) => Err(SecretError::Message(format!(
+            "protected Keychain read failed: {error}"
+        ))),
+    }
 }
 
 pub fn get_api_key() -> Result<Option<String>, SecretError> {

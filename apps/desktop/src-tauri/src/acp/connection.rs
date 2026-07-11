@@ -5,8 +5,8 @@ use super::handlers;
 use super::terminal_host::TerminalHost;
 use super::{AcpError, AgentStatus, StartConfig};
 use crate::contracts::{
-    ConnectionKey, ConnectionSnapshot, ConnectionState, EventSource, PowerProfile, RuntimeSnapshot,
-    SandboxMode, SessionEventEnvelope,
+    ConnectionKey, ConnectionSnapshot, ConnectionState, EventSource, RuntimeSnapshot, SandboxMode,
+    SessionEventEnvelope,
 };
 use parking_lot::Mutex;
 use serde_json::{json, Value};
@@ -35,6 +35,8 @@ pub struct ConnectionInner {
     pub sequence: AtomicU64,
     pub session_ids: Mutex<HashSet<String>>,
     pub active_session_id: Mutex<Option<String>>,
+    pub session_modes: Mutex<HashMap<String, crate::contracts::SessionModeState>>,
+    pub session_mode_config_ids: Mutex<HashMap<String, String>>,
     pub cwd: PathBuf,
     pub grok_path: String,
     pub state: Mutex<ConnectionState>,
@@ -48,6 +50,30 @@ pub struct ConnectionInner {
 }
 
 impl ConnectionInner {
+    pub fn session_mode_state(&self, session_id: &str) -> crate::contracts::SessionModeState {
+        if let Some(state) = self.session_modes.lock().get(session_id).cloned() {
+            return state;
+        }
+        let available_modes = self
+            .capabilities
+            .lock()
+            .as_ref()
+            .map(|caps| caps.available_modes.clone())
+            .unwrap_or_default();
+        crate::contracts::SessionModeState {
+            current_mode: "agent".into(),
+            live_switch_supported: !available_modes.is_empty(),
+            available_modes,
+            source: "desktop".into(),
+        }
+    }
+
+    pub fn record_session_mode(&self, session_id: &str, state: crate::contracts::SessionModeState) {
+        self.session_modes
+            .lock()
+            .insert(session_id.to_string(), state);
+    }
+
     pub fn snapshot(&self) -> ConnectionSnapshot {
         ConnectionSnapshot {
             connection_id: self.connection_id.clone(),
@@ -103,6 +129,20 @@ impl ConnectionInner {
         }
     }
 
+    /// Send a JSON-RPC notification without reserving a response slot.
+    /// ACP defines `session/cancel` as a notification.
+    pub fn notify(&self, method: &str, params: Value) -> Result<(), AcpError> {
+        let msg = json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        });
+        let line = serde_json::to_string(&msg)?;
+        self.write_tx
+            .send(line)
+            .map_err(|_| AcpError::Message("write channel closed".into()))
+    }
+
     pub async fn respond_to_request(
         &self,
         id: Value,
@@ -148,6 +188,7 @@ impl ConnectionInner {
             let _ = child.start_kill();
         }
         // Belt-and-suspenders: ensure the process group is gone on Unix.
+        #[cfg(unix)]
         if self.pid > 0 {
             let _ = std::process::Command::new("kill")
                 .args(["-9", &self.pid.to_string()])
@@ -230,22 +271,29 @@ pub fn normalize_workspace(cwd: &str) -> Result<PathBuf, AcpError> {
 }
 
 pub fn connection_key_from_config(config: &StartConfig, workspace: PathBuf) -> ConnectionKey {
+    let model_id = config
+        .model
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     ConnectionKey {
         workspace_root: workspace.to_string_lossy().into(),
-        sandbox: config.sandbox.unwrap_or(SandboxMode::None),
+        sandbox: config.sandbox.unwrap_or(SandboxMode::Workspace),
+        always_approve: config.always_approve,
         power_profile: config.power_profile,
+        model_id,
     }
 }
 
 pub fn shellexpand_home(path: &str) -> String {
     if let Some(rest) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return format!("{home}/{rest}");
+        if let Some(home) = user_home_dir() {
+            return home.join(rest).to_string_lossy().into_owned();
         }
     }
     if path == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            return home;
+        if let Some(home) = user_home_dir() {
+            return home.to_string_lossy().into_owned();
         }
     }
     path.to_string()
@@ -262,23 +310,32 @@ pub fn resolve_grok_path(configured: Option<&str>) -> Result<String, AcpError> {
         }
     }
 
-    let home = std::env::var("HOME").unwrap_or_default();
-    let candidates = [
-        format!("{home}/.grok/bin/grok"),
-        format!("{home}/.local/bin/grok"),
-        "/usr/local/bin/grok".to_string(),
-        "/opt/homebrew/bin/grok".to_string(),
-    ];
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(home) = user_home_dir() {
+        #[cfg(target_os = "windows")]
+        candidates.push(home.join(".grok").join("bin").join("grok.exe"));
+        #[cfg(not(target_os = "windows"))]
+        {
+            candidates.push(home.join(".grok").join("bin").join("grok"));
+            candidates.push(home.join(".local").join("bin").join("grok"));
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        candidates.push(PathBuf::from("/usr/local/bin/grok"));
+        candidates.push(PathBuf::from("/opt/homebrew/bin/grok"));
+    }
     for c in &candidates {
-        if Path::new(c).exists() {
-            return Ok(c.clone());
+        if c.exists() {
+            return Ok(c.to_string_lossy().into_owned());
         }
     }
 
-    if let Ok(output) = std::process::Command::new("/usr/bin/which")
-        .arg("grok")
-        .output()
-    {
+    #[cfg(target_os = "windows")]
+    let locator = "where.exe";
+    #[cfg(not(target_os = "windows"))]
+    let locator = "which";
+    if let Ok(output) = std::process::Command::new(locator).arg("grok").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() && Path::new(&path).exists() {
@@ -291,6 +348,14 @@ pub fn resolve_grok_path(configured: Option<&str>) -> Result<String, AcpError> {
         "grok CLI not found. Install Grok Build and ensure `grok` is on PATH, or set the path in Settings."
             .into(),
     ))
+}
+
+fn user_home_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    let key = "USERPROFILE";
+    #[cfg(not(target_os = "windows"))]
+    let key = "HOME";
+    std::env::var_os(key).map(PathBuf::from)
 }
 
 pub async fn spawn_connection(
@@ -306,7 +371,11 @@ pub async fn spawn_connection(
 
     // Real grok: `grok agent … stdio`. Python mock fixtures are launched via interpreter.
     let mut cmd = if grok_path.ends_with(".py") {
-        let mut c = Command::new("python3");
+        #[cfg(target_os = "windows")]
+        let python = "python";
+        #[cfg(not(target_os = "windows"))]
+        let python = "python3";
+        let mut c = Command::new(python);
         c.arg(&grok_path);
         c
     } else {
@@ -328,11 +397,22 @@ pub async fn spawn_connection(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    if let Ok(path) = std::env::var("PATH") {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let extra =
-            format!("{home}/.grok/bin:{home}/.local/bin:/usr/local/bin:/opt/homebrew/bin:{path}");
-        cmd.env("PATH", extra);
+    if let Some(path) = std::env::var_os("PATH") {
+        let mut entries = Vec::new();
+        if let Some(home) = user_home_dir() {
+            entries.push(home.join(".grok").join("bin"));
+            #[cfg(not(target_os = "windows"))]
+            entries.push(home.join(".local").join("bin"));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            entries.push(PathBuf::from("/usr/local/bin"));
+            entries.push(PathBuf::from("/opt/homebrew/bin"));
+        }
+        entries.extend(std::env::split_paths(&path));
+        if let Ok(joined) = std::env::join_paths(entries) {
+            cmd.env("PATH", joined);
+        }
     }
     if let Ok(key) = std::env::var("XAI_API_KEY") {
         if !key.is_empty() {
@@ -340,22 +420,14 @@ pub async fn spawn_connection(
         }
     }
 
-    // Sandbox / power profile: pass via env until CLI exposes first-class flags.
+    // Grok reads the sandbox profile at process startup. `GROK_BUILD_*` is not
+    // a Grok CLI namespace and must never be used as a security control.
     let sandbox = match key.sandbox {
         SandboxMode::None => "none",
         SandboxMode::Workspace => "workspace",
         SandboxMode::Strict => "strict",
     };
-    cmd.env("GROK_BUILD_SANDBOX", sandbox);
-    if let Some(profile) = key.power_profile {
-        let p = match profile {
-            PowerProfile::Balanced => "balanced",
-            PowerProfile::Performance => "performance",
-            PowerProfile::Efficiency => "efficiency",
-        };
-        cmd.env("GROK_BUILD_POWER_PROFILE", p);
-    }
-    cmd.env("GROK_BUILD_WORKSPACE", workspace.to_string_lossy().as_ref());
+    cmd.env("GROK_SANDBOX", sandbox);
 
     let mut child = cmd
         .spawn()
@@ -410,6 +482,8 @@ pub async fn spawn_connection(
         sequence: AtomicU64::new(1),
         session_ids: Mutex::new(HashSet::new()),
         active_session_id: Mutex::new(None),
+        session_modes: Mutex::new(HashMap::new()),
+        session_mode_config_ids: Mutex::new(HashMap::new()),
         cwd: workspace,
         grok_path: grok_path.clone(),
         state: Mutex::new(ConnectionState::Starting),
@@ -525,6 +599,9 @@ async fn reader_loop(
         if let Some(method) = parsed.get("method").and_then(|m| m.as_str()) {
             let params = parsed.get("params").cloned().unwrap_or(Value::Null);
             let session_id = extract_session_id(Some(&params));
+            if method == "session/update" {
+                apply_session_update_metadata(&conn, session_id.as_deref(), &params);
+            }
 
             let kind = if method == "session/update" {
                 "session_update"
@@ -593,8 +670,141 @@ async fn reader_loop(
             cwd: Some(conn.cwd.to_string_lossy().into()),
             grok_path: Some(conn.grok_path.clone()),
             last_error: Some("agent process exited".into()),
+            model: None,
+            mode: None,
+            available_commands: vec![],
         },
     );
+}
+
+fn apply_session_update_metadata(conn: &ConnectionInner, session_id: Option<&str>, params: &Value) {
+    let Some(session_id) = session_id else {
+        return;
+    };
+    let update = params.get("update").unwrap_or(params);
+    let kind = update
+        .get("sessionUpdate")
+        .or_else(|| update.get("session_update"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    if matches!(kind, "current_mode_update" | "currentModeUpdate") {
+        if let Some(mode) = update
+            .get("currentModeId")
+            .or_else(|| update.get("currentMode"))
+            .or_else(|| update.get("mode"))
+            .and_then(Value::as_str)
+        {
+            let mut state = conn.session_mode_state(session_id);
+            state.current_mode = mode.to_string();
+            state.source = "acp_config".into();
+            conn.record_session_mode(session_id, state);
+        }
+    }
+
+    if matches!(kind, "config_option_update" | "configOptionUpdate") {
+        let direct_config_id = update
+            .get("configId")
+            .or_else(|| update.get("config_id"))
+            .and_then(Value::as_str);
+        let known_mode_config = conn.session_mode_config_ids.lock().get(session_id).cloned();
+        if direct_config_id == Some("mode")
+            || direct_config_id
+                .zip(known_mode_config.as_deref())
+                .map(|(actual, known)| actual == known)
+                .unwrap_or(false)
+        {
+            if let Some(mode) = update
+                .get("value")
+                .or_else(|| update.get("currentValue"))
+                .and_then(Value::as_str)
+            {
+                let mut state = conn.session_mode_state(session_id);
+                state.current_mode = mode.to_string();
+                state.source = "acp_config".into();
+                conn.record_session_mode(session_id, state);
+            }
+        }
+        if let Some(options) = update.get("configOptions").and_then(Value::as_array) {
+            if let Some(mode_option) = options.iter().find(|option| {
+                option.get("category").and_then(Value::as_str) == Some("mode")
+                    || option.get("id").and_then(Value::as_str) == Some("mode")
+            }) {
+                let available_modes = mode_option
+                    .get("options")
+                    .and_then(Value::as_array)
+                    .map(|modes| {
+                        modes
+                            .iter()
+                            .filter_map(|mode| {
+                                let id = mode
+                                    .get("id")
+                                    .or_else(|| mode.get("value"))
+                                    .and_then(Value::as_str)?;
+                                Some(crate::contracts::SelectableMode {
+                                    id: id.to_string(),
+                                    name: mode
+                                        .get("name")
+                                        .and_then(Value::as_str)
+                                        .unwrap_or(id)
+                                        .to_string(),
+                                    description: mode
+                                        .get("description")
+                                        .and_then(Value::as_str)
+                                        .map(str::to_string),
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let current_mode = mode_option
+                    .get("currentValue")
+                    .and_then(Value::as_str)
+                    .unwrap_or("agent")
+                    .to_string();
+                conn.record_session_mode(
+                    session_id,
+                    crate::contracts::SessionModeState {
+                        current_mode,
+                        available_modes,
+                        live_switch_supported: true,
+                        source: "acp_config".into(),
+                    },
+                );
+            }
+        }
+    }
+
+    if matches!(
+        kind,
+        "available_commands_update" | "availableCommandsUpdate"
+    ) {
+        if let Some(commands) = update
+            .get("availableCommands")
+            .or_else(|| update.get("commands"))
+            .and_then(Value::as_array)
+        {
+            let parsed = commands
+                .iter()
+                .filter_map(|command| {
+                    Some(crate::contracts::AvailableCommand {
+                        name: command.get("name")?.as_str()?.to_string(),
+                        description: command
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        input: command
+                            .get("input")
+                            .cloned()
+                            .filter(|input| !input.is_null()),
+                    })
+                })
+                .collect::<Vec<_>>();
+            if let Some(capabilities) = conn.capabilities.lock().as_mut() {
+                capabilities.available_commands = parsed;
+            }
+        }
+    }
 }
 
 fn extract_session_id(params: Option<&Value>) -> Option<String> {

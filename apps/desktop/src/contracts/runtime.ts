@@ -2,8 +2,12 @@
  * Runtime pool contracts shared by UI and host.
  *
  * A RuntimePool key groups one ACP child process by:
- * workspace root + sandbox mode + power profile.
+ * workspace root + sandbox mode + power profile + model id.
  */
+
+import type { SessionModelState } from "./model";
+import type { AvailableCommand } from "./session";
+import type { SessionModeState } from "./mode";
 
 /** Optional sandbox mode passed to the Grok agent process. */
 export type SandboxMode = "none" | "workspace" | "strict";
@@ -19,7 +23,13 @@ export type ConnectionKey = {
   /** Absolute, normalized workspace root. */
   workspaceRoot: string;
   sandbox: SandboxMode;
+  alwaysApprove: boolean;
   powerProfile: PowerProfile;
+  /**
+   * Model id used when spawning the process.
+   * Included so agents that cannot live-switch models never reuse the wrong process.
+   */
+  modelId?: string | null;
 };
 
 export type ConnectionId = string;
@@ -44,6 +54,9 @@ export type AgentCapabilitySnapshot = {
   terminal?: boolean;
   authMethods: AuthMethodSummary[];
   models: string[];
+  currentModelId?: string | null;
+  availableCommands: AvailableCommand[];
+  availableModes: SessionModeState["availableModes"];
   raw?: unknown;
 };
 
@@ -77,6 +90,7 @@ export type RuntimeSnapshot = {
 
 /** Config used when spawning / attaching a connection. */
 export type StartConfig = {
+  taskId?: string | null;
   grokPath?: string | null;
   model?: string | null;
   alwaysApprove: boolean;
@@ -86,6 +100,7 @@ export type StartConfig = {
   useHarness: boolean;
   sandbox?: SandboxMode;
   powerProfile?: PowerProfile;
+  resumeSessionId?: string | null;
 };
 
 /** Process-level status (legacy single-runtime + pool-compatible). */
@@ -96,6 +111,10 @@ export type AgentStatus = {
   cwd?: string | null;
   grokPath?: string | null;
   lastError?: string | null;
+  /** Current session model snapshot when a connection is active. */
+  model?: SessionModelState | null;
+  mode?: SessionModeState | null;
+  availableCommands?: AvailableCommand[];
 };
 
 export type GrokProbe = {
@@ -122,10 +141,18 @@ export type RuntimeHealth = {
   checklist: HealthItem[];
 };
 
+export type AgentHostHealth = {
+  protocolVersion: number;
+  pid: number;
+  database: string;
+  status: AgentStatus;
+};
+
 /** Build a deterministic string key for maps / logging. */
 export function connectionKeyString(key: ConnectionKey): string {
   const profile = key.powerProfile ?? "off";
-  return `${key.workspaceRoot}::${key.sandbox}::${profile}`;
+  const model = key.modelId?.trim() || "default";
+  return `${key.workspaceRoot}::${key.sandbox}::${profile}::${key.alwaysApprove ? "approve" : "ask"}::${model}`;
 }
 
 export function emptyRuntimeSnapshot(now = new Date().toISOString()): RuntimeSnapshot {

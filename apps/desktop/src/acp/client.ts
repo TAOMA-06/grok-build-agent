@@ -10,13 +10,17 @@ import type {
   AgentStatus,
   GrokProbe,
   RuntimeHealth,
+  AgentHostHealth,
   ServerRequest,
   SessionEventEnvelope,
   SessionUpdate,
   Settings,
   StartConfig,
+  PromptDispatchContext,
 } from "../types";
 import { useAppStore } from "../store";
+import { appendSessionEvent } from "../api/catalog";
+import { t } from "../i18n";
 
 /** Unwrap SessionEventEnvelope or return legacy raw payload. */
 function unwrapPayload<T>(payload: unknown): T {
@@ -26,7 +30,16 @@ function unwrapPayload<T>(payload: unknown): T {
   return payload as T;
 }
 
-function activeOrFirstSessionId(envelopeSessionId?: string | null): string | null {
+/**
+ * Route ACP envelopes by their remote session id first.  Falling back to the
+ * visible session is only safe for legacy events that predate envelopes;
+ * otherwise an update from a background session can corrupt the open chat.
+ */
+export function resolveLocalSessionId(
+  envelopeSessionId?: string | null,
+  connectionId?: string | null,
+  allowLegacyFallback = false,
+): string | null {
   const store = useAppStore.getState();
   if (envelopeSessionId && store.sessions[envelopeSessionId]) {
     return envelopeSessionId;
@@ -43,7 +56,13 @@ function activeOrFirstSessionId(envelopeSessionId?: string | null): string | nul
       }
     }
   }
-  return store.activeSessionId;
+  if (connectionId) {
+    const matches = store.sessionOrder.filter(
+      (id) => store.sessions[id]?.summary.connectionId === connectionId,
+    );
+    if (matches.length === 1) return matches[0];
+  }
+  return allowLegacyFallback ? store.activeSessionId : null;
 }
 
 export async function probeGrok(grokPath?: string): Promise<GrokProbe> {
@@ -54,6 +73,14 @@ export async function runtimeHealth(grokPath?: string): Promise<RuntimeHealth> {
   return invoke<RuntimeHealth>("runtime_health", {
     grokPath: grokPath || null,
   });
+}
+
+export async function ensureAgentHost(): Promise<AgentHostHealth> {
+  return invoke<AgentHostHealth>("ensure_agent_host");
+}
+
+export async function agentHostHealth(): Promise<AgentHostHealth> {
+  return invoke<AgentHostHealth>("agent_host_health");
 }
 
 export async function loadSettings(): Promise<Settings> {
@@ -84,20 +111,106 @@ export async function restartAgent(config: StartConfig): Promise<AgentStatus> {
   return invoke<AgentStatus>("restart_agent", { config });
 }
 
-export async function sendPrompt(text: string): Promise<unknown> {
-  return invoke("send_prompt", { text });
+export async function sendPrompt(
+  connectionId: string,
+  sessionId: string,
+  text: string,
+  content?: import("../types").PromptContent[],
+  dispatch?: PromptDispatchContext,
+): Promise<unknown> {
+  return invoke("send_prompt", {
+    connectionId,
+    sessionId,
+    text,
+    content: content ?? null,
+    dispatch: dispatch ?? null,
+  });
 }
 
-export async function cancelPrompt(): Promise<unknown> {
-  return invoke("cancel_prompt");
+export async function listModels(
+  grokPath?: string,
+): Promise<import("../types").SelectableModel[]> {
+  return invoke("list_models", { grokPath: grokPath || null });
+}
+
+export async function setSessionModel(
+  connectionId: string,
+  sessionId: string,
+  modelId: string,
+): Promise<import("../types").ModelSwitchResult> {
+  return invoke("set_session_model", {
+    connectionId,
+    sessionId,
+    modelId,
+  });
+}
+
+export async function setSessionMode(
+  connectionId: string,
+  sessionId: string,
+  mode: import("../types").TaskMode,
+): Promise<import("../types").ModeSwitchResult> {
+  return invoke("set_session_mode", { connectionId, sessionId, mode });
+}
+
+export async function confirmSessionMode(
+  connectionId: string,
+  sessionId: string,
+  mode: import("../types").TaskMode,
+): Promise<import("../types").SessionModeState> {
+  return invoke("confirm_session_mode", { connectionId, sessionId, mode });
+}
+
+export async function inspectAttachments(
+  paths: string[],
+): Promise<import("../contracts").ComposerAttachment[]> {
+  const files = await invoke<
+    Array<{
+      id: string;
+      name: string;
+      path: string;
+      mimeType: string;
+      sizeBytes?: number | null;
+    }>
+  >("inspect_attachments", { paths });
+  return files.map((file) => ({
+    ...file,
+    source: "path" as const,
+    kind: file.mimeType.startsWith("image/") ? ("image" as const) : ("file" as const),
+  }));
+}
+
+export async function prepareAttachments(
+  files: import("../contracts").ComposerAttachment[],
+): Promise<import("../contracts").PromptContent[]> {
+  return invoke("prepare_attachments", {
+    files: files
+      .filter((file) => file.source === "path" && file.path)
+      .map((file) => ({
+        id: file.id,
+        name: file.name,
+        path: file.path,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes ?? null,
+      })),
+  });
+}
+
+export async function cancelPrompt(
+  connectionId: string,
+  sessionId: string,
+): Promise<void> {
+  return invoke("cancel_prompt", { connectionId, sessionId });
 }
 
 export async function respondServerRequest(
+  connectionId: string,
   id: string | number,
   result?: unknown,
   error?: unknown,
 ): Promise<void> {
   return invoke("respond_server_request", {
+    connectionId,
     id,
     result: result ?? null,
     error: error ?? null,
@@ -111,6 +224,24 @@ function extractText(content: SessionUpdate["content"]): string {
     return String((content as { text?: string }).text ?? "");
   }
   return "";
+}
+
+const HIDDEN_XAI_NOTIFICATIONS = new Set([
+  "_x.ai/session_notification",
+  "_x.ai/mcp/init_progress",
+  "_x.ai/mcp/server_status",
+  "_x.ai/mcp_initialized",
+  "_x.ai/announcements/update",
+  "_x.ai/models/update",
+  "_x.ai/sessions/changed",
+  "_x.ai/queue/changed",
+  "_x.ai/session/prompt_complete",
+  "_x.ai/session/update",
+]);
+
+/** xAI lifecycle telemetry belongs in diagnostics, not the conversation transcript. */
+export function shouldHideAcpNotification(method: string): boolean {
+  return HIDDEN_XAI_NOTIFICATIONS.has(method);
 }
 
 /** Batch high-frequency stream chunks per animation frame per session. */
@@ -153,12 +284,14 @@ function queueThought(sessionId: string, text: string) {
   scheduleFlush();
 }
 
-function handleSessionUpdate(
+export function handleSessionUpdate(
   update: SessionUpdate,
   sessionId: string | null,
+  connectionId: string | null,
+  legacyEvent = false,
 ) {
   const store = useAppStore.getState();
-  const sid = activeOrFirstSessionId(sessionId);
+  const sid = resolveLocalSessionId(sessionId, connectionId, legacyEvent);
   if (!sid) return;
 
   const u = (update.update as SessionUpdate | undefined) ?? update;
@@ -167,7 +300,20 @@ function handleSessionUpdate(
     (u as { session_update?: string }).session_update ??
     "";
 
+  const asTaskMode = (value: unknown): import("../types").TaskMode | null => {
+    if (typeof value !== "string") return null;
+    const normalized = value.toLowerCase();
+    if (normalized === "plan" || normalized === "architect") return "plan";
+    if (normalized === "goal") return "goal";
+    if (["agent", "code", "default"].includes(normalized)) return "agent";
+    return null;
+  };
+
   switch (kind) {
+    case "user_message_chunk":
+    case "user_message":
+      // The desktop already rendered the submitted user message optimistically.
+      break;
     case "agent_message_chunk":
     case "agent_message":
     case "message": {
@@ -218,7 +364,75 @@ function handleSessionUpdate(
           ? u.plan
           : JSON.stringify(u.plan ?? u, null, 2));
       store.setPlan(sid, text);
+      store.updateSummary(sid, {
+        runState: "awaiting_plan",
+        attentionRequired: true,
+      });
       store.setInspector(sid, { kind: "plan" });
+      break;
+    }
+    case "current_mode_update":
+    case "currentModeUpdate": {
+      const mode = asTaskMode(u.currentModeId ?? u.currentMode ?? u.mode);
+      if (!mode) break;
+      const previous = store.sessions[sid]?.modeState;
+      store.setSessionModeState(sid, {
+        currentMode: mode,
+        availableModes: previous?.availableModes ?? [],
+        liveSwitchSupported: true,
+        source: "acp_config",
+      });
+      store.updateSummary(sid, { mode });
+      break;
+    }
+    case "config_option_update":
+    case "configOptionUpdate": {
+      const options = Array.isArray(u.configOptions) ? u.configOptions : [];
+      const modeOption = options.find((option) => {
+        if (!option || typeof option !== "object") return false;
+        const record = option as Record<string, unknown>;
+        return record.category === "mode" || record.id === "mode";
+      }) as Record<string, unknown> | undefined;
+      const directMode = (u.configId === "mode" || u.config_id === "mode")
+        ? asTaskMode(u.value ?? u.currentValue)
+        : null;
+      const mode = directMode ?? asTaskMode(modeOption?.currentValue);
+      if (!mode) break;
+      const availableModes = (Array.isArray(modeOption?.options) ? modeOption.options : [])
+        .flatMap((option) => {
+          if (!option || typeof option !== "object") return [];
+          const record = option as Record<string, unknown>;
+          const id = asTaskMode(record.id ?? record.value);
+          return id
+            ? [{ id, name: String(record.name ?? id), description: typeof record.description === "string" ? record.description : null }]
+            : [];
+        });
+      store.setSessionModeState(sid, {
+        currentMode: mode,
+        availableModes,
+        liveSwitchSupported: true,
+        source: "acp_config",
+      });
+      store.updateSummary(sid, { mode });
+      break;
+    }
+    case "available_commands_update":
+    case "availableCommandsUpdate": {
+      const rawCommands = Array.isArray(u.availableCommands)
+        ? u.availableCommands
+        : Array.isArray(u.commands) ? u.commands : [];
+      const commands = rawCommands
+        .flatMap((command) => {
+          if (!command || typeof command !== "object") return [];
+          const record = command as Record<string, unknown>;
+          if (typeof record.name !== "string") return [];
+          return [{
+            name: record.name,
+            description: typeof record.description === "string" ? record.description : null,
+            input: record.input,
+          }];
+        });
+      store.setSessionCommands(sid, commands);
       break;
     }
     default: {
@@ -241,12 +455,32 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
     await listen<SessionEventEnvelope | SessionUpdate>(
       "acp:session_update",
       (event) => {
-        const sessionId = isSessionEventEnvelope(event.payload)
-          ? event.payload.sessionId
+        const envelope = isSessionEventEnvelope(event.payload)
+          ? (event.payload as SessionEventEnvelope)
           : null;
-        handleSessionUpdate(
-          unwrapPayload<SessionUpdate>(event.payload),
+        const isEnvelope = envelope !== null;
+        const sessionId = envelope?.sessionId ?? null;
+        const connectionId = envelope?.connectionId ?? null;
+        const update = unwrapPayload<SessionUpdate>(event.payload);
+        const localSessionId = resolveLocalSessionId(
           sessionId,
+          connectionId,
+          !isEnvelope,
+        );
+        if (envelope && localSessionId) {
+          void appendSessionEvent({
+            sessionId: localSessionId,
+            sequence: envelope.sequence,
+            timestamp: envelope.timestamp,
+            kind: envelope.kind,
+            payload: update,
+          }).catch(() => undefined);
+        }
+        handleSessionUpdate(
+          update,
+          sessionId,
+          connectionId,
+          !isEnvelope,
         );
       },
     ),
@@ -254,9 +488,19 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
 
   unsubs.push(
     await listen<AgentStatus>("acp:status", (event) => {
-      useAppStore.getState().setStatus(event.payload);
+      const store = useAppStore.getState();
+      store.setStatus(event.payload);
+      const localSessionId = resolveLocalSessionId(
+        event.payload.sessionId ?? null,
+        event.payload.connectionId ?? null,
+      );
+      if (localSessionId) {
+        if (event.payload.mode) store.setSessionModeState(localSessionId, event.payload.mode);
+        if (event.payload.availableCommands) {
+          store.setSessionCommands(localSessionId, event.payload.availableCommands);
+        }
+      }
       if (!event.payload.running) {
-        const store = useAppStore.getState();
         for (const id of store.sessionOrder) {
           store.setSessionBusy(id, false);
         }
@@ -288,7 +532,12 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
       } else {
         text = JSON.stringify(p);
       }
-      const sid = useAppStore.getState().activeSessionId;
+      const sid = isSessionEventEnvelope(event.payload)
+        ? resolveLocalSessionId(
+            event.payload.sessionId,
+            event.payload.connectionId,
+          )
+        : resolveLocalSessionId(undefined, undefined, true);
       if (sid) {
         useAppStore.getState().addBlock(sid, {
           type: "system",
@@ -309,35 +558,75 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
           raw && typeof raw === "object" && "method" in raw
             ? (raw as ServerRequest)
             : (event.payload as ServerRequest);
+        const connectionId = isSessionEventEnvelope(event.payload)
+          ? event.payload.connectionId
+          : "";
+        const sessionId = isSessionEventEnvelope(event.payload)
+          ? event.payload.sessionId
+          : null;
+        const routedRequest: ServerRequest = {
+          ...req,
+          connectionId,
+          sessionId,
+        };
 
-        if (!isPermissionMethod(req.method ?? "")) {
-          const sid = useAppStore.getState().activeSessionId;
+        if (routedRequest.method === "_x.ai/exit_plan_mode" || routedRequest.method === "x.ai/exit_plan_mode") {
+          const sid = resolveLocalSessionId(sessionId, connectionId);
+          if (!sid) return;
+          const params = routedRequest.params && typeof routedRequest.params === "object"
+            ? routedRequest.params as Record<string, unknown>
+            : {};
+          const planText = extractText(
+            (params.planContent ?? params.plan_content ?? params.content) as Parameters<typeof extractText>[0],
+          )
+            || (typeof params.plan === "string" ? params.plan : "")
+            || t.planReadyFallback;
+          useAppStore.getState().setPlan(sid, planText);
+          useAppStore.getState().setPlanApproval(routedRequest);
+          useAppStore.getState().updateSummary(sid, {
+            runState: "awaiting_plan",
+            attentionRequired: true,
+          });
+          useAppStore.getState().setSessionBusy(sid, false);
+          return;
+        }
+
+        if (!isPermissionMethod(routedRequest.method ?? "")) {
+          const sid = resolveLocalSessionId(sessionId, connectionId);
           if (sid) {
             useAppStore.getState().addBlock(sid, {
               type: "system",
               id: crypto.randomUUID(),
-              text: `Ignored non-permission server request: ${req.method}`,
+              text: `Ignored non-permission server request: ${routedRequest.method}`,
               level: "warn",
             });
           }
           return;
         }
 
-        const options = extractPermissionOptions(req.params);
-        const connectionId = isSessionEventEnvelope(event.payload)
-          ? event.payload.connectionId
-          : "local";
-        buildPermissionPrompt({ request: req, connectionId });
-        useAppStore.getState().setPermission(req, options);
+        const options = extractPermissionOptions(routedRequest.params);
+        buildPermissionPrompt({ request: routedRequest, connectionId });
+        useAppStore.getState().setPermission(routedRequest, options);
 
-        const settings = useAppStore.getState().settings;
-        if (settings.alwaysApprove) {
+        const localSessionId = resolveLocalSessionId(sessionId, connectionId);
+        if (localSessionId) {
+          useAppStore.getState().updateSummary(localSessionId, {
+            runState: "awaiting_permission",
+            attentionRequired: true,
+          });
+        }
+        const automaticallyApprove = localSessionId
+          ? useAppStore.getState().sessions[localSessionId]?.summary
+              .alwaysApprove === true
+          : false;
+        if (automaticallyApprove) {
           const allow =
             options.find(
               (o) => o.kind === "allow_once" || o.kind === "allow_always",
             ) ?? options[0];
           if (!allow) return;
-          void respondServerRequest(req.id, {
+          if (!connectionId) return;
+          void respondServerRequest(connectionId, routedRequest.id, {
             outcome: { outcome: "selected", optionId: allow.optionId },
           }).finally(() => useAppStore.getState().setPermission(null));
         }
@@ -351,7 +640,13 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
       (event) => {
         const p = unwrapPayload<{ method?: string }>(event.payload);
         const method = p?.method ?? "extension";
-        const sid = useAppStore.getState().activeSessionId;
+        if (shouldHideAcpNotification(method)) return;
+        const sid = isSessionEventEnvelope(event.payload)
+          ? resolveLocalSessionId(
+              event.payload.sessionId,
+              event.payload.connectionId,
+            )
+          : resolveLocalSessionId(undefined, undefined, true);
         if (sid) {
           useAppStore.getState().addBlock(sid, {
             type: "system",
@@ -370,7 +665,13 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
       (event) => {
         const p = unwrapPayload<{ method?: string }>(event.payload);
         const method = p?.method ?? "notification";
-        const sid = useAppStore.getState().activeSessionId;
+        if (shouldHideAcpNotification(method)) return;
+        const sid = isSessionEventEnvelope(event.payload)
+          ? resolveLocalSessionId(
+              event.payload.sessionId,
+              event.payload.connectionId,
+            )
+          : resolveLocalSessionId(undefined, undefined, true);
         if (sid) {
           useAppStore.getState().addBlock(sid, {
             type: "system",

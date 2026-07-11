@@ -7,13 +7,15 @@
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 // --- Runtime pool ---------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum SandboxMode {
     None,
+    #[default]
     Workspace,
     Strict,
 }
@@ -31,8 +33,14 @@ pub enum PowerProfile {
 pub struct ConnectionKey {
     pub workspace_root: String,
     pub sandbox: SandboxMode,
+    /// Grok approval is process-scoped, so ask/yolo sessions must not share a process.
+    #[serde(default)]
+    pub always_approve: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub power_profile: Option<PowerProfile>,
+    /// Model id used at process spawn; prevents reuse when live switch is unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
 }
 
 impl ConnectionKey {
@@ -48,8 +56,326 @@ impl ConnectionKey {
             SandboxMode::Workspace => "workspace",
             SandboxMode::Strict => "strict",
         };
-        format!("{}::{}::{}", self.workspace_root, sandbox, profile)
+        let approval = if self.always_approve {
+            "approve"
+        } else {
+            "ask"
+        };
+        let model = self
+            .model_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("default");
+        format!(
+            "{}::{}::{}::{approval}::{model}",
+            self.workspace_root, sandbox, profile
+        )
     }
+}
+
+// --- Models ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectableModel {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub is_default: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionModelState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_model_id: Option<String>,
+    #[serde(default)]
+    pub available_models: Vec<SelectableModel>,
+    #[serde(default)]
+    pub live_switch_supported: bool,
+    /// "acp" | "cli" | "configured"
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModelSwitchResult {
+    Switched { state: SessionModelState },
+    NewSessionRequired { reason: String },
+}
+
+// --- Session modes / commands ---------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectableMode {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionModeState {
+    pub current_mode: String,
+    #[serde(default)]
+    pub available_modes: Vec<SelectableMode>,
+    #[serde(default)]
+    pub live_switch_supported: bool,
+    /// "acp_config" | "acp_command" | "desktop"
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModeSwitchResult {
+    Switched { state: SessionModeState },
+    CommandRequired { command: String, reason: String },
+    Unsupported { reason: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvailableCommand {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<serde_json::Value>,
+}
+
+// --- Prompt content (ACP) --------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum PromptContent {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image")]
+    Image {
+        data: String,
+        #[serde(rename = "mimeType")]
+        mime_type: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
+    },
+    #[serde(rename = "resource")]
+    Resource { resource: PromptResource },
+    #[serde(rename = "resource_link")]
+    ResourceLink {
+        uri: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, rename = "mimeType", skip_serializing_if = "Option::is_none")]
+        mime_type: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptResource {
+    pub uri: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blob: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalAttachmentRef {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub mime_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+}
+
+impl PromptContent {
+    pub fn text_only(text: &str) -> Vec<Self> {
+        vec![PromptContent::Text {
+            text: text.to_string(),
+        }]
+    }
+
+    pub fn to_acp_value(&self) -> serde_json::Value {
+        match self {
+            PromptContent::Text { text } => json!({ "type": "text", "text": text }),
+            PromptContent::Image {
+                data,
+                mime_type,
+                uri,
+            } => {
+                let mut v = json!({
+                    "type": "image",
+                    "data": data,
+                    "mimeType": mime_type,
+                });
+                if let Some(u) = uri {
+                    v["uri"] = json!(u);
+                }
+                v
+            }
+            PromptContent::Resource { resource } => {
+                json!({
+                    "type": "resource",
+                    "resource": {
+                        "uri": resource.uri,
+                        "mimeType": resource.mime_type,
+                        "text": resource.text,
+                        "blob": resource.blob,
+                    }
+                })
+            }
+            PromptContent::ResourceLink {
+                uri,
+                name,
+                mime_type,
+                description,
+            } => {
+                let mut v = json!({ "type": "resource_link", "uri": uri });
+                if let Some(n) = name {
+                    v["name"] = json!(n);
+                }
+                if let Some(m) = mime_type {
+                    v["mimeType"] = json!(m);
+                }
+                if let Some(d) = description {
+                    v["description"] = json!(d);
+                }
+                v
+            }
+        }
+    }
+}
+
+// --- MCP -------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum McpTransport {
+    Stdio,
+    Http,
+    Sse,
+}
+
+impl McpTransport {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            McpTransport::Stdio => "stdio",
+            McpTransport::Http => "http",
+            McpTransport::Sse => "sse",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum McpScope {
+    User,
+    Project,
+}
+
+impl McpScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            McpScope::User => "user",
+            McpScope::Project => "project",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSecretField {
+    pub key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// keep | replace | delete
+    pub action: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerInput {
+    pub name: String,
+    pub scope: McpScope,
+    pub transport: McpTransport,
+    pub command_or_url: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: Vec<McpSecretField>,
+    #[serde(default)]
+    pub headers: Vec<McpSecretField>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolSummary {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpDoctorResult {
+    pub name: String,
+    pub ok: bool,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub tools: Vec<McpToolSummary>,
+    pub checked_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerInfo {
+    pub name: String,
+    pub transport: McpTransport,
+    pub scope: McpScope,
+    pub display_target: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env_keys: Vec<String>,
+    #[serde(default)]
+    pub header_keys: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_doctor: Option<McpDoctorResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpListResult {
+    pub servers: Vec<McpServerInfo>,
+    pub user_config_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_config_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +420,12 @@ pub struct AgentCapabilitySnapshot {
     pub auth_methods: Vec<AuthMethodSummary>,
     #[serde(default)]
     pub models: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_model_id: Option<String>,
+    #[serde(default)]
+    pub available_commands: Vec<AvailableCommand>,
+    #[serde(default)]
+    pub available_modes: Vec<SelectableMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,6 +475,24 @@ pub enum SessionRunState {
     Ended,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskMode {
+    #[default]
+    Agent,
+    Plan,
+    Goal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionPolicy {
+    #[default]
+    WorkspaceEdit,
+    AskAll,
+    FullAuto,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
@@ -160,6 +510,22 @@ pub struct SessionSummary {
     pub remote_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_commit: Option<String>,
+    #[serde(default)]
+    pub mode: TaskMode,
+    #[serde(default)]
+    pub permission_policy: PermissionPolicy,
+    #[serde(default)]
+    pub sandbox: SandboxMode,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default)]
+    pub attention_required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     pub always_approve: bool,
@@ -340,9 +706,22 @@ mod tests {
         let key = ConnectionKey {
             workspace_root: "/Users/me/proj".into(),
             sandbox: SandboxMode::Workspace,
+            always_approve: false,
             power_profile: None,
+            model_id: None,
         };
-        assert_eq!(key.key_string(), "/Users/me/proj::workspace::off");
+        assert_eq!(
+            key.key_string(),
+            "/Users/me/proj::workspace::off::ask::default"
+        );
+        let with_model = ConnectionKey {
+            model_id: Some("grok-4.5".into()),
+            ..key
+        };
+        assert_eq!(
+            with_model.key_string(),
+            "/Users/me/proj::workspace::off::ask::grok-4.5"
+        );
     }
 
     #[test]
@@ -353,7 +732,9 @@ mod tests {
                 key: ConnectionKey {
                     workspace_root: "/repo".into(),
                     sandbox: SandboxMode::None,
+                    always_approve: true,
                     power_profile: Some(PowerProfile::Balanced),
+                    model_id: Some("grok-build".into()),
                 },
                 state: ConnectionState::Ready,
                 grok_path: Some("/usr/local/bin/grok".into()),
@@ -458,6 +839,14 @@ mod tests {
             run_state: SessionRunState::Idle,
             remote_session_id: None,
             worktree_path: None,
+            execution_root: None,
+            base_commit: None,
+            mode: TaskMode::Agent,
+            permission_policy: PermissionPolicy::WorkspaceEdit,
+            sandbox: SandboxMode::Workspace,
+            archived: false,
+            attention_required: false,
+            applied_at: None,
             model: Some("grok-build".into()),
             always_approve: false,
             draft: Some("hello".into()),

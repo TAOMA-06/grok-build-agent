@@ -2,7 +2,8 @@
  * Session index and UI spine contracts.
  */
 
-import type { ConnectionId } from "./runtime";
+import type { ConnectionId, SandboxMode } from "./runtime";
+import type { TaskMode } from "./mode";
 
 export type SessionId = string;
 
@@ -29,6 +30,16 @@ export type SessionSummary = {
   remoteSessionId?: string | null;
   /** Associated worktree path when session is worktree-scoped. */
   worktreePath?: string | null;
+  /** Actual cwd used by the ACP process (worktree when isolated). */
+  executionRoot?: string | null;
+  /** Git commit used as the worktree/apply safety baseline. */
+  baseCommit?: string | null;
+  mode?: TaskMode;
+  permissionPolicy?: "workspace_edit" | "ask_all" | "full_auto";
+  sandbox?: SandboxMode;
+  archived?: boolean;
+  attentionRequired?: boolean;
+  appliedAt?: string | null;
   model?: string | null;
   alwaysApprove: boolean;
   draft?: string | null;
@@ -45,7 +56,13 @@ export type ToolCall = {
 
 /** Ordered execution-spine blocks shown in the center column. */
 export type ChatBlock =
-  | { type: "user"; id: string; text: string; at?: string }
+  | {
+      type: "user";
+      id: string;
+      text: string;
+      delivery?: "pending" | "sent" | "failed";
+      at?: string;
+    }
   | { type: "assistant"; id: string; text: string; at?: string }
   | { type: "thought"; id: string; text: string; at?: string }
   | { type: "tool"; id: string; tool: ToolCall; at?: string }

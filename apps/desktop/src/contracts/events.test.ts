@@ -68,10 +68,11 @@ describe("RuntimeSnapshot / SessionSummary / ReviewSnapshot shapes", () => {
     const key: ConnectionKey = {
       workspaceRoot: "/Users/me/proj",
       sandbox: "workspace",
+      alwaysApprove: false,
       powerProfile: null,
     };
     expect(connectionKeyString(key)).toBe(
-      "/Users/me/proj::workspace::off",
+      "/Users/me/proj::workspace::off::ask::default",
     );
   });
 

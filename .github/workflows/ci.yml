@@ -24,11 +24,12 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
       - run: npm ci
-      - run: npm test
-      - run: npm run build
+      - run: npm run check
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
   rust:
-    name: Rust
+    name: Rust (macOS v1)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,15 +44,19 @@ jobs:
         run: cargo fmt --all -- --check
       - name: clippy
         working-directory: apps/desktop/src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         working-directory: apps/desktop/src-tauri
-        run: cargo test --lib
-      - name: audit (advisory)
-        continue-on-error: true
-        run: |
-          cargo install cargo-audit --locked || true
-          cargo audit --manifest-path apps/desktop/src-tauri/Cargo.toml || true
+        run: cargo test --workspace
+
+  rust-audit:
+    name: Rust dependency audit
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-audit
+      - run: cargo audit --manifest-path apps/desktop/src-tauri/Cargo.toml
 
   harness:
     name: Harness plugin
@@ -63,14 +68,23 @@ jobs:
           if command -v grok >/dev/null 2>&1; then
             grok plugin validate harness
           else
-            echo "grok CLI not on runner; skip plugin validate"
+            echo "grok CLI not on runner; verifying bundled manifest instead"
             test -f harness/plugin.json
           fi
 
-  sbom-note:
-    name: SBOM reminder
+  sbom:
+    name: Generate SBOM
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          echo "Release pipeline may attach SBOM via cargo-cyclonedx / syft."
-          echo "Configure in T15 secrets before public distribution."
+      - uses: actions/checkout@v4
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: apps/desktop
+          format: spdx-json
+          output-file: grok-build-desktop.sbom.spdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-sbom
+          path: grok-build-desktop.sbom.spdx.json
+          if-no-files-found: error
