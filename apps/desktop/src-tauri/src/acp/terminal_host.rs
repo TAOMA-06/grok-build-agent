@@ -587,10 +587,20 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(wait["exitCode"], 0);
-        // Allow stdout reader task to flush into the buffer.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let out = host.output(&id).unwrap();
-        let text = out["output"].as_str().unwrap_or("");
+        // Process exit and the asynchronous PTY reader are independent. Poll
+        // for the expected output instead of assuming a fixed scheduler delay.
+        let text = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let out = host.output(&id).unwrap();
+                let text = out["output"].as_str().unwrap_or("").to_string();
+                if text.contains("hello-term") {
+                    break text;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .expect("PTY reader did not flush echo output before the deadline");
         assert!(
             text.contains("hello-term"),
             "expected echo output, got {text:?}"
