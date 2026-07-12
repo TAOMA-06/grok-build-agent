@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
+#[cfg(not(unix))]
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use uuid::Uuid;
@@ -165,11 +166,17 @@ impl TerminalHost {
         #[cfg(unix)]
         {
             let session = session.clone();
-            tokio::spawn(async move {
-                let mut out = tokio::fs::File::from_std(reader);
+            // PTY masters are character devices. Reading them through
+            // `tokio::fs::File` is unreliable on some macOS runner versions,
+            // because that adapter is intended for regular files. Keep the
+            // blocking read off the async runtime instead.
+            tokio::task::spawn_blocking(move || {
+                use std::io::Read;
+
+                let mut out = reader;
                 let mut buf = [0u8; 4096];
                 loop {
-                    match out.read(&mut buf).await {
+                    match out.read(&mut buf) {
                         Ok(0) => break,
                         Ok(n) => append_output(&session, &buf[..n]),
                         Err(_) => break,
