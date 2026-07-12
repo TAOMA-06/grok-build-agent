@@ -7,6 +7,7 @@ import { mockDesktopBridge } from "../../platform/mockBridge";
 import { defaultSettings, useAppStore, type SessionRuntime } from "../../store";
 import type { SessionSummary } from "../../types";
 import { useDesktopController } from "./useDesktopController";
+import { STOP_ARM_MS } from "./composerTiming";
 
 function wrapper(bridge: DesktopBridge) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -31,6 +32,7 @@ function runtime(summary: SessionSummary): SessionRuntime {
     availableCommands: [],
     attachments: [],
     failedSubmission: null,
+    contextUsage: null,
   };
 }
 
@@ -116,7 +118,7 @@ describe("useDesktopController", () => {
     );
   });
 
-  it("does not persist a live model change when the agent requires a new task", async () => {
+  it("restarts the agent when live model switch is unsupported", async () => {
     const summary: SessionSummary = {
       sessionId: "local",
       connectionId: "connection",
@@ -135,12 +137,25 @@ describe("useDesktopController", () => {
       sessionOrder: ["local"],
       activeSessionId: "local",
     });
+    const restartAgent = vi.fn().mockResolvedValue({
+      running: true,
+      connectionId: "connection-2",
+      sessionId: "remote-2",
+      cwd: "/repo",
+      grokPath: null,
+      lastError: null,
+      model: null,
+      mode: null,
+      availableCommands: [],
+    });
     const bridge: DesktopBridge = {
       ...mockDesktopBridge,
       setSessionModel: vi.fn().mockResolvedValue({
         kind: "new_session_required",
         reason: "unsupported",
       }),
+      restartAgent,
+      upsertSession: vi.fn().mockResolvedValue(undefined),
     };
     const { result } = renderHook(
       () => useDesktopController(async () => "clean_head"),
@@ -149,8 +164,56 @@ describe("useDesktopController", () => {
     await act(async () => {
       await result.current.chooseModel("grok-4.5");
     });
-    expect(useAppStore.getState().sessions.local?.summary.model).toBe("grok-build");
-    expect(result.current.pendingModelFork).toEqual({ modelId: "grok-4.5", reason: "unsupported" });
+    expect(useAppStore.getState().sessions.local?.summary.model).toBe("grok-4.5");
+    expect(restartAgent).toHaveBeenCalled();
+    expect(result.current.pendingModelFork).toBeNull();
+  });
+
+  it("restarts after unexpected end-of-file during model switch", async () => {
+    const summary: SessionSummary = {
+      sessionId: "local",
+      connectionId: "connection",
+      remoteSessionId: "remote",
+      workspaceRoot: "/repo",
+      title: "Task",
+      createdAt: "now",
+      updatedAt: "now",
+      runState: "idle",
+      model: "grok-build",
+      alwaysApprove: false,
+      sandbox: "workspace",
+    };
+    useAppStore.setState({
+      sessions: { local: runtime(summary) },
+      sessionOrder: ["local"],
+      activeSessionId: "local",
+    });
+    const restartAgent = vi.fn().mockResolvedValue({
+      running: true,
+      connectionId: "connection-2",
+      sessionId: "remote-2",
+      cwd: "/repo",
+      grokPath: null,
+      lastError: null,
+      model: null,
+      mode: null,
+      availableCommands: [],
+    });
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      setSessionModel: vi.fn().mockRejectedValue(new Error("unexpected end of file")),
+      restartAgent,
+      upsertSession: vi.fn().mockResolvedValue(undefined),
+    };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+    await act(async () => {
+      await result.current.chooseModel("grok-4.5");
+    });
+    expect(restartAgent).toHaveBeenCalled();
+    expect(useAppStore.getState().sessions.local?.summary.model).toBe("grok-4.5");
   });
 
   it("keeps provisional mode independent and persists a confirmed live mode switch", async () => {
@@ -187,7 +250,12 @@ describe("useDesktopController", () => {
       alwaysApprove: false,
       sandbox: "workspace",
     };
-    useAppStore.setState({ sessions: { "mode-local": runtime(summary) }, sessionOrder: ["mode-local"], activeSessionId: "mode-local" });
+    useAppStore.setState({
+      sessions: { "mode-local": runtime(summary) },
+      sessionOrder: ["mode-local"],
+      activeSessionId: "mode-local",
+      status: { running: true, connectionId: "connection", sessionId: "remote" },
+    });
     await act(async () => {
       await result.current.chooseMode("plan");
     });
@@ -195,7 +263,7 @@ describe("useDesktopController", () => {
     expect(useAppStore.getState().sessions["mode-local"]?.summary.mode).toBe("plan");
   });
 
-  it("rolls a command-fallback mode switch back when Grok rejects the control command", async () => {
+  it("defers command-fallback mode switches without auto-sending a control prompt", async () => {
     const summary: SessionSummary = {
       sessionId: "rollback-local",
       connectionId: "connection",
@@ -210,11 +278,17 @@ describe("useDesktopController", () => {
       alwaysApprove: false,
       sandbox: "workspace",
     };
-    useAppStore.setState({ sessions: { "rollback-local": runtime(summary) }, sessionOrder: ["rollback-local"], activeSessionId: "rollback-local" });
+    useAppStore.setState({
+      sessions: { "rollback-local": runtime(summary) },
+      sessionOrder: ["rollback-local"],
+      activeSessionId: "rollback-local",
+      status: { running: true, connectionId: "connection", sessionId: "remote" },
+    });
+    const sendPrompt = vi.fn().mockResolvedValue({});
     const bridge: DesktopBridge = {
       ...mockDesktopBridge,
       setSessionMode: vi.fn().mockResolvedValue({ kind: "command_required", command: "/plan" }),
-      sendPrompt: vi.fn().mockRejectedValue(new Error("control command failed")),
+      sendPrompt,
     };
     const { result } = renderHook(
       () => useDesktopController(async () => "clean_head"),
@@ -224,9 +298,241 @@ describe("useDesktopController", () => {
     await act(async () => {
       switchResult = await result.current.chooseMode("plan");
     });
-    expect(switchResult).toMatchObject({ kind: "unsupported" });
-    expect(useAppStore.getState().sessions["rollback-local"]?.summary.mode).toBe("agent");
+    expect(switchResult).toMatchObject({ kind: "switched", state: { currentMode: "plan" } });
+    expect(sendPrompt).not.toHaveBeenCalled();
+    expect(useAppStore.getState().sessions["rollback-local"]?.summary.mode).toBe("plan");
     expect(useAppStore.getState().sessions["rollback-local"]?.busy).toBe(false);
+  });
+
+  it("clears busy state when cancel IPC fails and ignores late send completion", async () => {
+    const summary: SessionSummary = {
+      sessionId: "cancel-local",
+      connectionId: "connection",
+      remoteSessionId: "remote",
+      workspaceRoot: "/repo",
+      title: "Cancel task",
+      createdAt: "now",
+      updatedAt: "now",
+      runState: "idle",
+      model: "grok-build",
+      mode: "agent",
+      alwaysApprove: false,
+      sandbox: "workspace",
+    };
+    let resolvePrompt: (value: unknown) => void = () => undefined;
+    const sendPrompt = vi.fn().mockImplementation(
+      () => new Promise((resolve) => {
+        resolvePrompt = resolve;
+      }),
+    );
+    const cancelPrompt = vi.fn().mockRejectedValue(
+      new Error("invalid type: map, expected unit"),
+    );
+    useAppStore.setState({
+      sessions: { "cancel-local": runtime(summary) },
+      sessionOrder: ["cancel-local"],
+      activeSessionId: "cancel-local",
+      status: { running: true, connectionId: "connection", sessionId: "remote" },
+    });
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      sendPrompt,
+      cancelPrompt,
+      upsertSession: vi.fn().mockResolvedValue(undefined),
+      saveDraft: vi.fn().mockResolvedValue(undefined),
+      prepareAttachments: vi.fn().mockResolvedValue([]),
+      appendCachedEvent: vi.fn().mockResolvedValue(undefined),
+    };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.send("做个简单的测试计划，我看一下grok", [], "agent");
+    });
+    expect(sendPrompt).toHaveBeenCalled();
+    expect(useAppStore.getState().sessions["cancel-local"]?.busy).toBe(true);
+    expect(
+      useAppStore.getState().sessions["cancel-local"]?.blocks.find((block) => block.type === "user"),
+    ).toMatchObject({ delivery: "sent" });
+
+    await act(async () => {
+      await result.current.cancel();
+    });
+    expect(cancelPrompt).toHaveBeenCalledWith("connection", "remote");
+    expect(useAppStore.getState().sessions["cancel-local"]?.busy).toBe(false);
+    expect(useAppStore.getState().sessions["cancel-local"]?.summary.runState).toBe("cancelled");
+    expect(
+      useAppStore.getState().sessions["cancel-local"]?.blocks.find((block) => block.type === "user"),
+    ).toMatchObject({ delivery: "sent" });
+
+    await act(async () => {
+      resolvePrompt({});
+      await sendPromise;
+    });
+    expect(useAppStore.getState().sessions["cancel-local"]?.busy).toBe(false);
+    expect(useAppStore.getState().sessions["cancel-local"]?.summary.runState).toBe("cancelled");
+  });
+
+  it("ignores a premature cancel while reconnecting so the in-flight send can finish", async () => {
+    const summary: SessionSummary = {
+      sessionId: "race-local",
+      connectionId: "stale-connection",
+      remoteSessionId: "remote",
+      workspaceRoot: "/repo",
+      title: "Race task",
+      createdAt: "now",
+      updatedAt: "now",
+      runState: "idle",
+      model: "grok-build",
+      mode: "plan",
+      alwaysApprove: false,
+      sandbox: "workspace",
+    };
+    let resolveStart: (value: unknown) => void = () => undefined;
+    const startAgent = vi.fn().mockImplementation(
+      () => new Promise((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+    const sendPrompt = vi.fn().mockResolvedValue({});
+    const cancelPrompt = vi.fn().mockRejectedValue(new Error("agent is not running"));
+    useAppStore.setState({
+      sessions: { "race-local": runtime(summary) },
+      sessionOrder: ["race-local"],
+      activeSessionId: "race-local",
+      status: { running: false },
+    });
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      startAgent,
+      sendPrompt,
+      cancelPrompt,
+      upsertSession: vi.fn().mockResolvedValue(undefined),
+      saveDraft: vi.fn().mockResolvedValue(undefined),
+      prepareAttachments: vi.fn().mockResolvedValue([]),
+      appendCachedEvent: vi.fn().mockResolvedValue(undefined),
+      confirmSessionMode: vi.fn().mockResolvedValue({
+        currentMode: "plan",
+        availableModes: [],
+        liveSwitchSupported: false,
+        source: "acp_command",
+      }),
+    };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.send("inspect without writing", [], "plan");
+    });
+    expect(useAppStore.getState().sessions["race-local"]?.busy).toBe(true);
+
+    await act(async () => {
+      await result.current.cancel();
+    });
+    expect(cancelPrompt).not.toHaveBeenCalled();
+    expect(useAppStore.getState().sessions["race-local"]?.busy).toBe(true);
+    expect(
+      useAppStore.getState().sessions["race-local"]?.blocks.some(
+        (block) => block.type === "system" && String(block.text).includes("Stop signal"),
+      ),
+    ).toBe(false);
+
+    await act(async () => {
+      resolveStart({
+        running: true,
+        connectionId: "fresh-connection",
+        sessionId: "remote",
+      });
+      await sendPromise;
+    });
+    expect(sendPrompt).toHaveBeenCalledWith(
+      "fresh-connection",
+      "remote",
+      "/plan inspect without writing",
+      expect.any(Array),
+      expect.objectContaining({ taskId: "race-local" }),
+    );
+    expect(useAppStore.getState().sessions["race-local"]?.busy).toBe(false);
+    expect(
+      useAppStore.getState().sessions["race-local"]?.blocks.find((block) => block.type === "user"),
+    ).toMatchObject({ delivery: "sent" });
+  });
+
+  it("cancels after the stop arm window without warning when the agent is not running", async () => {
+    const summary: SessionSummary = {
+      sessionId: "stale-cancel",
+      connectionId: "stale-connection",
+      remoteSessionId: "remote",
+      workspaceRoot: "/repo",
+      title: "Stale cancel",
+      createdAt: "now",
+      updatedAt: "now",
+      runState: "idle",
+      model: "grok-build",
+      mode: "agent",
+      alwaysApprove: false,
+      sandbox: "workspace",
+    };
+    let resolveStart: (value: unknown) => void = () => undefined;
+    const startAgent = vi.fn().mockImplementation(
+      () => new Promise((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+    const cancelPrompt = vi.fn().mockRejectedValue(new Error("agent is not running"));
+    useAppStore.setState({
+      sessions: { "stale-cancel": runtime(summary) },
+      sessionOrder: ["stale-cancel"],
+      activeSessionId: "stale-cancel",
+      status: { running: false },
+    });
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      startAgent,
+      cancelPrompt,
+      sendPrompt: vi.fn().mockResolvedValue({}),
+      upsertSession: vi.fn().mockResolvedValue(undefined),
+      saveDraft: vi.fn().mockResolvedValue(undefined),
+      prepareAttachments: vi.fn().mockResolvedValue([]),
+    };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.send("hello", [], "agent");
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, STOP_ARM_MS + 20));
+    });
+    await act(async () => {
+      await result.current.cancel();
+    });
+    expect(cancelPrompt).not.toHaveBeenCalled();
+    expect(useAppStore.getState().sessions["stale-cancel"]?.busy).toBe(false);
+    expect(
+      useAppStore.getState().sessions["stale-cancel"]?.blocks.some(
+        (block) => block.type === "system" && String(block.text).includes("agent is not running"),
+      ),
+    ).toBe(false);
+
+    await act(async () => {
+      resolveStart({
+        running: true,
+        connectionId: "fresh-connection",
+        sessionId: "remote",
+      });
+      await sendPromise;
+    });
+    expect(useAppStore.getState().sessions["stale-cancel"]?.summary.runState).toBe("cancelled");
   });
 
   it("reconnects a restored task when its persisted ACP connection is stale", async () => {
@@ -245,7 +551,12 @@ describe("useDesktopController", () => {
       alwaysApprove: false,
       sandbox: "workspace",
     };
-    useAppStore.setState({ sessions: { "restored-local": runtime(summary) }, sessionOrder: ["restored-local"], activeSessionId: "restored-local" });
+    useAppStore.setState({
+      sessions: { "restored-local": runtime(summary) },
+      sessionOrder: ["restored-local"],
+      activeSessionId: "restored-local",
+      status: { running: true, connectionId: "stale-connection", sessionId: "remote" },
+    });
     const setSessionMode = vi.fn()
       .mockRejectedValueOnce(new Error("connection not found"))
       .mockResolvedValueOnce({

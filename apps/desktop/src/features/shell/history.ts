@@ -1,19 +1,33 @@
 import type { CachedSessionEvent } from "../../api/catalog";
 import type { ChatBlock, SessionUpdate, ToolCall } from "../../types";
 
-function textFrom(content: SessionUpdate["content"]): string {
+function textFrom(content: SessionUpdate["content"] | unknown): string {
+  if (!content) return "";
   if (typeof content === "string") return content;
-  if (content && typeof content === "object") return String(content.text ?? "");
+  if (Array.isArray(content)) {
+    return content.map((item) => textFrom(item)).filter(Boolean).join("");
+  }
+  if (content && typeof content === "object") return String((content as { text?: string }).text ?? "");
   return "";
 }
 
 export function normalizeCachedEvents(events: CachedSessionEvent[]): ChatBlock[] {
   const blocks: ChatBlock[] = [];
   const toolBlocks = new Map<string, number>();
+  const seenRuntimeEvents = new Set<string>();
   let streamingKind: "assistant" | "thought" | null = null;
   let streamingIndex = -1;
 
   for (const event of events) {
+    const eventId = event.payload && typeof event.payload === "object"
+      ? String(((event.payload as { _meta?: { eventId?: unknown } })._meta?.eventId) ?? "")
+      : "";
+    // Older builds persisted each Host envelope once in the Host and once in
+    // the Renderer. Keep history readable without rewriting immutable events.
+    if (eventId) {
+      if (seenRuntimeEvents.has(eventId)) continue;
+      seenRuntimeEvents.add(eventId);
+    }
     if (event.kind === "user") {
       blocks.push({
         id: `history-user-${event.sequence}`,

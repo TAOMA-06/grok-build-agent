@@ -81,10 +81,12 @@ function ToolActivity({ block }: { block: Extract<ChatBlock, { type: "tool" }> }
 
 export function Timeline({
   blocks,
+  busy = false,
   onPlanAction,
   planActionsEnabled = false,
 }: {
   blocks: ChatBlock[];
+  busy?: boolean;
   onPlanAction: (action: "approve" | "revise") => void;
   planActionsEnabled?: boolean;
 }) {
@@ -98,6 +100,13 @@ export function Timeline({
     (lastIndex, block, index) => block.type === "plan" ? index : lastIndex,
     -1,
   );
+  const latestThoughtId = useMemo(() => {
+    for (let index = visibleBlocks.length - 1; index >= 0; index -= 1) {
+      const block = visibleBlocks[index];
+      if (block?.type === "thought") return block.id;
+    }
+    return null;
+  }, [visibleBlocks]);
   return (
     <div className="gb-timeline">
       {visibleCount < blocks.length && <button type="button" className="gb-button" onClick={() => setVisibleCount((count) => Math.min(blocks.length, count + 2_000))}>Load 2,000 earlier events</button>}
@@ -119,9 +128,10 @@ export function Timeline({
           );
         }
         if (block.type === "thought") {
+          const openWhileStreaming = busy && block.id === latestThoughtId;
           return (
-            <details key={block.id} className="gb-reasoning">
-              <summary><LoaderCircle size={13} /> {t.reasoning}<Timestamp at={block.at} /></summary>
+            <details key={block.id} className="gb-reasoning" open={openWhileStreaming || undefined}>
+              <summary><LoaderCircle size={13} className={openWhileStreaming ? "gb-spin" : undefined} /> {t.reasoning}<Timestamp at={block.at} /></summary>
               <div>{block.text}</div>
             </details>
           );

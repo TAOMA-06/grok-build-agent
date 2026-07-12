@@ -6,16 +6,19 @@ import { emptyComposerDraft } from "../../contracts";
 import { DesktopBridgeContext } from "../../platform/DesktopBridge";
 import { mockDesktopBridge } from "../../platform/mockBridge";
 import { defaultSettings, useAppStore } from "../../store";
-import { CommandComposer, browserAttachment } from "./CommandComposer";
+import { CommandComposer, browserAttachment, STOP_ARM_MS } from "./CommandComposer";
 
 function renderComposer(overrides?: {
   onSend?: ReturnType<typeof vi.fn>;
   onLocalCommand?: ReturnType<typeof vi.fn>;
   onChooseMode?: ReturnType<typeof vi.fn>;
+  onCancel?: ReturnType<typeof vi.fn>;
   busy?: boolean;
+  connecting?: boolean;
 }) {
   const onSend = overrides?.onSend ?? vi.fn().mockResolvedValue(undefined);
   const onLocalCommand = overrides?.onLocalCommand ?? vi.fn();
+  const onCancel = overrides?.onCancel ?? vi.fn().mockResolvedValue(undefined);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <DesktopBridgeContext.Provider value={mockDesktopBridge}>
@@ -23,10 +26,11 @@ function renderComposer(overrides?: {
         <CommandComposer
           models={[{ id: "grok-build", name: "Grok Build", isDefault: true }]}
           busy={overrides?.busy ?? false}
-          connecting={false}
+          connecting={overrides?.connecting ?? false}
           onSend={onSend}
-          onCancel={vi.fn().mockResolvedValue(undefined)}
+          onCancel={onCancel}
           onChooseModel={vi.fn().mockResolvedValue(undefined)}
+          onChooseEffort={vi.fn().mockResolvedValue(undefined)}
           onChooseMode={overrides?.onChooseMode ?? vi.fn().mockImplementation(async (mode) => ({
             kind: "switched",
             state: { currentMode: mode, availableModes: [], liveSwitchSupported: false, source: "desktop" },
@@ -36,7 +40,7 @@ function renderComposer(overrides?: {
       </QueryClientProvider>
     </DesktopBridgeContext.Provider>,
   );
-  return { onSend, onLocalCommand };
+  return { onSend, onLocalCommand, onCancel };
 }
 
 describe("CommandComposer", () => {
@@ -59,6 +63,65 @@ describe("CommandComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.keyDown(textarea, { key: "Enter", isComposing: false });
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("中文", [], "agent"));
+  });
+
+  it("does not submit on the Enter that confirms IME composition", async () => {
+    const { onSend } = renderComposer();
+    const textarea = screen.getByRole("textbox", { name: "Message Grok" });
+    fireEvent.change(textarea, { target: { value: "做个简单的测试计划，我看一下grok" } });
+    fireEvent.compositionStart(textarea);
+    fireEvent.compositionEnd(textarea);
+    fireEvent.keyDown(textarea, { key: "Enter", isComposing: false });
+    expect(onSend).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    fireEvent.keyDown(textarea, { key: "Enter", isComposing: false });
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith("做个简单的测试计划，我看一下grok", [], "agent");
+    });
+  });
+
+  it("delays Stop so an immediate re-click cannot cancel the send that just started", async () => {
+    vi.useFakeTimers();
+    const onCancel = vi.fn().mockResolvedValue(undefined);
+    renderComposer({ busy: true, onCancel });
+    expect(screen.queryByRole("button", { name: "Stop Grok" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Send to Grok" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Send to Grok" }));
+    expect(onCancel).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(STOP_ARM_MS);
+    fireEvent.click(screen.getByRole("button", { name: "Stop Grok" }));
+    expect(onCancel).toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("shows Stop while busy and invokes onCancel", async () => {
+    vi.useFakeTimers();
+    const onCancel = vi.fn().mockResolvedValue(undefined);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <DesktopBridgeContext.Provider value={mockDesktopBridge}>
+        <QueryClientProvider client={queryClient}>
+          <CommandComposer
+            models={[{ id: "grok-build", name: "Grok Build", isDefault: true }]}
+            busy
+            connecting={false}
+            onSend={vi.fn().mockResolvedValue(undefined)}
+            onCancel={onCancel}
+            onChooseModel={vi.fn().mockResolvedValue(undefined)}
+            onChooseEffort={vi.fn().mockResolvedValue(undefined)}
+            onChooseMode={vi.fn().mockImplementation(async (mode) => ({
+              kind: "switched",
+              state: { currentMode: mode, availableModes: [], liveSwitchSupported: false, source: "desktop" },
+            }))}
+            onLocalCommand={vi.fn()}
+          />
+        </QueryClientProvider>
+      </DesktopBridgeContext.Provider>,
+    );
+    await vi.advanceTimersByTimeAsync(STOP_ARM_MS);
+    fireEvent.click(screen.getByRole("button", { name: "Stop Grok" }));
+    expect(onCancel).toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it("executes local slash commands without sending them to Grok", async () => {

@@ -25,11 +25,16 @@ export type ConnectionKey = {
   sandbox: SandboxMode;
   alwaysApprove: boolean;
   powerProfile: PowerProfile;
-  /**
+/**
    * Model id used when spawning the process.
    * Included so agents that cannot live-switch models never reuse the wrong process.
    */
   modelId?: string | null;
+  /**
+   * Reasoning effort used at process spawn (`--reasoning-effort`).
+   * Included so live-switch failures do not reuse a process with the wrong effort.
+   */
+  reasoningEffort?: string | null;
 };
 
 export type ConnectionId = string;
@@ -93,6 +98,8 @@ export type StartConfig = {
   taskId?: string | null;
   grokPath?: string | null;
   model?: string | null;
+  /** CLI `--reasoning-effort` / `--effort` when the model supports it. */
+  reasoningEffort?: string | null;
   alwaysApprove: boolean;
   cwd: string;
   rules?: string | null;
@@ -152,7 +159,8 @@ export type AgentHostHealth = {
 export function connectionKeyString(key: ConnectionKey): string {
   const profile = key.powerProfile ?? "off";
   const model = key.modelId?.trim() || "default";
-  return `${key.workspaceRoot}::${key.sandbox}::${profile}::${key.alwaysApprove ? "approve" : "ask"}::${model}`;
+  const effort = key.reasoningEffort?.trim() || "default";
+  return `${key.workspaceRoot}::${key.sandbox}::${profile}::${key.alwaysApprove ? "approve" : "ask"}::${model}::${effort}`;
 }
 
 export function emptyRuntimeSnapshot(now = new Date().toISOString()): RuntimeSnapshot {

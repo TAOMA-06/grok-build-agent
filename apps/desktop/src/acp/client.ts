@@ -19,7 +19,6 @@ import type {
   PromptDispatchContext,
 } from "../types";
 import { useAppStore } from "../store";
-import { appendSessionEvent } from "../api/catalog";
 import { t } from "../i18n";
 
 /** Unwrap SessionEventEnvelope or return legacy raw payload. */
@@ -145,6 +144,18 @@ export async function setSessionModel(
   });
 }
 
+export async function setSessionEffort(
+  connectionId: string,
+  sessionId: string,
+  effort: string,
+): Promise<import("../types").EffortSwitchResult> {
+  return invoke("set_session_effort", {
+    connectionId,
+    sessionId,
+    effort,
+  });
+}
+
 export async function setSessionMode(
   connectionId: string,
   sessionId: string,
@@ -217,13 +228,101 @@ export async function respondServerRequest(
   });
 }
 
-function extractText(content: SessionUpdate["content"]): string {
+function extractText(content: SessionUpdate["content"] | unknown): string {
   if (!content) return "";
   if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((item) => extractText(item)).filter(Boolean).join("");
+  }
   if (typeof content === "object" && content && "text" in content) {
     return String((content as { text?: string }).text ?? "");
   }
   return "";
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/** Best-effort extraction of context usage from ACP / x.ai payloads. */
+export function extractContextUsage(
+  payload: unknown,
+): import("../types").SessionContextUsage | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as Record<string, unknown>;
+  const nested =
+    (root.update && typeof root.update === "object"
+      ? (root.update as Record<string, unknown>)
+      : null) ??
+    (root.params && typeof root.params === "object"
+      ? (root.params as Record<string, unknown>)
+      : null) ??
+    (root.usage && typeof root.usage === "object"
+      ? (root.usage as Record<string, unknown>)
+      : null) ??
+    root;
+  const usedTokens = asFiniteNumber(
+    nested.usedTokens ??
+      nested.used_tokens ??
+      nested.totalContextTokens ??
+      nested.total_context_tokens ??
+      nested.contextTokens ??
+      nested.context_tokens,
+  );
+  const windowTokens = asFiniteNumber(
+    nested.windowTokens ??
+      nested.window_tokens ??
+      nested.contextWindowTokens ??
+      nested.context_window_tokens ??
+      nested.contextWindow ??
+      nested.context_window,
+  );
+  let usagePercent = asFiniteNumber(
+    nested.usagePercent ??
+      nested.usage_percent ??
+      nested.contextUsagePct ??
+      nested.context_usage_pct ??
+      nested.percent,
+  );
+  if (usagePercent != null && usagePercent <= 1 && (usedTokens == null || windowTokens == null)) {
+    usagePercent = usagePercent * 100;
+  }
+  if (
+    usagePercent == null &&
+    usedTokens != null &&
+    windowTokens != null &&
+    windowTokens > 0
+  ) {
+    usagePercent = (usedTokens / windowTokens) * 100;
+  }
+  if (usedTokens == null && windowTokens == null && usagePercent == null) {
+    return null;
+  }
+  return {
+    usedTokens,
+    windowTokens,
+    usagePercent,
+    source: "acp",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function applyContextUsage(
+  sessionId: string | null,
+  connectionId: string | null,
+  payload: unknown,
+) {
+  const usage = extractContextUsage(payload);
+  if (!usage) return false;
+  const sid = resolveLocalSessionId(sessionId, connectionId);
+  if (!sid) return false;
+  useAppStore.getState().setSessionContextUsage(sid, usage);
+  return true;
 }
 
 const HIDDEN_XAI_NOTIFICATIONS = new Set([
@@ -397,23 +496,44 @@ export function handleSessionUpdate(
         ? asTaskMode(u.value ?? u.currentValue)
         : null;
       const mode = directMode ?? asTaskMode(modeOption?.currentValue);
-      if (!mode) break;
-      const availableModes = (Array.isArray(modeOption?.options) ? modeOption.options : [])
-        .flatMap((option) => {
-          if (!option || typeof option !== "object") return [];
-          const record = option as Record<string, unknown>;
-          const id = asTaskMode(record.id ?? record.value);
-          return id
-            ? [{ id, name: String(record.name ?? id), description: typeof record.description === "string" ? record.description : null }]
-            : [];
+      if (mode) {
+        const availableModes = (Array.isArray(modeOption?.options) ? modeOption.options : [])
+          .flatMap((option) => {
+            if (!option || typeof option !== "object") return [];
+            const record = option as Record<string, unknown>;
+            const id = asTaskMode(record.id ?? record.value);
+            return id
+              ? [{ id, name: String(record.name ?? id), description: typeof record.description === "string" ? record.description : null }]
+              : [];
+          });
+        store.setSessionModeState(sid, {
+          currentMode: mode,
+          availableModes,
+          liveSwitchSupported: true,
+          source: "acp_config",
         });
-      store.setSessionModeState(sid, {
-        currentMode: mode,
-        availableModes,
-        liveSwitchSupported: true,
-        source: "acp_config",
-      });
-      store.updateSummary(sid, { mode });
+        store.updateSummary(sid, { mode });
+      }
+
+      const effortId = String(u.configId ?? u.config_id ?? "");
+      if (effortId === "reasoning_effort" || effortId === "effort") {
+        const effort = String(u.value ?? u.currentValue ?? "").trim();
+        if (effort) store.updateSummary(sid, { reasoningEffort: effort });
+      }
+      const effortOption = options.find((option) => {
+        if (!option || typeof option !== "object") return false;
+        const record = option as Record<string, unknown>;
+        return (
+          record.id === "reasoning_effort" ||
+          record.id === "effort" ||
+          record.category === "reasoning_effort"
+        );
+      }) as Record<string, unknown> | undefined;
+      if (effortOption?.currentValue != null) {
+        const effort = String(effortOption.currentValue).trim();
+        if (effort) store.updateSummary(sid, { reasoningEffort: effort });
+      }
+      applyContextUsage(sessionId, connectionId, u);
       break;
     }
     case "available_commands_update":
@@ -436,7 +556,12 @@ export function handleSessionUpdate(
       break;
     }
     default: {
-      if (kind) {
+      if (applyContextUsage(sessionId, connectionId, u)) break;
+      const quiet =
+        /usage|context|token|compact|progress/i.test(kind) ||
+        kind === "status_update" ||
+        kind === "statusUpdate";
+      if (kind && !quiet) {
         store.addBlock(sid, {
           type: "system",
           id: crypto.randomUUID(),
@@ -462,20 +587,9 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
         const sessionId = envelope?.sessionId ?? null;
         const connectionId = envelope?.connectionId ?? null;
         const update = unwrapPayload<SessionUpdate>(event.payload);
-        const localSessionId = resolveLocalSessionId(
-          sessionId,
-          connectionId,
-          !isEnvelope,
-        );
-        if (envelope && localSessionId) {
-          void appendSessionEvent({
-            sessionId: localSessionId,
-            sequence: envelope.sequence,
-            timestamp: envelope.timestamp,
-            kind: envelope.kind,
-            payload: update,
-          }).catch(() => undefined);
-        }
+        // The independent Host is the sole event-store writer. Persisting the
+        // same envelope again from the Renderer gives it a different dedupe key
+        // and doubles every streamed token when history is reconstructed.
         handleSessionUpdate(
           update,
           sessionId,
@@ -638,15 +752,23 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
     await listen<SessionEventEnvelope | { method: string }>(
       "acp:extension",
       (event) => {
-        const p = unwrapPayload<{ method?: string }>(event.payload);
+        const p = unwrapPayload<{ method?: string; params?: unknown }>(event.payload);
         const method = p?.method ?? "extension";
+        const sessionId = isSessionEventEnvelope(event.payload)
+          ? event.payload.sessionId
+          : null;
+        const connectionId = isSessionEventEnvelope(event.payload)
+          ? event.payload.connectionId
+          : null;
+        if (
+          method.includes("session_notification") ||
+          method.includes("context") ||
+          method.includes("usage")
+        ) {
+          applyContextUsage(sessionId, connectionId, p?.params ?? p ?? event.payload);
+        }
         if (shouldHideAcpNotification(method)) return;
-        const sid = isSessionEventEnvelope(event.payload)
-          ? resolveLocalSessionId(
-              event.payload.sessionId,
-              event.payload.connectionId,
-            )
-          : resolveLocalSessionId(undefined, undefined, true);
+        const sid = resolveLocalSessionId(sessionId, connectionId, !isSessionEventEnvelope(event.payload));
         if (sid) {
           useAppStore.getState().addBlock(sid, {
             type: "system",
@@ -663,15 +785,23 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
     await listen<SessionEventEnvelope | { method: string }>(
       "acp:notification",
       (event) => {
-        const p = unwrapPayload<{ method?: string }>(event.payload);
+        const p = unwrapPayload<{ method?: string; params?: unknown }>(event.payload);
         const method = p?.method ?? "notification";
+        const sessionId = isSessionEventEnvelope(event.payload)
+          ? event.payload.sessionId
+          : null;
+        const connectionId = isSessionEventEnvelope(event.payload)
+          ? event.payload.connectionId
+          : null;
+        if (
+          method.includes("session_notification") ||
+          method.includes("context") ||
+          method.includes("usage")
+        ) {
+          applyContextUsage(sessionId, connectionId, p?.params ?? p ?? event.payload);
+        }
         if (shouldHideAcpNotification(method)) return;
-        const sid = isSessionEventEnvelope(event.payload)
-          ? resolveLocalSessionId(
-              event.payload.sessionId,
-              event.payload.connectionId,
-            )
-          : resolveLocalSessionId(undefined, undefined, true);
+        const sid = resolveLocalSessionId(sessionId, connectionId, !isSessionEventEnvelope(event.payload));
         if (sid) {
           useAppStore.getState().addBlock(sid, {
             type: "system",

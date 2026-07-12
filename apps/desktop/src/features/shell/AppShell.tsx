@@ -3,6 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore, type SessionRuntime } from "../../store";
+import { mergeSelectableModels } from "../../contracts/model";
 import type { Settings } from "../../types";
 import { t } from "../../i18n";
 import { ContextDrawer } from "./ContextDrawer";
@@ -155,13 +156,12 @@ export function AppShell() {
     const sessionModels = activeSession?.modelState?.availableModels ?? [];
     const cliModels = modelsQuery.data ?? [];
     const configuredId = activeSession?.summary.model || settings.model;
-    const ordered = [...sessionModels, ...cliModels];
+    // Prefer CLI/cache catalog metadata (effort, window) over bare ACP stubs.
+    const ordered = mergeSelectableModels(cliModels, sessionModels);
     if (configuredId && !ordered.some((model) => model.id === configuredId)) {
       ordered.push({ id: configuredId, name: configuredId, isDefault: ordered.length === 0 });
     }
-    return ordered.filter(
-      (model, index) => ordered.findIndex((candidate) => candidate.id === model.id) === index,
-    );
+    return ordered;
   }, [activeSession?.modelState?.availableModels, activeSession?.summary.model, modelsQuery.data, settings.model]);
 
   async function openWorkspace() {
@@ -172,11 +172,17 @@ export function AppShell() {
   }
 
   async function selectWorkspace(path: string) {
-    setSettings({ cwd: path });
-    await bridge.saveSettings({ ...useAppStore.getState().settings, cwd: path } satisfies Settings);
-    const first = orderedSessions.find((session) => session.summary.workspaceRoot === path && !session.summary.archived);
+    const first = orderedSessions.find(
+      (session) => session.summary.workspaceRoot === path && !session.summary.archived,
+    );
+    // Switch the visible workspace before crossing the IPC boundary. The active
+    // session takes precedence over settings.cwd when deriving activeWorkspace,
+    // so leaving the old session selected makes a slow/failed save look like the
+    // project click was ignored.
     setActiveSession(first?.summary.sessionId ?? null);
+    setSettings({ cwd: path });
     setDrawerOpen(false);
+    await bridge.saveSettings({ ...useAppStore.getState().settings, cwd: path } satisfies Settings);
   }
 
   function resolveDirtyPolicy(policy: DirtyPolicy) {
@@ -255,6 +261,10 @@ export function AppShell() {
       case "/model":
         if (args) await controller.chooseModel(args);
         else window.dispatchEvent(new Event("grok:open-model"));
+        break;
+      case "/effort":
+        if (args) await controller.chooseEffort(args.split(/\s+/)[0]);
+        else window.dispatchEvent(new Event("grok:open-effort"));
         break;
       case "/rename":
         if (args) await renameActiveThread(args);
@@ -401,6 +411,7 @@ export function AppShell() {
         onSend={controller.send}
         onCancel={controller.cancel}
         onChooseModel={controller.chooseModel}
+        onChooseEffort={controller.chooseEffort}
         onChooseMode={controller.chooseMode}
         onLocalCommand={(command) => void runLocalCommand(command)}
         onRetryFailed={controller.retryFailed}

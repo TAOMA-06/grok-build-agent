@@ -1,5 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { buildPromptContent } from "../../contracts";
+import { mergeSelectableModels } from "../../contracts/model";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore } from "../../store";
 import { t, translate } from "../../i18n";
@@ -11,6 +12,7 @@ import type {
   SessionSummary,
   TaskMode,
 } from "../../types";
+import { STOP_ARM_MS } from "./composerTiming";
 
 export type DirtyPolicy = "clean_head" | "copy_dirty";
 
@@ -23,6 +25,7 @@ export type DesktopController = {
   cancel(): Promise<void>;
   reloadActiveAgent(): Promise<void>;
   chooseModel(modelId: string): Promise<void>;
+  chooseEffort(effort: string): Promise<void>;
   chooseMode(mode: TaskMode): Promise<ModeSwitchResult>;
   pendingModelFork: { modelId: string; reason: string } | null;
   confirmModelFork(): Promise<void>;
@@ -59,6 +62,12 @@ export function useDesktopController(
     modelId: string;
     reason: string;
   } | null>(null);
+  /** Bumped on cancel so an in-flight send cannot re-busy or overwrite cancelled state. */
+  const cancelEpochRef = useRef(0);
+  /** True only while sendPrompt is in flight — cancelPrompt is meaningful then. */
+  const promptInFlightRef = useRef(false);
+  /** performance.now() when the active send marked busy — gates premature cancel. */
+  const sendBusyAtRef = useRef<number | null>(null);
 
   const chooseWorkspace = useCallback(async () => {
     const path = await bridge.chooseDirectory();
@@ -97,6 +106,7 @@ export function useDesktopController(
         attentionRequired: false,
         alwaysApprove: permissionAlwaysApprove(state.settings.permissionPolicy),
         model: state.effectiveModelId() || state.settings.model,
+        reasoningEffort: state.effectiveReasoningEffort() || state.settings.defaultReasoningEffort || null,
         draft: state.provisionalDraft.text,
         remoteSessionId: null,
       };
@@ -167,6 +177,11 @@ export function useDesktopController(
           taskId: sessionId,
           cwd: summary.executionRoot || summary.worktreePath || summary.workspaceRoot,
           model: summary.model || state.effectiveModelId() || null,
+          reasoningEffort:
+            summary.reasoningEffort ||
+            state.effectiveReasoningEffort() ||
+            state.settings.defaultReasoningEffort ||
+            null,
           alwaysApprove: permissionAlwaysApprove(policy),
           useHarness: state.settings.useHarness,
           sandbox: summary.sandbox ?? state.settings.sandbox,
@@ -214,6 +229,7 @@ export function useDesktopController(
       if (!sessionId) sessionId = await createThread(mode);
       if (!sessionId) return;
 
+      const epochAtStart = cancelEpochRef.current;
       const session = useAppStore.getState().sessions[sessionId];
       if (!session) return;
       const firstTurn = session.blocks.length === 0;
@@ -252,14 +268,16 @@ export function useDesktopController(
         });
       }
       state.setSessionBusy(sessionId, true);
+      sendBusyAtRef.current = performance.now();
       state.setFailedSubmission(sessionId, null);
       state.setSessionDraft(sessionId, "");
       state.setSessionAttachments(sessionId, []);
       state.clearProvisionalDraft();
-      await bridge.upsertSession(summary);
-      await bridge.saveDraft(sessionId, "");
+      const wasCancelled = () => cancelEpochRef.current !== epochAtStart;
 
       try {
+        await bridge.upsertSession(summary);
+        await bridge.saveDraft(sessionId, "");
         let target = useAppStore.getState().sessions[sessionId]?.summary;
         const runtimeStatus = useAppStore.getState().status;
         const connectionIsLive = Boolean(
@@ -268,7 +286,14 @@ export function useDesktopController(
           && runtimeStatus.connectionId === target?.connectionId,
         );
         if (!target?.connectionId || !target.remoteSessionId || !connectionIsLive) {
+          if (wasCancelled()) return;
           await connect(sessionId, displayText);
+          if (wasCancelled()) {
+            // connect() may have written runState:idle after cancel cleared busy.
+            useAppStore.getState().updateSummary(sessionId, { runState: "cancelled" });
+            useAppStore.getState().setSessionBusy(sessionId, false);
+            return;
+          }
           target = useAppStore.getState().sessions[sessionId]?.summary;
         }
         if (!target?.connectionId || !target.remoteSessionId) {
@@ -281,29 +306,16 @@ export function useDesktopController(
         const localContent = await bridge.prepareAttachments(
           attachments.filter((attachment) => attachment.source === "path"),
         );
-        await bridge.sendPrompt(
-          target.connectionId,
-          target.remoteSessionId,
-          promptText,
-          [...inlineContent, ...localContent],
-          {
-            taskId: sessionId,
-            turnId: messageBlockId,
-            idempotencyKey: `prompt:${sessionId}:${messageBlockId}`,
-          },
-        );
-        if (enteringMode && target.connectionId && target.remoteSessionId) {
-          const modeState = await bridge.confirmSessionMode(
-            target.connectionId,
-            target.remoteSessionId,
-            mode,
-          );
-          state.setSessionModeState(sessionId, modeState);
-        }
+        if (wasCancelled()) return;
+        // Handed off to the agent — stop showing "sending" while high-effort
+        // reasoning may still stream for a long time.
         state.updateBlock(sessionId, messageBlockId, {
           type: "user",
           delivery: "sent",
         });
+        // Persist the user turn before crossing into the Runtime. This keeps a
+        // crash-safe transcript in causal order and matches the dispatch rule:
+        // durable intent first, execution second.
         await bridge.appendCachedEvent({
           sessionId,
           sequence: Date.now(),
@@ -311,13 +323,45 @@ export function useDesktopController(
           kind: "user",
           payload: { text: displayText },
         });
+        if (wasCancelled()) return;
+        promptInFlightRef.current = true;
+        try {
+          await bridge.sendPrompt(
+            target.connectionId,
+            target.remoteSessionId,
+            promptText,
+            [...inlineContent, ...localContent],
+            {
+              taskId: sessionId,
+              turnId: messageBlockId,
+              idempotencyKey: `prompt:${sessionId}:${messageBlockId}`,
+            },
+          );
+        } finally {
+          promptInFlightRef.current = false;
+        }
+        if (wasCancelled()) return;
+        if (enteringMode && target.connectionId && target.remoteSessionId) {
+          const modeState = await bridge.confirmSessionMode(
+            target.connectionId,
+            target.remoteSessionId,
+            mode,
+          );
+          if (wasCancelled()) return;
+          state.setSessionModeState(sessionId, modeState);
+          state.updateSummary(sessionId, {
+            mode,
+            updatedAt: new Date().toISOString(),
+          });
+        }
         const complete = useAppStore.getState().sessions[sessionId]?.summary;
-        if (complete) {
+        if (complete && !wasCancelled()) {
           const next = { ...complete, runState: "idle" as const };
           useAppStore.getState().updateSummary(sessionId, next);
           await bridge.upsertSession(next);
         }
       } catch (error) {
+        if (wasCancelled()) return;
         const current = useAppStore.getState().sessions[sessionId];
         if (current && current.draft === "" && current.attachments.length === 0) {
           state.setSessionDraft(sessionId, rawText);
@@ -344,7 +388,12 @@ export function useDesktopController(
         });
         state.updateSummary(sessionId, { runState: "error" });
       } finally {
-        state.setSessionBusy(sessionId, false);
+        if (!wasCancelled()) {
+          state.setSessionBusy(sessionId, false);
+        }
+        if (sendBusyAtRef.current != null && cancelEpochRef.current === epochAtStart) {
+          sendBusyAtRef.current = null;
+        }
       }
     },
     [bridge, connect, createThread],
@@ -374,11 +423,61 @@ export function useDesktopController(
     const sessionId = state.activeSessionId;
     if (!sessionId) return;
     const summary = state.sessions[sessionId]?.summary;
-    if (summary?.connectionId && summary.remoteSessionId) {
-      await bridge.cancelPrompt(summary.connectionId, summary.remoteSessionId);
+    const connectionIsLive = Boolean(
+      state.status.running
+      && state.status.connectionId
+      && summary?.connectionId
+      && state.status.connectionId === summary.connectionId,
+    );
+    const promptInFlight = promptInFlightRef.current;
+    const busyFor = sendBusyAtRef.current == null
+      ? Number.POSITIVE_INFINITY
+      : performance.now() - sendBusyAtRef.current;
+    // Match Stop arming: ignore cancel that arrives before Stop is clickable,
+    // unless a live prompt/connection already makes cancel meaningful.
+    if (!promptInFlight && !connectionIsLive && busyFor < STOP_ARM_MS) {
+      return;
     }
+
+    cancelEpochRef.current += 1;
+    sendBusyAtRef.current = null;
+    const shouldCancelPrompt = promptInFlight || connectionIsLive;
+
+    // Clear busy/connecting immediately so Stop never leaves the UI stuck,
+    // even when cancel IPC fails (e.g. stale host returning `{}` as unit).
     state.setSessionBusy(sessionId, false);
+    setConnectingSessionId((current) => (current === sessionId ? null : current));
     state.updateSummary(sessionId, { runState: "cancelled" });
+    const pendingUsers = state.sessions[sessionId]?.blocks.filter(
+      (block) => block.type === "user" && block.delivery === "pending",
+    ) ?? [];
+    for (const pendingUser of pendingUsers) {
+      state.updateBlock(sessionId, pendingUser.id, {
+        type: "user",
+        delivery: "sent",
+      });
+    }
+
+    // Skip cancelPrompt when nothing is live/in-flight — a Send→Stop race with
+    // stale connection ids otherwise surfaces "agent is not running".
+    if (!shouldCancelPrompt || !summary?.connectionId || !summary.remoteSessionId) {
+      promptInFlightRef.current = false;
+      return;
+    }
+    try {
+      await bridge.cancelPrompt(summary.connectionId, summary.remoteSessionId);
+    } catch (error) {
+      const reason = String(error);
+      if (/not running|NotRunning/i.test(reason)) return;
+      state.addBlock(sessionId, {
+        id: crypto.randomUUID(),
+        type: "system",
+        level: "warn",
+        text: translate("cancelFailed", { reason }),
+      });
+    } finally {
+      promptInFlightRef.current = false;
+    }
   }, [bridge]);
 
   const reloadActiveAgent = useCallback(async () => {
@@ -392,6 +491,11 @@ export function useDesktopController(
         taskId: sessionId,
         cwd: summary.executionRoot || summary.worktreePath || summary.workspaceRoot,
         model: summary.model || state.settings.model,
+        reasoningEffort:
+          summary.reasoningEffort ||
+          state.effectiveReasoningEffort() ||
+          state.settings.defaultReasoningEffort ||
+          null,
         alwaysApprove: permissionAlwaysApprove(
           summary.permissionPolicy ?? state.settings.permissionPolicy,
         ),
@@ -424,49 +528,124 @@ export function useDesktopController(
         return;
       }
       if (state.sessions[sessionId]?.busy) return;
-      let summary = state.sessions[sessionId]?.summary;
-      if (summary?.connectionId && summary.remoteSessionId) {
-        let result;
+      // Persist the choice first so reconnect/restart uses the new connection key.
+      state.setEffectiveModelId(modelId);
+      const summary = useAppStore.getState().sessions[sessionId]?.summary;
+      if (!summary?.connectionId || !summary.remoteSessionId) {
+        const next = useAppStore.getState().sessions[sessionId]?.summary;
+        if (next) await bridge.upsertSession(next);
+        return;
+      }
+
+      let result;
+      try {
+        result = await bridge.setSessionModel(
+          summary.connectionId,
+          summary.remoteSessionId,
+          modelId,
+        );
+      } catch {
+        // Stale host / dead ACP pipe after an in-place app replace often surfaces
+        // as "unexpected end of file". Reconnect with the new model instead.
         try {
-          result = await bridge.setSessionModel(
+          await reloadActiveAgent();
+          const next = useAppStore.getState().sessions[sessionId]?.summary;
+          // Persistence failures must not surface as model-switch failures.
+          if (next) await bridge.upsertSession(next).catch(() => undefined);
+        } catch (error) {
+          state.addBlock(sessionId, {
+            id: crypto.randomUUID(),
+            type: "system",
+            level: "error",
+            text: translate("modelSwitchFailed", { reason: String(error) }),
+          });
+        }
+        return;
+      }
+
+      if (result.kind === "new_session_required") {
+        try {
+          await reloadActiveAgent();
+          const next = useAppStore.getState().sessions[sessionId]?.summary;
+          if (next) await bridge.upsertSession(next).catch(() => undefined);
+        } catch (error) {
+          setPendingModelFork({ modelId, reason: result.reason });
+          state.addBlock(sessionId, {
+            id: crypto.randomUUID(),
+            type: "system",
+            level: "error",
+            text: translate("modelSwitchFailed", { reason: String(error) }),
+          });
+        }
+        return;
+      }
+
+      const prev = useAppStore.getState().sessions[sessionId]?.modelState;
+      const merged = {
+        ...result.state,
+        availableModels: mergeSelectableModels(
+          result.state.availableModels,
+          prev?.availableModels,
+          useAppStore.getState().globalModelState.availableModels,
+        ),
+      };
+      state.setSessionModelState(sessionId, merged);
+      state.setGlobalModelState({
+        ...useAppStore.getState().globalModelState,
+        currentModelId: modelId,
+        availableModels: mergeSelectableModels(
+          useAppStore.getState().globalModelState.availableModels,
+          merged.availableModels,
+        ),
+      });
+      const next = useAppStore.getState().sessions[sessionId]?.summary;
+      if (next) await bridge.upsertSession(next).catch(() => undefined);
+    },
+    [bridge, reloadActiveAgent],
+  );
+
+  const chooseEffort = useCallback(
+    async (effort: string) => {
+      const state = useAppStore.getState();
+      const sessionId = state.activeSessionId;
+      if (!sessionId) {
+        state.setEffectiveReasoningEffort(effort);
+        return;
+      }
+      if (state.sessions[sessionId]?.busy) return;
+      let summary = state.sessions[sessionId]?.summary;
+      state.setEffectiveReasoningEffort(effort);
+
+      if (summary?.connectionId && summary.remoteSessionId) {
+        try {
+          const result = await bridge.setSessionEffort(
             summary.connectionId,
             summary.remoteSessionId,
-            modelId,
+            effort,
           );
-        } catch {
-          try {
-            await connect(sessionId, summary.lastMessagePreview || summary.title);
-            summary = useAppStore.getState().sessions[sessionId]?.summary;
-            if (!summary?.connectionId || !summary.remoteSessionId) throw new Error(t.grokStartThreadFailed);
-            result = await bridge.setSessionModel(
-              summary.connectionId,
-              summary.remoteSessionId,
-              modelId,
-            );
-          } catch (error) {
+          if (result.kind === "restart_required") {
             state.addBlock(sessionId, {
               id: crypto.randomUUID(),
               type: "system",
-              level: "error",
-              text: translate("modelSwitchFailed", { reason: String(error) }),
+              level: "info",
+              text: result.reason,
             });
-            return;
+            await reloadActiveAgent();
           }
+        } catch (error) {
+          state.addBlock(sessionId, {
+            id: crypto.randomUUID(),
+            type: "system",
+            level: "warn",
+            text: translate("effortSwitchFailed", { reason: String(error) }),
+          });
+          await reloadActiveAgent();
         }
-        if (result.kind === "new_session_required") {
-          setPendingModelFork({ modelId, reason: result.reason });
-          return;
-        }
-        state.setEffectiveModelId(modelId);
-        state.setSessionModelState(sessionId, result.state);
-        state.setGlobalModelState(result.state);
-      } else {
-        state.setEffectiveModelId(modelId);
       }
       const next = useAppStore.getState().sessions[sessionId]?.summary;
       if (next) await bridge.upsertSession(next);
     },
-    [bridge, connect],
+    [bridge, reloadActiveAgent],
   );
 
   const chooseMode = useCallback(
@@ -494,10 +673,18 @@ export function useDesktopController(
         return { kind: "unsupported", reason: t.taskBusy };
       }
       let summary = session.summary;
-      if (!summary.connectionId || !summary.remoteSessionId) {
+      const connectionIsLive = Boolean(
+        state.status.running
+        && state.status.connectionId
+        && state.status.connectionId === summary.connectionId,
+      );
+      if (!summary.connectionId || !summary.remoteSessionId || !connectionIsLive) {
         state.setEffectiveMode(mode);
         const next = useAppStore.getState().sessions[sessionId]?.summary;
-        if (next) await bridge.upsertSession(next);
+        // Mode selection is usable immediately. A transient Host persistence
+        // failure must not be reported as a mode-switch failure; the summary is
+        // persisted again when the task is sent.
+        if (next) await bridge.upsertSession(next).catch(() => undefined);
         return {
           kind: "switched",
           state: { ...session.modeState, currentMode: mode, source: "desktop" },
@@ -539,32 +726,24 @@ export function useDesktopController(
         state.setSessionModeState(sessionId, result.state);
         state.updateSummary(sessionId, { mode, updatedAt: new Date().toISOString() });
         const next = useAppStore.getState().sessions[sessionId]?.summary;
-        if (next) await bridge.upsertSession(next);
+        if (next) await bridge.upsertSession(next).catch(() => undefined);
         return result;
       }
       if (result.kind === "command_required" && mode !== "goal") {
-        state.setSessionBusy(sessionId, true);
-        try {
-          await bridge.sendPrompt(
-            connectionId,
-            remoteSessionId,
-            result.command,
-          );
-          const modeState = await bridge.confirmSessionMode(
-            connectionId,
-            remoteSessionId,
-            mode,
-          );
-          state.setSessionModeState(sessionId, modeState);
-          state.updateSummary(sessionId, { mode, updatedAt: new Date().toISOString() });
-          const next = useAppStore.getState().sessions[sessionId]?.summary;
-          if (next) await bridge.upsertSession(next);
-          return { kind: "switched", state: modeState };
-        } catch (error) {
-          return { kind: "unsupported", reason: String(error) };
-        } finally {
-          state.setSessionBusy(sessionId, false);
-        }
+        // Do not auto-send `/plan` (or similar) — that starts a turn and can
+        // look like a premature submit. Local mode + next send prefixes the
+        // command via sendInternal's enteringMode path.
+        const modeState = {
+          ...session.modeState,
+          currentMode: mode,
+          liveSwitchSupported: false,
+          source: "desktop" as const,
+        };
+        state.setSessionModeState(sessionId, modeState);
+        state.updateSummary(sessionId, { mode, updatedAt: new Date().toISOString() });
+        const next = useAppStore.getState().sessions[sessionId]?.summary;
+        if (next) await bridge.upsertSession(next).catch(() => undefined);
+        return { kind: "switched", state: modeState };
       }
       if (result.kind === "command_required" && mode === "goal") {
         state.setSessionModeState(sessionId, {
@@ -712,6 +891,7 @@ export function useDesktopController(
     cancel,
     reloadActiveAgent,
     chooseModel,
+    chooseEffort,
     chooseMode,
     pendingModelFork,
     confirmModelFork,

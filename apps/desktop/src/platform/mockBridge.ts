@@ -114,8 +114,29 @@ const blocksBySession = new Map<string, ChatBlock[]>([
 ]);
 
 const models: SelectableModel[] = [
-  { id: "grok-build", name: "Grok Build", description: "Recommended coding agent", isDefault: true },
-  { id: "grok-4.5", name: "Grok 4.5", description: "Deep reasoning", isDefault: false },
+  {
+    id: "grok-build",
+    name: "Grok Build",
+    description: "Recommended coding agent",
+    isDefault: true,
+    contextWindow: 200_000,
+    supportsReasoningEffort: false,
+  },
+  {
+    id: "grok-4.5",
+    name: "Grok 4.5",
+    description: "Deep reasoning",
+    isDefault: false,
+    contextWindow: 500_000,
+    supportsReasoningEffort: true,
+    reasoningEffort: "high",
+    reasoningEfforts: [
+      { id: "low", value: "low", label: "Low Effort" },
+      { id: "medium", value: "medium", label: "Medium Effort" },
+      { id: "high", value: "high", label: "High Effort", default: true },
+    ],
+    autoCompactThresholdPercent: 80,
+  },
 ];
 
 const settings: Settings = {
@@ -298,6 +319,13 @@ export const mockDesktopBridge: DesktopBridge = {
         liveSwitchSupported: true,
         source: "acp",
       } satisfies SessionModelState,
+    } as const;
+  },
+  async setSessionEffort(_connectionId, _sessionId, effort) {
+    return {
+      kind: "switched",
+      effort,
+      liveSwitchSupported: true,
     } as const;
   },
   async setSessionMode(_connectionId, _sessionId, mode) {

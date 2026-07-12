@@ -32,6 +32,7 @@ impl GrokAcpAdapter {
             task_id: Some(format!("adapter:{}", config.workspace_root)),
             grok_path: (!config.executable.trim().is_empty()).then(|| config.executable.clone()),
             model: config.model.clone(),
+            reasoning_effort: None,
             always_approve: config.approval_policy == "full_auto",
             cwd: config.workspace_root.clone(),
             rules: config.rules.clone(),

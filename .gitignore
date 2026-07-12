@@ -27,6 +27,20 @@ Thumbs.db
 .env.*
 !.env.example
 
+# Signing, notarization and private release material
+*.p12
+*.pfx
+*.mobileprovision
+*.pem
+*.key
+*.cer
+*.dmg
+*.app
+notarization-credentials.json
+release.env
+dist/release/
+.release/
+
 # Tauri
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/WixTools/

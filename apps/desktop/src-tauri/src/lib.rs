@@ -48,7 +48,7 @@ fn rpc_meta(correlation_id: &str, idempotency_key: Option<String>) -> host_rpc::
     }
 }
 
-async fn host_request<T: DeserializeOwned>(
+async fn host_request<T: DeserializeOwned + 'static>(
     state: &AppState,
     method: &str,
     params: Value,
@@ -59,7 +59,27 @@ async fn host_request<T: DeserializeOwned>(
         .request(method, params, meta)
         .await
         .map_err(|error| acp::AcpError::Message(error.to_string()))?;
-    serde_json::from_value(value).map_err(acp::AcpError::Json)
+    // Host write methods consistently return an empty JSON object. Tauri
+    // commands whose public contract is `Result<()>` must treat that object as
+    // an acknowledgement instead of trying to deserialize it as Rust unit.
+    if std::any::TypeId::of::<T>() == std::any::TypeId::of::<()>() {
+        return Ok(
+            // `()` only deserializes from null / unit; never from `{}`.
+            serde_json::from_value(Value::Null).expect("unit value"),
+        );
+    }
+    match serde_json::from_value::<T>(value.clone()) {
+        Ok(parsed) => Ok(parsed),
+        Err(error)
+            if value.is_object()
+                && value.as_object().is_some_and(|object| object.is_empty())
+                && error.to_string().contains("expected unit") =>
+        {
+            // Defensive fallback for any lingering `Result<()>` call sites.
+            serde_json::from_value(Value::Null).map_err(acp::AcpError::Json)
+        }
+        Err(error) => Err(acp::AcpError::Json(error)),
+    }
 }
 
 #[tauri::command]
@@ -427,6 +447,26 @@ async fn set_session_model(
             "connectionId": connection_id,
             "sessionId": session_id,
             "modelId": model_id,
+        }),
+        Some(rpc_meta(&session_id, None)),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn set_session_effort(
+    state: State<'_, AppState>,
+    connection_id: String,
+    session_id: String,
+    effort: String,
+) -> Result<crate::contracts::EffortSwitchResult, acp::AcpError> {
+    host_request(
+        &state,
+        "session.setEffort",
+        serde_json::json!({
+            "connectionId": connection_id,
+            "sessionId": session_id,
+            "effort": effort,
         }),
         Some(rpc_meta(&session_id, None)),
     )
@@ -1562,6 +1602,7 @@ pub fn run() {
             list_models,
             inspect_capabilities,
             set_session_model,
+            set_session_effort,
             set_session_mode,
             confirm_session_mode,
             acp_request,

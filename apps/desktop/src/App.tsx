@@ -56,6 +56,7 @@ export default function App() {
             await bridge.saveSettings(migrated);
           }
         }
+        if (cancelled) return;
         unsubs = await bridge.subscribeEvents();
       } catch (e) {
         setBootstrap({ status: "error", message: t.appStartFailed, detail: String(e) });

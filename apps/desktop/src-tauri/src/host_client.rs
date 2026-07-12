@@ -105,7 +105,10 @@ impl HostClient {
         .await?;
         let _: HostResponse = host_rpc::read_frame(&mut stream).await?;
         loop {
-            let notification: Value = host_rpc::read_frame(&mut stream).await?;
+            let notification: Value = match host_rpc::read_frame(&mut stream).await {
+                Ok(value) => value,
+                Err(error) => return Err(error.into()),
+            };
             let Some(params) = notification.get("params") else {
                 continue;
             };

@@ -7,11 +7,16 @@ export type ThemeId = "dark" | "light" | "system" | string;
 
 export type Settings = {
   /** Versioned renderer/host settings contract. */
-  schemaVersion: 3;
+  schemaVersion: 4;
   grokPath: string;
   /** Optional advanced override. Empty means use CLI discovery. */
   cliPathOverride: string;
   model: string;
+  /**
+   * Default reasoning effort for new sessions (Grok `--reasoning-effort`).
+   * Empty means use the model catalog default / CLI config.
+   */
+  defaultReasoningEffort: string;
   defaultMode: import("./mode").TaskMode;
   permissionPolicy: "workspace_edit" | "ask_all" | "full_auto";
   autoUpdateCli: boolean;
@@ -56,10 +61,11 @@ export type OnboardingStep =
 
 export function defaultSettings(): Settings {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     grokPath: "",
     cliPathOverride: "",
     model: "grok-build",
+    defaultReasoningEffort: "high",
     defaultMode: "agent",
     permissionPolicy: "workspace_edit",
     autoUpdateCli: true,

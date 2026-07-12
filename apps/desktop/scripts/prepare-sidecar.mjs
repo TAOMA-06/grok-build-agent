@@ -36,15 +36,7 @@ if (target === "universal-apple-darwin") {
 }
 chmodSync(destination, 0o755);
 
-const teamId = process.env.APPLE_TEAM_ID?.trim();
-if (teamId && !/^[A-Z0-9]{10}$/.test(teamId)) {
-  throw new Error("APPLE_TEAM_ID must be a 10-character Apple team identifier");
-}
-const keychainGroup = teamId ? `${teamId}.com.grokbuilddesktop.community.shared` : null;
-const groupEntry = keychainGroup
-  ? `  <key>keychain-access-groups</key>\n  <array><string>${keychainGroup}</string></array>\n`
-  : "";
 writeFileSync(
   resolve(tauriDir, "entitlements.generated.plist"),
-  `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n${groupEntry}</dict>\n</plist>\n`,
+  `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict/>\n</plist>\n`,
 );

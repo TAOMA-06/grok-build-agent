@@ -351,10 +351,10 @@ export function ContextDrawer({
               <div className="gb-patch-head">
                 <span>{selectedPath}</span>
                 <div>
-                  <button type="button" className="gb-icon-button" disabled={gitBusy} title={selectedFile?.staged ? t.unstageFile : t.stageFile} onClick={() => void mutateFile(selectedFile?.staged ? "unstage" : "stage")}><ListPlus size={13} /></button>
-                  <button type="button" className="gb-icon-button" disabled={gitBusy || selectedFile?.status === "untracked"} title={t.revertFile} onClick={() => void mutateFile("revert")}><RotateCcw size={13} /></button>
-                  <button type="button" className="gb-icon-button" title={t.copyPath} onClick={() => void bridge.copyText(selectedPath)}><Clipboard size={13} /></button>
-                  <button type="button" className="gb-icon-button" title={t.openFile} onClick={() => void bridge.openPath(`${root}/${selectedPath}`)}><ExternalLink size={13} /></button>
+                  <button type="button" className="gb-icon-button" disabled={gitBusy} title={selectedFile?.staged ? t.unstageFile : t.stageFile} aria-label={selectedFile?.staged ? t.unstageFile : t.stageFile} onClick={() => void mutateFile(selectedFile?.staged ? "unstage" : "stage")}><ListPlus size={13} /></button>
+                  <button type="button" className="gb-icon-button" disabled={gitBusy || selectedFile?.status === "untracked"} title={t.revertFile} aria-label={t.revertFile} onClick={() => void mutateFile("revert")}><RotateCcw size={13} /></button>
+                  <button type="button" className="gb-icon-button" title={t.copyPath} aria-label={t.copyPath} onClick={() => void bridge.copyText(selectedPath)}><Clipboard size={13} /></button>
+                  <button type="button" className="gb-icon-button" title={t.openFile} aria-label={t.openFile} onClick={() => void bridge.openPath(`${root}/${selectedPath}`)}><ExternalLink size={13} /></button>
                 </div>
               </div>
               <pre>{patchQuery.data || (patchQuery.isLoading ? t.loadingPatch : t.noPatch)}</pre>
@@ -460,7 +460,7 @@ export function ContextDrawer({
           {terminalError && <div className="gb-apply-status blocked"><span>{terminalError}</span></div>}
         </Tabs.Content>
         <Tabs.Content value="files" className="gb-drawer-content">
-          <div className="gb-drawer-toolbar"><button type="button" className="gb-icon-button" disabled={!explorerPath} title="Parent directory" onClick={() => setExplorerPath(explorerPath?.split("/").slice(0, -1).join("/") || null)}>↑</button><span>{explorerPath || "."}</span><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => void treeQuery.refetch()}><RefreshCw size={14} /></button></div>
+          <div className="gb-drawer-toolbar"><button type="button" className="gb-icon-button" disabled={!explorerPath} title="Parent directory" aria-label="Parent directory" onClick={() => setExplorerPath(explorerPath?.split("/").slice(0, -1).join("/") || null)}>↑</button><span>{explorerPath || "."}</span><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => void treeQuery.refetch()}><RefreshCw size={14} /></button></div>
           <label className="gb-explorer-search"><Search size={13} /><input value={explorerSearch} placeholder="Search names and content" onChange={(event) => setExplorerSearch(event.target.value)} /></label>
           {(searchQuery.data ?? treeQuery.data)?.map((entry) => <button type="button" className="gb-file-row" key={entry.path} onClick={() => entry.directory ? setExplorerPath(entry.path) : setPreviewPath(entry.path)}><span>{entry.directory ? "▸ " : ""}{entry.path}</span><small>{entry.size ?? ""}</small></button>)}
           {previewPath && <div className="gb-patch-panel"><div className="gb-patch-head"><span>{previewPath}</span><button type="button" className="gb-icon-button" aria-label="Close preview" onClick={() => setPreviewPath(null)}><X size={13} /></button></div>{previewQuery.data?.binary ? <div className="gb-drawer-empty">Binary file · {previewQuery.data.size} bytes</div> : <pre>{previewQuery.data?.content}{previewQuery.data?.truncated ? "\n… [preview truncated]" : ""}</pre>}</div>}

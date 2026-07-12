@@ -20,6 +20,9 @@ import { useAppStore } from "../../store";
 import {
   inferAttachmentMime,
   validateAttachments,
+  effortOptionsForModel,
+  formatTokenCount,
+  emptyContextUsage,
 } from "../../contracts";
 import type {
   ComposerAttachment,
@@ -31,6 +34,9 @@ import type {
 } from "../../types";
 import { t, translate } from "../../i18n";
 import { buildCommandCatalog, parseSlashCommand } from "./commands";
+import { STOP_ARM_MS } from "./composerTiming";
+
+export { STOP_ARM_MS } from "./composerTiming";
 
 export async function browserAttachment(file: File): Promise<ComposerAttachment> {
   const mimeType = inferAttachmentMime(file.name, file.type);
@@ -65,6 +71,7 @@ export function CommandComposer({
   onSend,
   onCancel,
   onChooseModel,
+  onChooseEffort,
   onChooseMode,
   onLocalCommand,
 }: {
@@ -74,6 +81,7 @@ export function CommandComposer({
   onSend: (text: string, attachments: ComposerAttachment[], mode: TaskMode) => Promise<void>;
   onCancel: () => Promise<void>;
   onChooseModel: (modelId: string) => Promise<void>;
+  onChooseEffort: (effort: string) => Promise<void>;
   onChooseMode: (mode: TaskMode) => Promise<ModeSwitchResult>;
   onLocalCommand: (commandLine: string) => void | Promise<void>;
 }) {
@@ -87,25 +95,50 @@ export function CommandComposer({
     effectiveAttachments,
     setEffectiveAttachments,
     effectiveModelId,
+    effectiveReasoningEffort,
     effectiveMode,
   } = useAppStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const commandMenuRef = useRef<HTMLDivElement>(null);
+  const composingRef = useRef(false);
+  const compositionEndedAtRef = useRef<number | null>(null);
+  const submittingRef = useRef(false);
+  /** Delay Stop so a double-click / IME Enter+click on Send cannot hit cancel. */
+  const [stopArmed, setStopArmed] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
   const [unknownCommandDraft, setUnknownCommandDraft] = useState<string | null>(null);
   const [dismissedCommandDraft, setDismissedCommandDraft] = useState<string | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
+  const [effortOpen, setEffortOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
   const draft = effectiveDraftText();
   const attachments = effectiveAttachments();
   const modelId = effectiveModelId() || models.find((model) => model.isDefault)?.id || settings.model;
+  const selectedModel = models.find((model) => model.id === modelId) ?? null;
+  const effortOptions = effortOptionsForModel(selectedModel);
+  const effortId =
+    effectiveReasoningEffort() ||
+    selectedModel?.reasoningEffort ||
+    effortOptions.find((option) => option.default)?.value ||
+    effortOptions[0]?.value ||
+    settings.defaultReasoningEffort;
   const mode = effectiveMode();
   const currentSession = activeSessionId ? sessions[activeSessionId] : null;
   const sandbox = currentSession?.summary.sandbox ?? settings.sandbox;
   const permissionPolicy = currentSession?.summary.permissionPolicy ?? settings.permissionPolicy;
   const runtimeLocked = busy || connecting || Boolean(currentSession?.summary.remoteSessionId);
+  const contextUsage = currentSession?.contextUsage ?? emptyContextUsage(selectedModel?.contextWindow);
+  const usageWindow = contextUsage.windowTokens ?? selectedModel?.contextWindow ?? null;
+  const usagePercent =
+    contextUsage.usagePercent ??
+    (contextUsage.usedTokens != null && usageWindow
+      ? (contextUsage.usedTokens / usageWindow) * 100
+      : null);
+  const usageWarn =
+    usagePercent != null &&
+    usagePercent >= (selectedModel?.autoCompactThresholdPercent ?? 85);
   const capabilitiesQuery = useQuery({
     queryKey: ["capabilities", settings.cliPathOverride || settings.grokPath, settings.cwd],
     queryFn: () => bridge.inspectCapabilities(
@@ -137,12 +170,24 @@ export function CommandComposer({
   }, [activeSessionId, busy, connecting]);
 
   useEffect(() => {
+    if (!(busy || connecting)) {
+      setStopArmed(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setStopArmed(true), STOP_ARM_MS);
+    return () => window.clearTimeout(timer);
+  }, [busy, connecting]);
+
+  useEffect(() => {
     const openModel = () => setModelOpen(true);
+    const openEffort = () => setEffortOpen(true);
     const focusComposer = () => textareaRef.current?.focus();
     window.addEventListener("grok:open-model", openModel);
+    window.addEventListener("grok:open-effort", openEffort);
     window.addEventListener("grok:focus-composer", focusComposer);
     return () => {
       window.removeEventListener("grok:open-model", openModel);
+      window.removeEventListener("grok:open-effort", openEffort);
       window.removeEventListener("grok:focus-composer", focusComposer);
     };
   }, []);
@@ -216,7 +261,7 @@ export function CommandComposer({
   }
 
   async function submit() {
-    if (busy || connecting || (!draft.trim() && attachments.length === 0)) return;
+    if (busy || connecting || submittingRef.current || (!draft.trim() && attachments.length === 0)) return;
     const catalog = buildCommandCatalog(
       currentSession?.availableCommands ?? [],
       capabilitiesQuery.data?.skills ?? [],
@@ -233,35 +278,40 @@ export function CommandComposer({
     }
     setCommandError(null);
     setUnknownCommandDraft(null);
-    if (parsed?.descriptor.name === "/agent") {
-      const result = await onChooseMode("agent");
-      if (result.kind === "unsupported") setCommandError(result.reason);
-      else setEffectiveDraftText("");
-      return;
-    }
-    if (parsed?.descriptor.name === "/plan") {
-      if (parsed.args) await onSend(parsed.args, attachments, "plan");
-      else {
-        const result = await onChooseMode("plan");
+    submittingRef.current = true;
+    try {
+      if (parsed?.descriptor.name === "/agent") {
+        const result = await onChooseMode("agent");
         if (result.kind === "unsupported") setCommandError(result.reason);
         else setEffectiveDraftText("");
+        return;
       }
-      return;
-    }
-    if (parsed?.descriptor.name === "/goal") {
-      if (parsed.args) await onSend(parsed.args, attachments, "goal");
-      else {
-        const result = await onChooseMode("goal");
-        if (result.kind === "unsupported") setCommandError(result.reason);
-        else setEffectiveDraftText("");
+      if (parsed?.descriptor.name === "/plan") {
+        if (parsed.args) await onSend(parsed.args, attachments, "plan");
+        else {
+          const result = await onChooseMode("plan");
+          if (result.kind === "unsupported") setCommandError(result.reason);
+          else setEffectiveDraftText("");
+        }
+        return;
       }
-      return;
+      if (parsed?.descriptor.name === "/goal") {
+        if (parsed.args) await onSend(parsed.args, attachments, "goal");
+        else {
+          const result = await onChooseMode("goal");
+          if (result.kind === "unsupported") setCommandError(result.reason);
+          else setEffectiveDraftText("");
+        }
+        return;
+      }
+      if (parsed && parsed.descriptor.execution !== "acp") {
+        await onLocalCommand(draft.trim());
+        return;
+      }
+      await onSend(draft, attachments, mode);
+    } finally {
+      submittingRef.current = false;
     }
-    if (parsed && parsed.descriptor.execution !== "acp") {
-      await onLocalCommand(draft.trim());
-      return;
-    }
-    await onSend(draft, attachments, mode);
   }
 
   async function updateRuntimeOptions(patch: {
@@ -335,10 +385,29 @@ export function CommandComposer({
               setUnknownCommandDraft(null);
               setCommandError(null);
             }}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false;
+              // macOS Chinese/Japanese IMEs often fire compositionend before the
+              // confirming Enter keydown. Guard long enough to absorb that same
+              // physical keypress without blocking a deliberate second Enter.
+              compositionEndedAtRef.current = performance.now();
+            }}
             onPaste={handlePaste}
             placeholder={mode === "goal" ? t.goalPlaceholder : mode === "plan" ? t.planPlaceholder : t.agentPlaceholder}
             aria-label={t.messageGrok}
             onKeyDown={(event) => {
+              const nativeEvent = event.nativeEvent as KeyboardEvent;
+              const imeGuardMs = 300;
+              const confirmingIme = composingRef.current
+                || nativeEvent.isComposing
+                || nativeEvent.keyCode === 229
+                || (event.key === "Enter"
+                  && compositionEndedAtRef.current != null
+                  && performance.now() - compositionEndedAtRef.current < imeGuardMs);
+              if (confirmingIme) return;
               if (event.key === "Escape" && commandQuery) {
                 event.preventDefault();
                 setDismissedCommandDraft(draft);
@@ -349,7 +418,7 @@ export function CommandComposer({
                 commandMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
                 return;
               }
-              const submitKey = event.key === "Enter" && !event.nativeEvent.isComposing && (
+              const submitKey = event.key === "Enter" && (
                 event.metaKey || event.ctrlKey || (!settings.multilineMode && !event.shiftKey)
               );
               if (submitKey) {
@@ -448,6 +517,40 @@ export function CommandComposer({
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
 
+          {effortOptions.length > 0 && (
+            <DropdownMenu.Root open={effortOpen} onOpenChange={setEffortOpen}>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  type="button"
+                  className="gb-composer-select"
+                  disabled={busy || connecting}
+                  aria-label={t.reasoningEffort}
+                  title={t.reasoningEffortHint}
+                >
+                  <span>{effortOptions.find((option) => option.value === effortId)?.label || effortId}</span>
+                  <ChevronDown size={13} />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content className="gb-dropdown compact" sideOffset={8} align="start">
+                  <DropdownMenu.Label>{t.reasoningEffort}</DropdownMenu.Label>
+                  {effortOptions.map((option) => (
+                    <DropdownMenu.Item
+                      key={option.value}
+                      onSelect={() => void onChooseEffort(option.value)}
+                    >
+                      <span>
+                        <strong>{option.label}</strong>
+                        {option.description && <small>{option.description}</small>}
+                      </span>
+                      {option.value === effortId && <Check size={14} />}
+                    </DropdownMenu.Item>
+                  ))}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          )}
+
           <select
             className="gb-composer-select"
             aria-label={t.taskSandbox}
@@ -498,12 +601,22 @@ export function CommandComposer({
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
 
-          <span className="gb-permission-summary" title={t.runtimePolicy}>
+          <span className="gb-permission-summary" title={t.runtimePolicy} role="status" aria-live="polite">
             <ShieldCheck size={14} /> {busy ? t.grokWorking : connecting ? t.connecting : t.ready}
           </span>
+
+          <button
+            type="button"
+            className={`gb-context-chip${usageWarn ? " warn" : ""}`}
+            title={t.contextUsageHint}
+            onClick={() => void onLocalCommand("/context")}
+          >
+            {formatTokenCount(contextUsage.usedTokens)} / {formatTokenCount(usageWindow)}
+            {usagePercent != null ? ` · ${Math.round(usagePercent)}%` : ""}
+          </button>
         </div>
 
-        {busy || connecting ? (
+        {stopArmed ? (
           <button type="button" className="gb-send stop" aria-label={t.stopGrok} onClick={() => void onCancel()}>
             <Square size={14} fill="currentColor" />
           </button>
@@ -512,7 +625,7 @@ export function CommandComposer({
             type="button"
             className="gb-send"
             aria-label={t.sendToGrok}
-            disabled={!draft.trim() && attachments.length === 0}
+            disabled={busy || connecting || (!draft.trim() && attachments.length === 0)}
             onClick={() => void submit()}
           >
             <Send size={16} />

@@ -7,7 +7,10 @@ The tag workflow builds and publishes the supported v1 target:
 - macOS universal DMG and app ZIP (`arm64` + `x86_64`)
 - SPDX SBOM
 
-The GitHub Release is created only after platform build jobs succeed. The desktop app does not redistribute Grok CLI; bootstrap installs it from the fixed official x.ai source.
+The GitHub Release is created as a **draft** only after platform build jobs succeed.
+A maintainer must inspect the draft artifacts and explicitly publish the release.
+The desktop app does not redistribute Grok CLI; bootstrap installs it from the
+fixed official x.ai source.
 
 ## CI matrix
 
@@ -38,11 +41,12 @@ is never copied out of the signed bundle.
 
 ## Release procedure
 
-1. Merge a green main branch.
-2. Update versions in `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/src-tauri/tauri.conf.json`.
-3. Create and push a signed-off tag such as `v0.1.0`.
-4. Verify the macOS universal build and its artifacts.
-5. Verify macOS signature, stapled ticket and Gatekeeper output before announcing the release.
+1. Run `npm run release:check` from `apps/desktop`. It rejects token-shaped values, private keys and sensitive release files.
+2. Merge a green main branch.
+3. Update versions in `apps/desktop/package.json`, `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/src-tauri/tauri.conf.json`.
+4. Create and push a signed-off tag such as `v0.1.0`; the workflow creates a draft release only.
+5. Verify the macOS universal build, signature, stapled ticket and Gatekeeper output.
+6. Publish the GitHub draft only after a separate source and artifact review.
 
 ## Local quality gate
 

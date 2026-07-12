@@ -37,6 +37,7 @@ mod tests {
             task_id: Some("e2e-task".into()),
             grok_path: Some(mock.to_string_lossy().into()),
             model: None,
+            reasoning_effort: None,
             always_approve: false,
             cwd: cwd.to_string_lossy().into(),
             rules: None,
@@ -104,6 +105,7 @@ mod tests {
             attention_required: false,
             applied_at: None,
             model: Some("grok-build".into()),
+            reasoning_effort: None,
             always_approve: false,
             draft: Some("hello draft".into()),
         };

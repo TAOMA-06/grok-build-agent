@@ -54,6 +54,9 @@ pub struct StartConfig {
     /// Path to the `grok` binary. Empty = search PATH.
     pub grok_path: Option<String>,
     pub model: Option<String>,
+    /// CLI `--reasoning-effort` when the selected model supports it.
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     pub always_approve: bool,
     pub cwd: String,
     /// Optional extra system rules (harness overlay).
@@ -174,6 +177,7 @@ mod tests {
             task_id: Some("test-task".into()),
             grok_path: Some(mock.to_string_lossy().into()),
             model: None,
+            reasoning_effort: None,
             always_approve: false,
             cwd: cwd.to_string_lossy().into(),
             rules: None,

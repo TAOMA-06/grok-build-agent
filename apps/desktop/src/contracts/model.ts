@@ -5,6 +5,24 @@
 
 export type ModelSource = "acp" | "cli" | "configured";
 
+/** Canonical Grok reasoning-effort levels (CLI `--reasoning-effort`). */
+export type ReasoningEffortLevel =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
+
+export type ReasoningEffortOption = {
+  id: string;
+  value: string;
+  label: string;
+  description?: string | null;
+  default?: boolean;
+};
+
 export type SelectableModel = {
   id: string;
   name: string;
@@ -12,6 +30,14 @@ export type SelectableModel = {
   isDefault?: boolean;
   /** Free-form tags from CLI/ACP (e.g. "fast", "reasoning"). */
   tags?: string[];
+  /** Context window size in tokens when known from the model catalog. */
+  contextWindow?: number | null;
+  supportsReasoningEffort?: boolean;
+  /** Default effort for this model when supported. */
+  reasoningEffort?: string | null;
+  reasoningEfforts?: ReasoningEffortOption[];
+  /** Auto-compact threshold percent from the model catalog (e.g. 80). */
+  autoCompactThresholdPercent?: number | null;
 };
 
 export type SessionModelState = {
@@ -25,6 +51,19 @@ export type SessionModelState = {
 export type ModelSwitchResult =
   | { kind: "switched"; state: SessionModelState }
   | { kind: "new_session_required"; reason: string };
+
+export type EffortSwitchResult =
+  | { kind: "switched"; effort: string; liveSwitchSupported: boolean }
+  | { kind: "restart_required"; effort: string; reason: string };
+
+/** Agent-reported or estimated context-window usage for a session. */
+export type SessionContextUsage = {
+  usedTokens: number | null;
+  windowTokens: number | null;
+  usagePercent: number | null;
+  source: "acp" | "slash" | "estimate" | "catalog" | "unknown";
+  updatedAt: string;
+};
 
 export function emptySessionModelState(
   currentModelId?: string | null,
@@ -52,5 +91,89 @@ export function modelsFromIds(
     availableModels,
     liveSwitchSupported: source === "acp" && ids.length > 0,
     source,
+  };
+}
+
+export function emptyContextUsage(
+  windowTokens?: number | null,
+): SessionContextUsage {
+  return {
+    usedTokens: null,
+    windowTokens: windowTokens ?? null,
+    usagePercent: null,
+    source: windowTokens != null ? "catalog" : "unknown",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function formatTokenCount(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+  return String(Math.round(n));
+}
+
+/** Prefer catalog options for the active model; fall back to common CLI levels. */
+export function effortOptionsForModel(
+  model: SelectableModel | null | undefined,
+): ReasoningEffortOption[] {
+  if (model?.supportsReasoningEffort === false) return [];
+  if (model?.reasoningEfforts?.length) return model.reasoningEfforts;
+  if (model?.supportsReasoningEffort) {
+    return [
+      { id: "low", value: "low", label: "Low" },
+      { id: "medium", value: "medium", label: "Medium" },
+      { id: "high", value: "high", label: "High", default: true },
+    ];
+  }
+  return [];
+}
+
+/** Merge model rows, keeping richer catalog metadata (effort / window) over bare ACP ids. */
+export function mergeSelectableModels(
+  ...groups: Array<SelectableModel[] | null | undefined>
+): SelectableModel[] {
+  const byId = new Map<string, SelectableModel>();
+  for (const group of groups) {
+    for (const model of group ?? []) {
+      if (!model?.id) continue;
+      const prev = byId.get(model.id);
+      byId.set(model.id, prev ? preferRicherModel(prev, model) : model);
+    }
+  }
+  return Array.from(byId.values());
+}
+
+function preferRicherModel(a: SelectableModel, b: SelectableModel): SelectableModel {
+  const aScore =
+    (a.supportsReasoningEffort ? 2 : 0) +
+    (a.reasoningEfforts?.length ? 2 : 0) +
+    (a.contextWindow != null ? 1 : 0) +
+    (a.description ? 1 : 0);
+  const bScore =
+    (b.supportsReasoningEffort ? 2 : 0) +
+    (b.reasoningEfforts?.length ? 2 : 0) +
+    (b.contextWindow != null ? 1 : 0) +
+    (b.description ? 1 : 0);
+  const primary = bScore > aScore ? b : a;
+  const secondary = primary === a ? b : a;
+  return {
+    ...secondary,
+    ...primary,
+    id: primary.id,
+    name: primary.name || secondary.name,
+    description: primary.description ?? secondary.description ?? null,
+    isDefault: Boolean(primary.isDefault || secondary.isDefault),
+    tags: primary.tags?.length ? primary.tags : secondary.tags,
+    contextWindow: primary.contextWindow ?? secondary.contextWindow ?? null,
+    supportsReasoningEffort: Boolean(
+      primary.supportsReasoningEffort || secondary.supportsReasoningEffort,
+    ),
+    reasoningEffort: primary.reasoningEffort ?? secondary.reasoningEffort ?? null,
+    reasoningEfforts: primary.reasoningEfforts?.length
+      ? primary.reasoningEfforts
+      : secondary.reasoningEfforts,
+    autoCompactThresholdPercent:
+      primary.autoCompactThresholdPercent ?? secondary.autoCompactThresholdPercent ?? null,
   };
 }

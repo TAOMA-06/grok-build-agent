@@ -19,6 +19,7 @@ import type {
   ServerRequest,
   SessionModelState,
   SessionModeState,
+  SessionContextUsage,
   SessionSummary,
   Settings,
   ToolCall,
@@ -46,6 +47,8 @@ export type SessionRuntime = {
   availableCommands: AvailableCommand[];
   attachments: ComposerAttachment[];
   failedSubmission: FailedSubmission | null;
+  /** Context window usage reported by the agent or inferred from the catalog. */
+  contextUsage: SessionContextUsage | null;
 };
 
 // --- Slice shapes (settings / sessions / composer / runtime / admin UI) ---
@@ -73,6 +76,7 @@ type SessionSlice = {
   setSessionModelState: (id: string, state: SessionModelState | null) => void;
   setSessionModeState: (id: string, state: SessionModeState) => void;
   setSessionCommands: (id: string, commands: AvailableCommand[]) => void;
+  setSessionContextUsage: (id: string, usage: SessionContextUsage | null) => void;
   addBlock: (sessionId: string, b: ChatBlock) => void;
   updateBlock: (sessionId: string, blockId: string, patch: Partial<ChatBlock>) => void;
   setFailedSubmission: (id: string, failed: FailedSubmission | null) => void;
@@ -105,6 +109,8 @@ type ComposerSlice = {
   setEffectiveAttachments: (attachments: ComposerAttachment[]) => void;
   effectiveModelId: () => string | null;
   setEffectiveModelId: (modelId: string | null) => void;
+  effectiveReasoningEffort: () => string | null;
+  setEffectiveReasoningEffort: (effort: string | null) => void;
   effectiveMode: () => import("./types").TaskMode;
   setEffectiveMode: (mode: import("./types").TaskMode) => void;
 };
@@ -176,6 +182,7 @@ function emptyRuntime(summary: SessionSummary): SessionRuntime {
     availableCommands: [],
     attachments: [],
     failedSubmission: null,
+    contextUsage: null,
   };
 }
 
@@ -304,11 +311,36 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     get().setProvisionalDraft({ modelId });
   },
+  effectiveReasoningEffort: () => {
+    const id = get().activeSessionId;
+    if (id) {
+      const s = get().sessions[id];
+      if (s?.summary.reasoningEffort) return s.summary.reasoningEffort;
+    }
+    return (
+      get().provisionalDraft.reasoningEffort ??
+      get().settings.defaultReasoningEffort ??
+      null
+    );
+  },
+  setEffectiveReasoningEffort: (effort) => {
+    const id = get().activeSessionId;
+    if (id && get().sessions[id]) {
+      get().updateSummary(id, {
+        reasoningEffort: effort,
+        updatedAt: new Date().toISOString(),
+      });
+      return;
+    }
+    get().setProvisionalDraft({ reasoningEffort: effort });
+  },
   effectiveMode: () => {
     const id = get().activeSessionId;
     if (id && get().sessions[id]) {
-      return get().sessions[id].modeState.currentMode
-        ?? get().sessions[id].summary.mode
+      // The catalog summary is the durable task mode. modeState may be a
+      // short-lived adapter snapshot from before a `/plan` transition.
+      return get().sessions[id].summary.mode
+        ?? get().sessions[id].modeState.currentMode
         ?? "agent";
     }
     return get().provisionalDraft.mode ?? get().settings.defaultMode;
@@ -345,6 +377,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...sessions[summary.sessionId].summary,
           ...summary,
         },
+        modeState: summary.mode
+          ? { ...sessions[summary.sessionId].modeState, currentMode: summary.mode }
+          : sessions[summary.sessionId].modeState,
       };
       set({ sessions });
     }
@@ -426,6 +461,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!s) return;
     set({
       sessions: { ...get().sessions, [id]: { ...s, modeState } },
+    });
+  },
+
+  setSessionContextUsage: (id, contextUsage) => {
+    const s = get().sessions[id];
+    if (!s) return;
+    set({
+      sessions: { ...get().sessions, [id]: { ...s, contextUsage } },
     });
   },
 

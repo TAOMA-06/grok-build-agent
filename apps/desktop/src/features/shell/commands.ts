@@ -37,6 +37,7 @@ export const DESKTOP_COMMANDS: CommandDescriptor[] = [
   local({ name: "/find", aliases: [], descriptionKey: "find", inputHint: "<text>", category: "session", execution: "local" }),
   local({ name: "/transcript", aliases: [], descriptionKey: "transcript", category: "session", execution: "local" }),
   local({ name: "/model", aliases: ["/m"], descriptionKey: "model", inputHint: "[name]", category: "model", execution: "local" }),
+  local({ name: "/effort", aliases: [], descriptionKey: "effort", inputHint: "[level]", category: "model", execution: "local" }),
   local({ name: "/agent", aliases: [], descriptionKey: "agent", category: "mode", execution: "local" }),
   local({ name: "/plan", aliases: [], descriptionKey: "plan", inputHint: "[description]", category: "mode", execution: "local" }),
   local({ name: "/goal", aliases: [], descriptionKey: "goal", inputHint: "<objective>", category: "mode", execution: "local" }),

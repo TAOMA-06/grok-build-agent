@@ -41,6 +41,9 @@ pub struct ConnectionKey {
     /// Model id used at process spawn; prevents reuse when live switch is unavailable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
+    /// Reasoning effort used at process spawn (`--reasoning-effort`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 impl ConnectionKey {
@@ -67,14 +70,32 @@ impl ConnectionKey {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or("default");
+        let effort = self
+            .reasoning_effort
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("default");
         format!(
-            "{}::{}::{}::{approval}::{model}",
+            "{}::{}::{}::{approval}::{model}::{effort}",
             self.workspace_root, sandbox, profile
         )
     }
 }
 
 // --- Models ----------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReasoningEffortOption {
+    pub id: String,
+    pub value: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub default: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,6 +108,33 @@ pub struct SelectableModel {
     pub is_default: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
+    #[serde(default)]
+    pub supports_reasoning_effort: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reasoning_efforts: Vec<ReasoningEffortOption>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_compact_threshold_percent: Option<u8>,
+}
+
+impl SelectableModel {
+    pub fn named(id: impl Into<String>, name: impl Into<String>, is_default: bool) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            description: None,
+            is_default,
+            tags: Vec::new(),
+            context_window: None,
+            supports_reasoning_effort: false,
+            reasoning_effort: None,
+            reasoning_efforts: Vec::new(),
+            auto_compact_threshold_percent: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +155,20 @@ pub struct SessionModelState {
 pub enum ModelSwitchResult {
     Switched { state: SessionModelState },
     NewSessionRequired { reason: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EffortSwitchResult {
+    Switched {
+        effort: String,
+        #[serde(default)]
+        live_switch_supported: bool,
+    },
+    RestartRequired {
+        effort: String,
+        reason: String,
+    },
 }
 
 // --- Session modes / commands ---------------------------------------------
@@ -528,6 +590,8 @@ pub struct SessionSummary {
     pub applied_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
     pub always_approve: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<String>,
@@ -709,18 +773,20 @@ mod tests {
             always_approve: false,
             power_profile: None,
             model_id: None,
+            reasoning_effort: None,
         };
         assert_eq!(
             key.key_string(),
-            "/Users/me/proj::workspace::off::ask::default"
+            "/Users/me/proj::workspace::off::ask::default::default"
         );
         let with_model = ConnectionKey {
             model_id: Some("grok-4.5".into()),
+            reasoning_effort: Some("high".into()),
             ..key
         };
         assert_eq!(
             with_model.key_string(),
-            "/Users/me/proj::workspace::off::ask::grok-4.5"
+            "/Users/me/proj::workspace::off::ask::grok-4.5::high"
         );
     }
 
@@ -735,6 +801,7 @@ mod tests {
                     always_approve: true,
                     power_profile: Some(PowerProfile::Balanced),
                     model_id: Some("grok-build".into()),
+                    reasoning_effort: None,
                 },
                 state: ConnectionState::Ready,
                 grok_path: Some("/usr/local/bin/grok".into()),
@@ -848,6 +915,7 @@ mod tests {
             attention_required: false,
             applied_at: None,
             model: Some("grok-build".into()),
+            reasoning_effort: None,
             always_approve: false,
             draft: Some("hello".into()),
         };

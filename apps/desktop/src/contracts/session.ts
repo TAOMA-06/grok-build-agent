@@ -41,6 +41,8 @@ export type SessionSummary = {
   attentionRequired?: boolean;
   appliedAt?: string | null;
   model?: string | null;
+  /** Reasoning effort for this session when the model supports it. */
+  reasoningEffort?: string | null;
   alwaysApprove: boolean;
   draft?: string | null;
 };

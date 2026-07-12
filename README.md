@@ -2,8 +2,6 @@
 
 > A local-first, open-source macOS control plane for reliable Grok Build coding agents.
 
-[![CI](https://github.com/TAOMA-06/grok-build-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/TAOMA-06/grok-build-agent/actions/workflows/ci.yml)
-[![Release](https://github.com/TAOMA-06/grok-build-agent/actions/workflows/release.yml/badge.svg)](https://github.com/TAOMA-06/grok-build-agent/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: macOS 12+](https://img.shields.io/badge/platform-macOS%2012%2B-black)](#install)
 
@@ -12,6 +10,30 @@ A project-first desktop agent for the official [Grok Build CLI](https://docs.x.a
 This is an unofficial community project and is not affiliated with xAI.
 
 The app has no product telemetry and keeps local workspace data on the Mac. See [Privacy](PRIVACY.md), [Security](SECURITY.md), and the [Threat Model](THREAT_MODEL.md).
+
+## Project purpose
+
+Grok Build Desktop turns the official Grok Build CLI into a dependable desktop
+coding workspace. The CLI remains the execution runtime and owns Grok
+authentication; this project provides the control plane around it: projects,
+tasks, permissions, isolated worktrees, terminals, diffs, event history and
+crash recovery.
+
+The project is built around four principles:
+
+- **Runtime-compatible:** communicate with Grok through ACP/JSON-RPC instead of
+  parsing its terminal UI or reimplementing the model runtime.
+- **Local-first:** source code, sessions, events and artifacts stay on the Mac
+  unless the user explicitly invokes an approved network tool.
+- **Recoverable:** the independent Agent Host owns execution and persistence, so
+  closing or restarting the UI does not silently lose confirmed work.
+- **Reviewable and safe:** coding tasks run inside explicit workspace boundaries;
+  risky actions require permission, parallel writers use isolated worktrees and
+  changes remain inspectable before they reach the main project.
+
+This is an agent platform for completing and reviewing coding tasks, not a full
+IDE, model provider, cloud execution service or replacement for the official
+Grok CLI.
 
 ## Install
 
@@ -74,9 +96,12 @@ npm run app:dev
 ```
 
 Development uses the explicit in-process Host fallback. Release bundles never
-fall back: they require the packaged `grok-build-agent-host` sidecar. Public
-builds also require `APPLE_TEAM_ID` so the UI and Host share only the per-install
-IPC credential through a Data Protection Keychain access group.
+fall back: they require the packaged `grok-build-agent-host` sidecar. The UI and
+Host authenticate over a per-user Unix socket (`0600`) with peer-UID validation
+and a random per-install credential stored in a user-only (`0600`) local file.
+Opening the app must not require Keychain access. Grok authentication remains
+owned by the official CLI; Keychain is used only if the user explicitly chooses
+to save an additional API key.
 
 The same interface can be previewed without Tauri; browser mode automatically uses deterministic MockBridge scenarios:
 

@@ -47,6 +47,7 @@ describe("ACP session event routing", () => {
           availableCommands: [],
           attachments: [],
           failedSubmission: null,
+          contextUsage: null,
         },
         [background.sessionId]: {
           summary: background,
@@ -64,6 +65,7 @@ describe("ACP session event routing", () => {
           availableCommands: [],
           attachments: [],
           failedSubmission: null,
+          contextUsage: null,
         },
       },
       sessionOrder: [foreground.sessionId, background.sessionId],
@@ -111,6 +113,20 @@ describe("ACP session event routing", () => {
       content: { type: "text", text: "already rendered" },
     }, "remote-1", "conn-1");
     expect(useAppStore.getState().sessions["local-foreground"]?.blocks).toEqual([]);
+  });
+
+  it("streams thought chunks from array-shaped ACP content", async () => {
+    handleSessionUpdate({
+      sessionUpdate: "agent_thought_chunk",
+      content: [{ type: "text", text: "Thinking" }, { type: "text", text: " hard" }],
+    } as never, "remote-1", "conn-1");
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+    const thoughts = useAppStore.getState().sessions["local-foreground"]?.blocks
+      .filter((block) => block.type === "thought");
+    expect(thoughts).toHaveLength(1);
+    expect(thoughts?.[0]).toMatchObject({ type: "thought", text: "Thinking hard" });
   });
 
   it("deduplicates an identical plan delivered by update and approval request", () => {

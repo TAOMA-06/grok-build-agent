@@ -554,27 +554,111 @@ pub fn parse_create_params(params: &Value) -> Result<(String, Vec<String>), AcpE
             .ok_or_else(|| AcpError::Message("empty command array".into()))?;
         return Ok((cmd, iter.collect()));
     }
-    let cmd = params
+    let command_line = params
         .get("command")
         .and_then(|c| c.as_str())
-        .ok_or_else(|| AcpError::Message("terminal create missing command".into()))?
-        .to_string();
-    let args = params
-        .get("args")
-        .and_then(|a| a.as_array())
-        .map(|a| {
+        .ok_or_else(|| AcpError::Message("terminal create missing command".into()))?;
+    let explicit_args: Option<Vec<String>> =
+        params.get("args").and_then(|a| a.as_array()).map(|a| {
             a.iter()
                 .filter_map(|v| v.as_str().map(|s| s.to_string()))
                 .collect()
-        })
-        .unwrap_or_default();
-    Ok((cmd, args))
+        });
+    if let Some(args) = explicit_args {
+        if !args.is_empty() || !command_line.chars().any(char::is_whitespace) {
+            return Ok((command_line.to_string(), args));
+        }
+    }
+    let mut argv = split_command_line(command_line)?;
+    if argv.is_empty() {
+        return Err(AcpError::Message("empty terminal command".into()));
+    }
+    let command = argv.remove(0);
+    Ok((command, argv))
+}
+
+/// Parse a command line into argv without invoking a shell or performing any
+/// expansion. ACP agents commonly send `command: "npm test"`; treating that
+/// entire string as a program path produces ENOENT. Shell control operators
+/// remain forbidden and must be requested as explicit interpreter argv, where
+/// the policy engine can require confirmation.
+fn split_command_line(input: &str) -> Result<Vec<String>, AcpError> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+
+    let mut quote = Quote::None;
+    let mut escaped = false;
+    let mut current = String::new();
+    let mut argv = Vec::new();
+    for character in input.chars() {
+        if escaped {
+            current.push(character);
+            escaped = false;
+            continue;
+        }
+        match (quote, character) {
+            (Quote::None, '\\') | (Quote::Double, '\\') => escaped = true,
+            (Quote::None, '\'') => quote = Quote::Single,
+            (Quote::Single, '\'') => quote = Quote::None,
+            (Quote::None, '"') => quote = Quote::Double,
+            (Quote::Double, '"') => quote = Quote::None,
+            (Quote::None, c) if c.is_whitespace() => {
+                if !current.is_empty() {
+                    argv.push(std::mem::take(&mut current));
+                }
+            }
+            (Quote::None, '|' | ';' | '&' | '<' | '>' | '`' | '\n' | '\r') => {
+                return Err(AcpError::Message(
+                    "terminal command contains a shell control operator".into(),
+                ));
+            }
+            (_, c) => current.push(c),
+        }
+    }
+    if escaped || quote != Quote::None {
+        return Err(AcpError::Message(
+            "terminal command contains an unfinished quote or escape".into(),
+        ));
+    }
+    if !current.is_empty() {
+        argv.push(current);
+    }
+    Ok(argv)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn parses_string_command_line_to_argv_without_a_shell() {
+        let (command, args) = parse_create_params(&serde_json::json!({
+            "command": "npm test -- --test-name-pattern 'handles empty'"
+        }))
+        .unwrap();
+        assert_eq!(command, "npm");
+        assert_eq!(
+            args,
+            vec!["test", "--", "--test-name-pattern", "handles empty"]
+        );
+    }
+
+    #[test]
+    fn rejects_shell_operators_in_string_command_line() {
+        assert!(parse_create_params(&serde_json::json!({
+            "command": "npm test | tee result.txt"
+        }))
+        .is_err());
+        assert!(parse_create_params(&serde_json::json!({
+            "command": "echo 'unfinished"
+        }))
+        .is_err());
+    }
 
     #[tokio::test]
     async fn run_echo_and_release() {

@@ -13,6 +13,7 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "vitest run src/e2e",
     "check": "tsc --noEmit && vitest run && npm run build",
+    "release:check": "node scripts/release-safety-check.mjs",
     "tauri": "tauri",
     "app:dev": "GROK_BUILD_IN_PROCESS_HOST=1 tauri dev",
     "app:build": "tauri build",

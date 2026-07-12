@@ -80,6 +80,7 @@ export function ThreadView({
   onSend,
   onCancel,
   onChooseModel,
+  onChooseEffort,
   onChooseMode,
   onLocalCommand,
   onRetryFailed,
@@ -102,6 +103,7 @@ export function ThreadView({
   onSend: (text: string, attachments: ComposerAttachment[], mode: TaskMode) => Promise<void>;
   onCancel: () => Promise<void>;
   onChooseModel: (modelId: string) => Promise<void>;
+  onChooseEffort: (effort: string) => Promise<void>;
   onChooseMode: (mode: TaskMode) => Promise<ModeSwitchResult>;
   onLocalCommand: (command: string) => void;
   onRetryFailed: () => Promise<void>;
@@ -135,7 +137,7 @@ export function ThreadView({
   }, []);
   const executionRoot = session?.summary.executionRoot || session?.summary.worktreePath || session?.summary.workspaceRoot;
   const changesVisible = Boolean(session && (session.tools.length > 0 || session.summary.worktreePath));
-  const visibleMode = session?.modeState.currentMode ?? session?.summary.mode ?? "agent";
+  const visibleMode = session?.summary.mode ?? session?.modeState.currentMode ?? "agent";
 
   return (
     <>
@@ -148,7 +150,7 @@ export function ThreadView({
               <span><FolderKanban size={13} /> {workspaceName || t.project}{session.summary.worktreePath && <> <i>·</i> <Flag size={12} /> {t.isolated}</>}</span>
             </div>
             <div className="gb-thread-header-actions">
-              <span className={`gb-run-pill ${session.busy ? "running" : session.summary.runState}`}><CircleDot size={12} />{session.busy ? t.grokWorking : t.runState[session.summary.runState] ?? session.summary.runState}</span>
+              <span className={`gb-run-pill ${session.busy ? "running" : session.summary.runState}`} role="status" aria-live="polite"><CircleDot size={12} />{session.busy ? t.grokWorking : t.runState[session.summary.runState] ?? session.summary.runState}</span>
               {executionRoot && <button type="button" className="gb-header-button" onClick={() => void onOpenPath(executionRoot)}><ExternalLink size={14} /> {t.open}</button>}
               <button type="button" className={drawerOpen ? "gb-header-button active" : "gb-header-button"} onClick={onToggleDrawer}><FileCode2 size={14} /> {t.changes}{changesVisible && <span className="gb-change-dot" />}</button>
               <DropdownMenu.Root>
@@ -180,6 +182,7 @@ export function ThreadView({
           <div className="gb-thread-column">
             <Timeline
               blocks={session.blocks}
+              busy={Boolean(session.busy)}
               planActionsEnabled={Boolean(pendingPlanApproval)}
               onPlanAction={(action) => {
                 if (pendingPlanApproval) {
@@ -240,6 +243,7 @@ export function ThreadView({
           onSend={onSend}
           onCancel={onCancel}
           onChooseModel={onChooseModel}
+          onChooseEffort={onChooseEffort}
           onChooseMode={onChooseMode}
           onLocalCommand={onLocalCommand}
         />

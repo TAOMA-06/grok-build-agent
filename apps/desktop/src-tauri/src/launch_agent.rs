@@ -2,10 +2,12 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
 const LABEL: &str = "com.grokbuilddesktop.community.agent-host";
+static ENSURE_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Error)]
 pub enum LaunchAgentError {
@@ -16,6 +18,17 @@ pub enum LaunchAgentError {
 }
 
 pub fn ensure_running() -> Result<(), LaunchAgentError> {
+    // React StrictMode and multiple windows can ask the broker to ensure the Host
+    // concurrently. Serialize the full readiness sequence so a second caller
+    // observes the live socket instead of restarting the process that the first
+    // caller is still waiting for.
+    let _guard = ENSURE_LOCK
+        .lock()
+        .map_err(|_| LaunchAgentError::Message("Agent Host launch lock is poisoned".into()))?;
+    ensure_running_locked()
+}
+
+fn ensure_running_locked() -> Result<(), LaunchAgentError> {
     let socket = crate::agent_host::socket_path()
         .map_err(|error| LaunchAgentError::Message(error.to_string()))?;
     if socket_is_live(&socket) {
@@ -144,10 +157,16 @@ fn install_and_kickstart(executable: &Path) -> Result<(), LaunchAgentError> {
          <plist version=\"1.0\"><dict>\n\
          <key>Label</key><string>{LABEL}</string>\n\
          <key>ProgramArguments</key><array><string>{}</string><string>--agent-host</string></array>\n\
+         <key>EnvironmentVariables</key><dict>\n\
+           <key>HOME</key><string>{}</string>\n\
+           <key>PATH</key><string>{}/.grok/bin:{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>\n\
+         </dict>\n\
          <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n\
-         <key>ProcessType</key><string>Background</string>\n\
          </dict></plist>\n",
-        xml_escape(&executable.to_string_lossy())
+        xml_escape(&executable.to_string_lossy()),
+        xml_escape(&home.to_string_lossy()),
+        xml_escape(&home.to_string_lossy()),
+        xml_escape(&home.to_string_lossy())
     );
     // SAFETY: geteuid has no preconditions.
     let uid = unsafe { libc::geteuid() };

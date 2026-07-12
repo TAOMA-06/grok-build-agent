@@ -1,11 +1,11 @@
-//! macOS Keychain (via `keyring`) for API keys — never log secret values.
+//! Optional API-key storage plus the private UI/Host IPC credential.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 const SERVICE: &str = "com.grokbuilddesktop.community";
 const USER: &str = "xai_api_key";
-const HOST_IPC_USER: &str = "agent_host_ipc_v1";
+const HOST_IPC_TOKEN_FILE: &str = "agent-host-ipc-token-v1";
 
 #[derive(Debug, Error)]
 pub enum SecretError {
@@ -32,77 +32,53 @@ fn entry_for(user: &str) -> Result<keyring::Entry, SecretError> {
 }
 
 pub fn get_or_create_host_ipc_token() -> Result<String, SecretError> {
-    #[cfg(all(target_os = "macos", not(debug_assertions)))]
-    {
-        return get_or_create_protected_host_ipc_token();
-    }
-    #[cfg(any(not(target_os = "macos"), debug_assertions))]
-    {
-        get_or_create_legacy_host_ipc_token()
-    }
-}
+    use std::fs::OpenOptions;
+    use std::io::Write;
 
-#[cfg(any(not(target_os = "macos"), debug_assertions))]
-fn get_or_create_legacy_host_ipc_token() -> Result<String, SecretError> {
-    let entry = entry_for(HOST_IPC_USER)?;
-    match entry.get_password() {
-        Ok(token) if token.len() >= 32 => Ok(token),
-        Ok(_) | Err(keyring::Error::NoEntry) => {
-            let token = format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
-            entry
-                .set_password(&token)
-                .map_err(|error| SecretError::Message(format!("keychain write failed: {error}")))?;
+    let root = crate::config::config_dir_path()
+        .map_err(|error| SecretError::Message(error.to_string()))?;
+    std::fs::create_dir_all(&root)
+        .map_err(|error| SecretError::Message(format!("create config directory: {error}")))?;
+    let path = std::path::Path::new(&root).join(HOST_IPC_TOKEN_FILE);
+
+    if let Ok(token) = std::fs::read_to_string(&path) {
+        let token = token.trim().to_string();
+        if token.len() >= 32 {
+            return Ok(token);
+        }
+        return Err(SecretError::Message(
+            "Agent Host IPC credential is unexpectedly short".into(),
+        ));
+    }
+
+    let token = format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(&path) {
+        Ok(mut file) => {
+            file.write_all(token.as_bytes())
+                .and_then(|_| file.sync_all())
+                .map_err(|error| SecretError::Message(format!("write IPC credential: {error}")))?;
             Ok(token)
         }
-        Err(error) => Err(SecretError::Message(format!(
-            "keychain read failed: {error}"
-        ))),
-    }
-}
-
-#[cfg(all(target_os = "macos", not(debug_assertions)))]
-fn get_or_create_protected_host_ipc_token() -> Result<String, SecretError> {
-    use security_framework::passwords::{
-        generic_password, set_generic_password_options, PasswordOptions,
-    };
-    use security_framework_sys::base::errSecItemNotFound;
-
-    let team_id = option_env!("APPLE_TEAM_ID")
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            SecretError::Message(
-                "signed release is missing APPLE_TEAM_ID for the shared Keychain access group"
-                    .into(),
-            )
-        })?;
-    let access_group = format!("{team_id}.com.grokbuilddesktop.community.shared");
-    let options = || {
-        let mut options = PasswordOptions::new_generic_password(SERVICE, HOST_IPC_USER);
-        options.set_access_group(&access_group);
-        options.use_protected_keychain();
-        options
-    };
-
-    match generic_password(options()) {
-        Ok(bytes) => {
-            let token = String::from_utf8(bytes)
-                .map_err(|_| SecretError::Message("Keychain IPC token is not UTF-8".into()))?;
-            if token.len() < 32 {
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let existing = std::fs::read_to_string(&path)
+                .map_err(|error| SecretError::Message(format!("read IPC credential: {error}")))?;
+            let existing = existing.trim().to_string();
+            if existing.len() < 32 {
                 return Err(SecretError::Message(
-                    "Keychain IPC token is unexpectedly short".into(),
+                    "Agent Host IPC credential is unexpectedly short".into(),
                 ));
             }
-            Ok(token)
-        }
-        Err(error) if error.code() == errSecItemNotFound => {
-            let token = format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
-            set_generic_password_options(token.as_bytes(), options()).map_err(|error| {
-                SecretError::Message(format!("protected Keychain write failed: {error}"))
-            })?;
-            Ok(token)
+            Ok(existing)
         }
         Err(error) => Err(SecretError::Message(format!(
-            "protected Keychain read failed: {error}"
+            "create IPC credential: {error}"
         ))),
     }
 }
@@ -142,20 +118,13 @@ pub fn apply_api_key_to_env(api_key: &str) {
     }
 }
 
-pub fn load_api_key_into_env() {
-    if let Ok(Some(key)) = get_api_key() {
-        apply_api_key_to_env(&key);
-    }
-}
-
 /// Redact secrets from log / error strings.
 pub fn redact_secrets(text: &str) -> String {
     let mut out = text.to_string();
-    if let Ok(Some(key)) = get_api_key() {
-        if key.len() >= 8 {
-            out = out.replace(&key, "[REDACTED]");
-        }
-    }
+    // Redaction runs on every audited Host RPC. Never read Keychain from this
+    // hot path: a background LaunchAgent may be unable to present the access
+    // dialog, and credential lookup must not block or abort an unrelated RPC.
+    // An explicitly supplied API key is already present in the Host environment.
     if let Ok(key) = std::env::var("XAI_API_KEY") {
         if key.len() >= 8 {
             out = out.replace(&key, "[REDACTED]");
@@ -168,31 +137,28 @@ pub fn redact_secrets(text: &str) -> String {
 
 fn redact_prefixed_tokens(text: &str, prefix: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if text[i..].starts_with(prefix) {
-            let start = i;
-            i += prefix.len();
-            while i < bytes.len() {
-                let c = bytes[i] as char;
-                if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                    i += 1;
-                } else {
-                    break;
-                }
-            }
-            if i - start > prefix.len() + 8 {
-                out.push_str(prefix);
-                out.push_str("[REDACTED]");
-                continue;
-            }
-            out.push_str(&text[start..i]);
-            continue;
+    let mut cursor = 0;
+    while let Some(relative_start) = text[cursor..].find(prefix) {
+        let start = cursor + relative_start;
+        out.push_str(&text[cursor..start]);
+        let token_start = start + prefix.len();
+        let token_end = text[token_start..]
+            .char_indices()
+            .take_while(|(_, character)| {
+                character.is_ascii_alphanumeric() || *character == '_' || *character == '-'
+            })
+            .map(|(offset, character)| token_start + offset + character.len_utf8())
+            .last()
+            .unwrap_or(token_start);
+        if token_end - token_start > 8 {
+            out.push_str(prefix);
+            out.push_str("[REDACTED]");
+        } else {
+            out.push_str(&text[start..token_end]);
         }
-        out.push(bytes[i] as char);
-        i += 1;
+        cursor = token_end;
     }
+    out.push_str(&text[cursor..]);
     out
 }
 
@@ -220,5 +186,13 @@ mod tests {
         assert!(!s.contains("xai-abcdefghijklmnop"));
         assert!(!s.contains("sk-1234567890abcdef"));
         assert!(s.contains("[REDACTED]") || s.contains("xai-[REDACTED]"));
+    }
+
+    #[test]
+    fn redact_preserves_unicode_without_panicking() {
+        let text = "制定中文计划，再检查 xai-abcdefghijklmnop 是否脱敏";
+        let redacted = redact_secrets(text);
+        assert!(redacted.starts_with("制定中文计划，再检查 "));
+        assert!(!redacted.contains("abcdefghijklmnop"));
     }
 }

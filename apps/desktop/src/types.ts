@@ -79,6 +79,10 @@ export type {
   SessionModelState,
   ModelSource,
   ModelSwitchResult,
+  EffortSwitchResult,
+  SessionContextUsage,
+  ReasoningEffortOption,
+  ReasoningEffortLevel,
 } from "./contracts";
 
 export type {

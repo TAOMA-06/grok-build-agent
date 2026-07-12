@@ -276,12 +276,18 @@ pub fn connection_key_from_config(config: &StartConfig, workspace: PathBuf) -> C
         .as_ref()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let reasoning_effort = config
+        .reasoning_effort
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     ConnectionKey {
         workspace_root: workspace.to_string_lossy().into(),
         sandbox: config.sandbox.unwrap_or(SandboxMode::Workspace),
         always_approve: config.always_approve,
         power_profile: config.power_profile,
         model_id,
+        reasoning_effort,
     }
 }
 
@@ -385,6 +391,12 @@ pub async fn spawn_connection(
     if let Some(model) = &config.model {
         if !model.is_empty() {
             cmd.arg("--model").arg(model);
+        }
+    }
+    if let Some(effort) = &config.reasoning_effort {
+        let effort = effort.trim();
+        if !effort.is_empty() {
+            cmd.arg("--reasoning-effort").arg(effort);
         }
     }
     if config.always_approve {

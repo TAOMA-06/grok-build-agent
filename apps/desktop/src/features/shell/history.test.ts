@@ -35,4 +35,18 @@ describe("normalizeCachedEvents", () => {
       tool: { id: "t1", status: "completed", output: "ok" },
     });
   });
+
+  it("deduplicates legacy Host and Renderer copies by ACP event id", () => {
+    const payload = {
+      _meta: { eventId: "runtime-event-1" },
+      update: { sessionUpdate: "agent_message_chunk", content: { text: "计划" } },
+    };
+    const blocks = normalizeCachedEvents([
+      event(1, "session_update", payload),
+      event(1, "session_update", payload),
+    ]);
+    expect(blocks).toEqual([
+      expect.objectContaining({ type: "assistant", text: "计划" }),
+    ]);
+  });
 });

@@ -122,6 +122,7 @@ pub fn is_write_method(method: &str) -> bool {
             | "session.prompt"
             | "session.cancel"
             | "session.setModel"
+            | "session.setEffort"
             | "session.setMode"
             | "session.confirmMode"
             | "runtime.request"

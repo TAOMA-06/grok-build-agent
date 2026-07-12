@@ -10,6 +10,7 @@ import type {
   AgentHostHealth,
   SelectableModel,
   ModelSwitchResult,
+  EffortSwitchResult,
   ModeSwitchResult,
   SessionModeState,
   McpDoctorResult,
@@ -92,6 +93,11 @@ export interface DesktopBridge {
     sessionId: string,
     modelId: string,
   ): Promise<ModelSwitchResult>;
+  setSessionEffort(
+    connectionId: string,
+    sessionId: string,
+    effort: string,
+  ): Promise<EffortSwitchResult>;
   setSessionMode(
     connectionId: string,
     sessionId: string,

@@ -262,19 +262,30 @@ pub fn list_models(
     configured: Option<&str>,
 ) -> Result<Vec<crate::contracts::SelectableModel>, CliBridgeError> {
     // Prefer JSON if the CLI adds it later; always fall back to text parse.
-    if let Ok(out) = run_grok(configured, &["models", "--json"]) {
+    let mut models = if let Ok(out) = run_grok(configured, &["models", "--json"]) {
         let trimmed = out.trim();
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            if let Some(models) = parse_models_json(&value) {
-                if !models.is_empty() {
-                    return Ok(models);
-                }
-            }
+            parse_models_json(&value).unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    if models.is_empty() {
+        // `grok models` prints login banners / log lines before the list; text
+        // parse must ignore those (otherwise "You are logged in…" becomes id "You").
+        if let Ok(out) = run_grok(configured, &["models"]) {
+            models = parse_models_text(&out);
         }
     }
 
-    let out = run_grok(configured, &["models"])?;
-    Ok(parse_models_text(&out))
+    enrich_models_from_cache(&mut models);
+    if models.is_empty() {
+        models = models_from_cache_only();
+    }
+    Ok(models)
 }
 
 fn parse_models_json(value: &serde_json::Value) -> Option<Vec<crate::contracts::SelectableModel>> {
@@ -318,21 +329,277 @@ fn parse_models_json(value: &serde_json::Value) -> Option<Vec<crate::contracts::
                         .collect()
                 })
                 .unwrap_or_default(),
+            context_window: item
+                .get("contextWindow")
+                .or_else(|| item.get("context_window"))
+                .and_then(|v| v.as_u64()),
+            supports_reasoning_effort: item
+                .get("supportsReasoningEffort")
+                .or_else(|| item.get("supports_reasoning_effort"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            reasoning_effort: item
+                .get("reasoningEffort")
+                .or_else(|| item.get("reasoning_effort"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            reasoning_efforts: parse_reasoning_efforts(&item),
+            auto_compact_threshold_percent: item
+                .get("autoCompactThresholdPercent")
+                .or_else(|| item.get("auto_compact_threshold_percent"))
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u8),
         });
     }
     Some(models)
+}
+
+fn parse_reasoning_efforts(
+    item: &serde_json::Value,
+) -> Vec<crate::contracts::ReasoningEffortOption> {
+    let Some(arr) = item
+        .get("reasoningEfforts")
+        .or_else(|| item.get("reasoning_efforts"))
+        .and_then(|v| v.as_array())
+    else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|opt| {
+            let value = opt
+                .get("value")
+                .or_else(|| opt.get("id"))
+                .and_then(|v| v.as_str())?
+                .to_string();
+            let id = opt
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(value.as_str())
+                .to_string();
+            Some(crate::contracts::ReasoningEffortOption {
+                id,
+                label: opt
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(value.as_str())
+                    .to_string(),
+                description: opt
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                default: opt
+                    .get("default")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                value,
+            })
+        })
+        .collect()
+}
+
+fn models_cache_path() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(
+        std::path::PathBuf::from(home)
+            .join(".grok")
+            .join("models_cache.json"),
+    )
+}
+
+fn read_models_cache() -> Option<serde_json::Value> {
+    let path = models_cache_path()?;
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn apply_cache_info(model: &mut crate::contracts::SelectableModel, info: &serde_json::Value) {
+    if model.name == model.id {
+        if let Some(name) = info.get("name").and_then(|v| v.as_str()) {
+            model.name = name.to_string();
+        }
+    }
+    if model.description.is_none() {
+        model.description = info
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+    }
+    if model.context_window.is_none() {
+        model.context_window = info.get("context_window").and_then(|v| v.as_u64());
+    }
+    if let Some(supports) = info
+        .get("supports_reasoning_effort")
+        .and_then(|v| v.as_bool())
+    {
+        model.supports_reasoning_effort = supports;
+    }
+    if model.reasoning_effort.is_none() {
+        model.reasoning_effort = info
+            .get("reasoning_effort")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+    }
+    if model.reasoning_efforts.is_empty() {
+        model.reasoning_efforts = parse_reasoning_efforts(info);
+    }
+    if model.auto_compact_threshold_percent.is_none() {
+        model.auto_compact_threshold_percent = info
+            .get("auto_compact_threshold_percent")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u8);
+    }
+}
+
+fn enrich_models_from_cache(models: &mut Vec<crate::contracts::SelectableModel>) {
+    let Some(cache) = read_models_cache() else {
+        return;
+    };
+    let Some(map) = cache.get("models").and_then(|v| v.as_object()) else {
+        return;
+    };
+    // Drop banner noise that slipped past the text parser when we have a real catalog.
+    models.retain(|model| map.contains_key(&model.id) || looks_like_model_id(&model.id));
+    for model in models.iter_mut() {
+        if let Some(entry) = map.get(&model.id) {
+            if let Some(info) = entry.get("info") {
+                apply_cache_info(model, info);
+            }
+        }
+    }
+    let existing: std::collections::HashSet<String> =
+        models.iter().map(|model| model.id.clone()).collect();
+    for (id, entry) in map {
+        if existing.contains(id) {
+            continue;
+        }
+        let Some(info) = entry.get("info") else {
+            continue;
+        };
+        if info
+            .get("hidden")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let mut model = crate::contracts::SelectableModel::named(
+            id.clone(),
+            info.get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or(id)
+                .to_string(),
+            false,
+        );
+        apply_cache_info(&mut model, info);
+        models.push(model);
+    }
+}
+
+fn models_from_cache_only() -> Vec<crate::contracts::SelectableModel> {
+    let Some(cache) = read_models_cache() else {
+        return Vec::new();
+    };
+    let Some(map) = cache.get("models").and_then(|v| v.as_object()) else {
+        return Vec::new();
+    };
+    let mut models = Vec::new();
+    for (id, entry) in map {
+        let Some(info) = entry.get("info") else {
+            continue;
+        };
+        if info
+            .get("hidden")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let mut model = crate::contracts::SelectableModel::named(
+            id.clone(),
+            info.get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or(id)
+                .to_string(),
+            false,
+        );
+        apply_cache_info(&mut model, info);
+        models.push(model);
+    }
+    models.sort_by_key(|model| model.name.to_lowercase());
+    models
+}
+
+fn looks_like_model_id(id: &str) -> bool {
+    let id = id.trim();
+    if id.len() < 2 || id.len() > 128 {
+        return false;
+    }
+    let lower = id.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "you"
+            | "available"
+            | "default"
+            | "error"
+            | "settings"
+            | "model"
+            | "models"
+            | "logged"
+            | "login"
+    ) {
+        return false;
+    }
+    // Timestamps / ISO datetimes from log lines.
+    if id.chars().next().is_some_and(|c| c.is_ascii_digit()) && id.contains(':') {
+        return false;
+    }
+    id.contains('-')
+        || id.contains('/')
+        || lower.starts_with("grok")
+        || lower.starts_with("composer")
 }
 
 fn parse_models_text(out: &str) -> Vec<crate::contracts::SelectableModel> {
     let mut models = Vec::new();
     let mut default_id: Option<String> = None;
     for line in out.lines() {
+        // Strip common ANSI SGR sequences from CLI log noise.
+        let line = {
+            let mut cleaned = String::with_capacity(line.len());
+            let mut chars = line.chars().peekable();
+            while let Some(ch) = chars.next() {
+                if ch == '\u{1b}' {
+                    if chars.peek() == Some(&'[') {
+                        chars.next();
+                        for next in chars.by_ref() {
+                            if next.is_ascii_alphabetic() {
+                                break;
+                            }
+                        }
+                    }
+                    continue;
+                }
+                cleaned.push(ch);
+            }
+            cleaned
+        };
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("Default model:") {
-            default_id = Some(rest.trim().to_string());
+            let id = rest.trim().to_string();
+            if looks_like_model_id(&id) {
+                default_id = Some(id);
+            }
             continue;
         }
-        // `* id (default)` or `- id`
+        // Only accept bullet list rows (`* id` / `- id`), never prose like
+        // "You are logged in with grok.com."
+        let trimmed_start = line.trim_start();
+        let is_bullet = trimmed_start.starts_with('*')
+            || trimmed_start.starts_with('-')
+            || trimmed_start.starts_with('•');
+        if !is_bullet {
+            continue;
+        }
         let cleaned = line.trim_start_matches(['*', '-', '•', ' ']).trim();
         if cleaned.is_empty() || cleaned.eq_ignore_ascii_case("available models:") {
             continue;
@@ -351,7 +618,7 @@ fn parse_models_text(out: &str) -> Vec<crate::contracts::SelectableModel> {
             .unwrap_or(cleaned)
             .trim_matches(|c| c == '(' || c == ')')
             .to_string();
-        if id.is_empty() || id == "Available" {
+        if !looks_like_model_id(&id) {
             continue;
         }
         let is_default = line.contains('*')
@@ -363,23 +630,21 @@ fn parse_models_text(out: &str) -> Vec<crate::contracts::SelectableModel> {
         {
             continue;
         }
-        models.push(crate::contracts::SelectableModel {
-            id: id.clone(),
-            name: id,
-            description: None,
+        models.push(crate::contracts::SelectableModel::named(
+            id.clone(),
+            id,
             is_default,
-            tags: vec![],
-        });
+        ));
     }
     if models.is_empty() {
         if let Some(d) = default_id {
-            models.push(crate::contracts::SelectableModel {
-                id: d.clone(),
-                name: d,
-                description: None,
-                is_default: true,
-                tags: vec![],
-            });
+            models.push(crate::contracts::SelectableModel::named(d.clone(), d, true));
+        }
+    } else if let Some(d) = default_id.as_deref() {
+        for model in &mut models {
+            if model.id == d {
+                model.is_default = true;
+            }
         }
     }
     models
@@ -1577,5 +1842,20 @@ mod tests {
         .unwrap();
         assert!(!results[0].ok);
         assert!(results[0].summary.contains("timed out"));
+    }
+
+    #[test]
+    fn parse_models_text_ignores_login_banner_and_log_noise() {
+        let out = "You are logged in with grok.com.\n\n\
+            \u{1b}[2m2026-07-12T06:00:02.725895Z\u{1b}[0m \u{1b}[31mERROR\u{1b}[0m Settings fetch failed\n\
+            Default model: grok-4.5\n\n\
+            Available models:\n\
+              * grok-4.5 (default)\n\
+              - grok-composer-2.5-fast\n";
+        let models = parse_models_text(out);
+        let ids: Vec<_> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["grok-4.5", "grok-composer-2.5-fast"]);
+        assert!(models.iter().any(|m| m.id == "grok-4.5" && m.is_default));
+        assert!(!ids.contains(&"You"));
     }
 }

@@ -494,6 +494,21 @@ impl Database {
         Ok(reconciled)
     }
 
+    /// A freshly started Host has no in-memory ACP connections. Session rows
+    /// left in an active state therefore describe work interrupted by the
+    /// previous Host, not work that is still running. Preserve the remote
+    /// session id for an explicit retry, but clear the dead connection and make
+    /// the interruption visible instead of showing a permanent ghost spinner.
+    pub fn reconcile_interrupted_sessions(&self) -> Result<usize, DbError> {
+        Ok(self.conn.lock().execute(
+            "UPDATE sessions
+             SET run_state = 'error', connection_id = NULL,
+                 attention_required = 1, updated_at = ?1
+             WHERE run_state IN ('streaming', 'awaiting_permission', 'awaiting_plan')",
+            params![iso_now()],
+        )?)
+    }
+
     pub fn mark_runtime_processes_stopped(&self) -> Result<usize, DbError> {
         Ok(self.conn.lock().execute(
             "UPDATE runtime_processes SET state='stopped', stopped_at=?1
@@ -1010,7 +1025,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT sequence, timestamp, kind, payload FROM platform_events
              WHERE session_id = ?1 AND kind NOT LIKE '%_snapshot'
-             ORDER BY sequence ASC, rowid ASC",
+             ORDER BY timestamp ASC, sequence ASC, rowid ASC",
         )?;
         let rows = stmt.query_map(params![session_id], |row| {
             Ok((
@@ -2530,6 +2545,7 @@ fn task_mode_str(mode: TaskMode) -> &'static str {
 
 fn parse_task_mode(value: &str) -> TaskMode {
     match value {
+        "plan" => TaskMode::Plan,
         "goal" => TaskMode::Goal,
         _ => TaskMode::Agent,
     }
@@ -2581,6 +2597,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummary> 
         remote_session_id: row.get(8)?,
         worktree_path: row.get(9)?,
         model: row.get(10)?,
+        reasoning_effort: None,
         always_approve: row.get::<_, i64>(11)? != 0,
         draft: row.get(12)?,
         execution_root: row.get(13)?,
@@ -2630,13 +2647,14 @@ mod tests {
             worktree_path: None,
             execution_root: Some("/tmp/proj".into()),
             base_commit: None,
-            mode: TaskMode::Agent,
+            mode: TaskMode::Plan,
             permission_policy: PermissionPolicy::WorkspaceEdit,
             sandbox: SandboxMode::Workspace,
             archived: false,
             attention_required: false,
             applied_at: None,
             model: Some("grok-build".into()),
+            reasoning_effort: None,
             always_approve: false,
             draft: Some("draft text".into()),
         };
@@ -2644,7 +2662,7 @@ mod tests {
         db.save_draft("s1", "updated draft").unwrap();
         let loaded = db.get_session("s1").unwrap().unwrap();
         assert_eq!(loaded.draft.as_deref(), Some("updated draft"));
-        assert_eq!(loaded.mode, TaskMode::Agent);
+        assert_eq!(loaded.mode, TaskMode::Plan);
         assert_eq!(loaded.permission_policy, PermissionPolicy::WorkspaceEdit);
         let schema_version: i64 = db
             .conn
@@ -2669,6 +2687,18 @@ mod tests {
         let loaded_ui = db.load_session_ui("s1").unwrap().unwrap();
         assert_eq!(loaded_ui.scroll_top, 42.0);
         assert_eq!(loaded_ui.collapsed_tool_ids, vec!["tool-1".to_string()]);
+
+        let interrupted = SessionSummary {
+            run_state: SessionRunState::Streaming,
+            attention_required: false,
+            ..loaded
+        };
+        db.upsert_session(&interrupted).unwrap();
+        assert_eq!(db.reconcile_interrupted_sessions().unwrap(), 1);
+        let recovered = db.get_session("s1").unwrap().unwrap();
+        assert_eq!(recovered.run_state, SessionRunState::Error);
+        assert!(recovered.attention_required);
+        assert!(recovered.connection_id.is_none());
 
         db.delete_session("s1").unwrap();
         assert!(db.get_session("s1").unwrap().is_none());
@@ -2697,6 +2727,7 @@ mod tests {
             attention_required: false,
             applied_at: None,
             model: None,
+            reasoning_effort: None,
             always_approve: false,
             draft: None,
         };
@@ -2772,6 +2803,7 @@ mod tests {
             attention_required: false,
             applied_at: None,
             model: None,
+            reasoning_effort: None,
             always_approve: false,
             draft: None,
         };
@@ -2929,6 +2961,7 @@ mod tests {
             attention_required: false,
             applied_at: None,
             model: None,
+            reasoning_effort: None,
             always_approve: false,
             draft: None,
         };

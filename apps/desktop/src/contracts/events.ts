@@ -32,7 +32,7 @@ export type SessionEventEnvelope<TPayload = unknown> = {
 /** Loose ACP session/update body (agent may use camelCase or snake_case). */
 export type SessionUpdate = {
   sessionUpdate?: string;
-  content?: { type?: string; text?: string } | string;
+  content?: { type?: string; text?: string } | Array<{ type?: string; text?: string }> | string;
   title?: string;
   kind?: string;
   status?: string;

@@ -87,6 +87,8 @@ export type ComposerDraft = {
   attachments: ComposerAttachment[];
   /** Session model override while provisional (no active session yet). */
   modelId?: string | null;
+  /** Reasoning effort override while provisional. */
+  reasoningEffort?: string | null;
   /** Optional slash-command draft prefix (e.g. `/review`). */
   commandHint?: string | null;
   mode: TaskMode;
@@ -100,6 +102,7 @@ export function emptyComposerDraft(
     text: "",
     attachments: [],
     modelId: modelId ?? null,
+    reasoningEffort: null,
     commandHint: null,
     mode,
   };

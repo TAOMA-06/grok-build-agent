@@ -67,12 +67,12 @@ impl RuntimePool {
                     .map(|cap| {
                         cap.models
                             .iter()
-                            .map(|id| crate::contracts::SelectableModel {
-                                id: id.clone(),
-                                name: id.clone(),
-                                description: None,
-                                is_default: current.as_deref() == Some(id.as_str()),
-                                tags: vec![],
+                            .map(|id| {
+                                crate::contracts::SelectableModel::named(
+                                    id.clone(),
+                                    id.clone(),
+                                    current.as_deref() == Some(id.as_str()),
+                                )
                             })
                             .collect()
                     })
@@ -518,12 +518,12 @@ impl RuntimePool {
             .map(|c| {
                 c.models
                     .iter()
-                    .map(|id| crate::contracts::SelectableModel {
-                        id: id.clone(),
-                        name: id.clone(),
-                        description: None,
-                        is_default: id == model_id,
-                        tags: vec![],
+                    .map(|id| {
+                        crate::contracts::SelectableModel::named(
+                            id.clone(),
+                            id.clone(),
+                            id == model_id,
+                        )
                     })
                     .collect::<Vec<_>>()
             })
@@ -538,6 +538,60 @@ impl RuntimePool {
             } else {
                 "configured".into()
             },
+        })
+    }
+
+    /// Try ACP live reasoning-effort switch; otherwise ask the UI to restart.
+    pub async fn set_session_effort(
+        &self,
+        connection_id: &str,
+        session_id: &str,
+        effort: &str,
+    ) -> Result<crate::contracts::EffortSwitchResult, AcpError> {
+        let conn = self.get_connection(connection_id)?;
+        if !conn.session_ids.lock().contains(session_id) {
+            return Err(AcpError::Message(format!(
+                "session {session_id} not found on connection {connection_id}"
+            )));
+        }
+        let effort = effort.trim();
+        if effort.is_empty() {
+            return Err(AcpError::Message("reasoning effort empty".into()));
+        }
+
+        for (method, params) in [
+            (
+                "session/set_config_option",
+                json!({
+                    "sessionId": session_id,
+                    "configId": "reasoning_effort",
+                    "value": effort
+                }),
+            ),
+            (
+                "session/set_config_option",
+                json!({
+                    "sessionId": session_id,
+                    "configId": "effort",
+                    "value": effort
+                }),
+            ),
+        ] {
+            if conn
+                .request(method, params, Duration::from_secs(15))
+                .await
+                .is_ok()
+            {
+                return Ok(crate::contracts::EffortSwitchResult::Switched {
+                    effort: effort.to_string(),
+                    live_switch_supported: true,
+                });
+            }
+        }
+
+        Ok(crate::contracts::EffortSwitchResult::RestartRequired {
+            effort: effort.to_string(),
+            reason: "This Grok CLI cannot change reasoning effort in a live session; the agent will restart.".into(),
         })
     }
 

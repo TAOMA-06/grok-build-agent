@@ -37,6 +37,41 @@ struct HostState {
     task_roots: Arc<parking_lot::Mutex<HashMap<String, PathBuf>>>,
 }
 
+/// A workspace write lease exists only while a task turn is actively running.
+/// Keeping it for the lifetime of a resumable session prevents every later
+/// task in a non-Git workspace, even after the original task is idle.
+struct TaskRootLease {
+    task_id: String,
+    roots: Arc<parking_lot::Mutex<HashMap<String, PathBuf>>>,
+}
+
+impl Drop for TaskRootLease {
+    fn drop(&mut self) {
+        self.roots.lock().remove(&self.task_id);
+    }
+}
+
+fn claim_task_root(
+    roots: &Arc<parking_lot::Mutex<HashMap<String, PathBuf>>>,
+    task_id: &str,
+    execution_root: PathBuf,
+) -> Result<TaskRootLease, String> {
+    let mut task_roots = roots.lock();
+    if let Some((owner, _)) = task_roots
+        .iter()
+        .find(|(owner, root)| owner.as_str() != task_id && **root == execution_root)
+    {
+        return Err(format!(
+            "execution root is already owned by task {owner}; parallel write tasks require separate worktrees"
+        ));
+    }
+    task_roots.insert(task_id.to_string(), execution_root);
+    Ok(TaskRootLease {
+        task_id: task_id.to_string(),
+        roots: roots.clone(),
+    })
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct HostNotification {
     jsonrpc: &'static str,
@@ -261,6 +296,14 @@ struct ModelRoute {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct EffortRoute {
+    connection_id: String,
+    session_id: String,
+    effort: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ModeRoute {
     connection_id: String,
     session_id: String,
@@ -299,7 +342,6 @@ pub fn run_blocking() -> Result<(), AgentHostError> {
 }
 
 async fn run() -> Result<(), AgentHostError> {
-    crate::secrets::load_api_key_into_env();
     let db = Arc::new(
         Database::open_default().map_err(|error| AgentHostError::Message(error.to_string()))?,
     );
@@ -311,13 +353,15 @@ async fn run() -> Result<(), AgentHostError> {
         .map_err(|error| AgentHostError::Message(error.to_string()))?;
     db.reconcile_orphan_runtime_processes()
         .map_err(|error| AgentHostError::Message(error.to_string()))?;
+    db.reconcile_interrupted_sessions()
+        .map_err(|error| AgentHostError::Message(error.to_string()))?;
     db.reconcile_orphan_terminal_processes()
         .map_err(|error| AgentHostError::Message(error.to_string()))?;
     let token = Arc::new(
         crate::secrets::get_or_create_host_ipc_token()
             .map_err(|error| AgentHostError::Message(error.to_string()))?,
     );
-    let (events, _) = broadcast::channel(2_048);
+    let (events, _) = broadcast::channel(16_384);
     let blob_root = db
         .path()
         .parent()
@@ -454,6 +498,7 @@ async fn serve_connection(mut stream: UnixStream, state: HostState) -> Result<()
                 let batch_len = batch.len();
                 for (rowid, event) in batch {
                     replay_cursor = rowid;
+                    let event_name = host_event_name_for_kind(&event.kind);
                     let payload = SessionEventEnvelope {
                         connection_id: event.runtime_id,
                         session_id: Some(event.session_id),
@@ -468,7 +513,7 @@ async fn serve_connection(mut stream: UnixStream, state: HostState) -> Result<()
                         &HostNotification {
                             jsonrpc: "2.0",
                             method: "host.event",
-                            params: json!({ "eventName": "acp-session-event", "payload": payload }),
+                            params: json!({ "eventName": event_name, "payload": payload }),
                             cursor: Some(rowid),
                         },
                     )
@@ -478,14 +523,22 @@ async fn serve_connection(mut stream: UnixStream, state: HostState) -> Result<()
                     break;
                 }
             }
-            while let Ok(notification) = receiver.recv().await {
-                if notification
-                    .cursor
-                    .is_some_and(|cursor| cursor <= replay_cursor)
-                {
-                    continue;
+            loop {
+                match receiver.recv().await {
+                    Ok(notification) => {
+                        if notification
+                            .cursor
+                            .is_some_and(|cursor| cursor <= replay_cursor)
+                        {
+                            continue;
+                        }
+                        host_rpc::write_frame(&mut stream, &notification).await?;
+                    }
+                    // High-frequency thought chunks can outrun a slow UI socket.
+                    // Stay subscribed and keep draining; DB replay covers gaps on reconnect.
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
-                host_rpc::write_frame(&mut stream, &notification).await?;
             }
             return Ok(());
         }
@@ -622,7 +675,6 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
         .map_err(|error| error.to_string())
         .and_then(|settings| crate::config::save_settings(&settings).map_err(|error| error.to_string()))
         .map(|_| {
-            crate::secrets::load_api_key_into_env();
             json!({})
         }),
         "secret.status" => serde_json::to_value(crate::secrets::status()).map_err(|error| error.to_string()),
@@ -1073,6 +1125,15 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                         }
                     }
                 })
+                .map_err(|error| error.to_string())
+                .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+            Err(error) => Err(error.to_string()),
+        },
+        "session.setEffort" => match serde_json::from_value::<EffortRoute>(request.params) {
+            Ok(route) => state
+                .runtime
+                .set_session_effort(&route.connection_id, &route.session_id, &route.effort)
+                .await
                 .map_err(|error| error.to_string())
                 .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
             Err(error) => Err(error.to_string()),
@@ -1768,6 +1829,19 @@ async fn prompt(state: &HostState, params: Value) -> Result<Value, String> {
         DispatchState::Cancelled => return Err("prompt dispatch was cancelled".into()),
         DispatchState::Prepared | DispatchState::Failed => {}
     }
+    let summary = state
+        .db
+        .get_session(&params.task_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("task session {} is unavailable", params.task_id))?;
+    let execution_root = summary
+        .execution_root
+        .as_deref()
+        .or(summary.worktree_path.as_deref())
+        .unwrap_or(&summary.workspace_root);
+    let execution_root = std::fs::canonicalize(execution_root)
+        .map_err(|error| format!("execution root is unavailable: {error}"))?;
+    let _task_root_lease = claim_task_root(&state.task_roots, &params.task_id, execution_root)?;
     apply_task_context(&state.db, &mut params)?;
     state
         .db
@@ -1948,6 +2022,17 @@ fn apply_task_context(db: &Database, params: &mut PromptParams) -> Result<(), St
     .map_err(|error| error.to_string())
 }
 
+fn host_event_name_for_kind(kind: &str) -> &'static str {
+    match kind {
+        "session_update" => "acp:session_update",
+        "extension" => "acp:extension",
+        "permission" | "plan_approval" | "unknown_server_request" => "acp:server_request",
+        "error" => "acp:error",
+        "stderr" => "acp:stderr",
+        _ => "acp:notification",
+    }
+}
+
 fn success(id: Value, result: Value) -> HostResponse {
     HostResponse {
         jsonrpc: "2.0".into(),
@@ -1989,5 +2074,25 @@ mod tests {
         result.status = crate::platform::VerificationStatus::NotRun;
         result.exit_code = None;
         assert!(validate_manual_verification(&result).is_ok());
+    }
+
+    #[test]
+    fn replay_event_names_match_frontend_listeners() {
+        assert_eq!(
+            host_event_name_for_kind("session_update"),
+            "acp:session_update"
+        );
+        assert_eq!(host_event_name_for_kind("permission"), "acp:server_request");
+        assert_eq!(host_event_name_for_kind("error"), "acp:error");
+    }
+
+    #[test]
+    fn task_root_lease_blocks_parallel_turns_and_releases_when_idle() {
+        let roots = Arc::new(parking_lot::Mutex::new(HashMap::new()));
+        let root = PathBuf::from("/tmp/non-git-workspace");
+        let first = claim_task_root(&roots, "task-1", root.clone()).unwrap();
+        assert!(claim_task_root(&roots, "task-2", root.clone()).is_err());
+        drop(first);
+        assert!(claim_task_root(&roots, "task-2", root).is_ok());
     }
 }
