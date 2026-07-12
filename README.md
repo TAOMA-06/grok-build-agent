@@ -160,6 +160,11 @@ docs/               架构、发布说明与 README 截图
 LICENSE             MIT
 ```
 
+## Contributors · 贡献者
+
+- **[TAOMA-06](https://github.com/TAOMA-06)** (maintainer · 维护者) — [taomahj834225@outlook.com](mailto:taomahj834225@outlook.com)
+- **[Cursor](https://cursor.com)** (AI-assisted development · AI 辅助开发)
+
 ## License · 许可
 
 MIT — see [LICENSE](LICENSE).
