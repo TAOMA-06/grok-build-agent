@@ -1,93 +1,93 @@
 # Grok Build Desktop
 
-> A local-first, open-source macOS control plane for reliable Grok Build coding agents.
+> A local-first, open-source macOS control plane for reliable [Grok Build](https://docs.x.ai/build/overview) coding agents.  
+> 面向官方 Grok Build CLI 的本地优先、开源 macOS 桌面控制台。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform: macOS 12+](https://img.shields.io/badge/platform-macOS%2012%2B-black)](#install)
+[![Platform: macOS 12+](https://img.shields.io/badge/platform-macOS%2012%2B%20Apple%20Silicon-black)](#download--安装)
+[![GitHub Release](https://img.shields.io/github/v/release/TAOMA-06/grok-build-agent?include_prereleases)](https://github.com/TAOMA-06/grok-build-agent/releases)
 
-A project-first desktop agent for the official [Grok Build CLI](https://docs.x.ai/build/overview). It uses a Codex-style task command center—projects, parallel threads, isolated worktrees, execution activity and reviewable diffs—without requiring users to manage ACP connections, CLI arguments or free-form model IDs.
+English · [中文](#中文)
 
-This is an unofficial community project and is not affiliated with xAI.
+This is an **unofficial community project** and is **not affiliated with xAI**.  
+本项目为**非官方社区项目**，与 xAI **无隶属关系**。
 
-The app has no product telemetry and keeps local workspace data on the Mac. See [Privacy](PRIVACY.md), [Security](SECURITY.md), and the [Threat Model](THREAT_MODEL.md).
+---
 
-## Project purpose
+## Screenshots · 截图
 
-Grok Build Desktop turns the official Grok Build CLI into a dependable desktop
-coding workspace. The CLI remains the execution runtime and owns Grok
-authentication; this project provides the control plane around it: projects,
-tasks, permissions, isolated worktrees, terminals, diffs, event history and
-crash recovery.
+<p align="center">
+  <img src="docs/screenshots/01-home.png" alt="New task workspace" width="900" />
+</p>
 
-The project is built around four principles:
+<p align="center">
+  <img src="docs/screenshots/02-settings.png" alt="Settings" width="440" />
+  &nbsp;
+  <img src="docs/screenshots/03-commands.png" alt="Command palette" width="440" />
+</p>
 
-- **Runtime-compatible:** communicate with Grok through ACP/JSON-RPC instead of
-  parsing its terminal UI or reimplementing the model runtime.
-- **Local-first:** source code, sessions, events and artifacts stay on the Mac
-  unless the user explicitly invokes an approved network tool.
-- **Recoverable:** the independent Agent Host owns execution and persistence, so
-  closing or restarting the UI does not silently lose confirmed work.
-- **Reviewable and safe:** coding tasks run inside explicit workspace boundaries;
-  risky actions require permission, parallel writers use isolated worktrees and
-  changes remain inspectable before they reach the main project.
+| | |
+|---|---|
+| **Workspace** · 工作区 | Start a task, pick a project, and talk to Grok in one shell. |
+| **Settings** · 设置 | Theme, language (EN / 简体中文), agent and permissions. |
+| **Command palette** · 命令面板 | Keyboard-first `/plan`, `/effort`, `/diff`, and more. |
 
-This is an agent platform for completing and reviewing coding tasks, not a full
-IDE, model provider, cloud execution service or replacement for the official
-Grok CLI.
+---
 
-## Install
+## Download · 安装
 
-GitHub Releases publish:
+### Apple Silicon (M1 / M2 / M3 / M4)
 
-- macOS universal DMG (`arm64` + `x86_64`)
+Download the latest **macOS arm64** build from Releases:
 
-macOS 12 or later is the only supported v1 platform. Windows and Linux support is not currently provided.
+**→ [GitHub Releases](https://github.com/TAOMA-06/grok-build-agent/releases/latest)**
 
-Grok Build CLI remains an official xAI-managed dependency and is not bundled into the app. If it is missing, the first screen downloads the fixed official installer from `https://x.ai`; authentication uses `grok login --device-auth`. Existing installations and signed-in users go directly to the workspace.
+Artifact name:
 
-The app installs a per-user LaunchAgent so confirmed tasks and terminals continue
-when the UI closes. Before deleting the app manually, remove that service with:
+- `Grok-Build-Desktop-<version>-macos-arm64.zip`
 
-```bash
-"/Applications/Grok Build Desktop.app/Contents/MacOS/grok-build-desktop" --uninstall-agent-host
-```
+Install:
 
-## Using the app
+1. Unzip the archive.
+2. Drag **Grok Build Desktop.app** into `/Applications`.
+3. First launch: right-click the app → **Open** (ad-hoc signed; Gatekeeper may warn until you approve once).
+4. Install / sign in to the official **Grok CLI** if prompted (`grok login --oauth` or device auth).
+
+Requirements:
+
+- macOS 12+
+- Apple Silicon Mac
+- Official [Grok Build CLI](https://docs.x.ai/build/overview) (not bundled)
+
+> Universal / Intel builds and Apple notarization need signing secrets in CI. This release ships a local **arm64** package for Apple Silicon first.
+
+---
+
+## English
+
+### What it is
+
+Grok Build Desktop turns the official Grok Build CLI into a dependable desktop coding workspace. The CLI remains the execution runtime and owns Grok authentication; this app is the control plane: projects, tasks, permissions, isolated worktrees, terminals, diffs, event history, and crash recovery.
+
+### Highlights
+
+- Project / task sidebar with running, attention, completed, and archived states
+- Independent Agent Host sidecar — closing the UI does not kill confirmed work
+- Concurrent ACP sessions with crash recovery and event replay
+- Automatic Git worktrees and explicit dirty-worktree choice
+- Plan / Agent / Goal modes, reasoning effort, model picker, context usage
+- Markdown replies, tool activity, plans, permissions, MCP manager
+- No product telemetry; workspace data stays on your Mac — see [PRIVACY.md](PRIVACY.md)
+
+### Using the app
 
 1. Open a project folder.
-2. Describe the task and send it. The app saves the project, creates the task, prepares a worktree for Git projects, starts ACP and sends the prompt as one operation.
-3. Run other tasks in parallel from the sidebar. Events remain routed by connection and remote session ID.
-4. Review activity and file changes from the task drawer.
-5. Use **Apply to project** when ready. The app performs a no-write dry-run and only enables apply when the main workspace is clean, HEAD matches the task base commit, the patch applies cleanly and untracked files do not conflict.
+2. Describe the task and send it. The app prepares a worktree (for Git projects), starts ACP, and sends the prompt.
+3. Run other tasks in parallel from the sidebar.
+4. Review activity and diffs in the task drawer.
+5. Use **Apply to project** when ready (dry-run first; apply only when preflight passes).
 
-Agent is the default mode. Plan is a task-level, read-only planning mode that must be approved before the same task returns to implementation. Goal exposes status, pause, resume and clear controls. The composer always shows task mode, model, sandbox and approval policy.
-
-## Product capabilities
-
-- Project and task sidebar with running, attention, completed and archived states
-- Independent signed Agent Host sidecar: UI exit does not stop confirmed work
-- Concurrent ACP sessions with crash recovery and append-only event replay
-- Automatic Git worktrees and explicit dirty-worktree choice
-- Markdown/GFM responses, compact tool activity, plans, subagents and inline permissions
-- Attachments by picker, drag-and-drop and paste
-- Changes drawer with stats, unified patches, file actions, review prompts and safe apply
-- Grok capability discovery from `grok inspect --json` for Skills, Plugins, Hooks, MCP and commands
-- Grok-compatible searchable slash commands merged from desktop actions, live ACP commands and skills; unsupported TUI-only commands are explicitly disabled
-- Session-scoped model, sandbox and permission controls with safe new-task fallback when live model switching is unavailable
-- SQLite v4 immutable control-plane events, prompt idempotency journal and explicit uncertain-delivery recovery
-- Runtime-neutral Adapter contract with Grok ACP conformance coverage and versioned JSON Schema
-- SHA-256 content-addressed diagnostic blobs plus redacted policy audit records
-- File/hunk stage and unstage, checkpoint-before-revert and commit controls in the changes workbench
-- Recoverable task-bound PTY tabs with input/resize, process-tree cancellation, output quotas and listening-port discovery
-- Host-executed verification commands with immutable exit-code/output evidence; the Renderer cannot forge passed results
-- Full stdio/HTTP/SSE MCP editor with user/project scope, write-only secrets, Doctor diagnostics and explicit Agent reload
-- Text, code, PNG/JPEG/WebP and PDF attachments with size limits, drag/drop, paste and failure-safe draft recovery
-- Dark, light and system themes; reactive system/English/Simplified Chinese preference
-- Settings v3 and versioned SQLite migrations that retain existing sessions
-
-## Development
-
-Requirements: current Node.js/npm, Rust and the Tauri platform prerequisites.
+### Develop from source
 
 ```bash
 cd apps/desktop
@@ -95,51 +95,67 @@ npm install
 npm run app:dev
 ```
 
-Development uses the explicit in-process Host fallback. Release bundles never
-fall back: they require the packaged `grok-build-agent-host` sidecar. The UI and
-Host authenticate over a per-user Unix socket (`0600`) with peer-UID validation
-and a random per-install credential stored in a user-only (`0600`) local file.
-Opening the app must not require Keychain access. Grok authentication remains
-owned by the official CLI; Keychain is used only if the user explicitly chooses
-to save an additional API key.
-
-The same interface can be previewed without Tauri; browser mode automatically uses deterministic MockBridge scenarios:
-
-```bash
-cd apps/desktop
-npm run dev
-```
-
 Quality gate:
 
 ```bash
-cd apps/desktop
-npm run check
-
-cd src-tauri
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cd apps/desktop && npm run check
+cd src-tauri && cargo test --workspace
 ```
 
-## Architecture and safety
+More: [architecture](docs/architecture.md) · [release](docs/release.md) · [ACP mapping](docs/acp-mapping.md) · [SECURITY](SECURITY.md) · [THREAT_MODEL](THREAT_MODEL.md)
 
-React components depend on `DesktopBridge`, not Tauri APIs. `TauriDesktopBridge` owns production IPC and `MockDesktopBridge` supports browser testing. TanStack Query owns persistent async resources; Zustand owns live task events, drafts and UI selection. The Rust ACP host and SQLite catalog retain `session` terminology for protocol compatibility while the UI calls them tasks.
+---
 
-The default permission policy permits normal commands and edits inside the selected workspace. Network access, workspace-external access, credentials and dangerous actions remain approval boundaries. Commands are launched with argv arrays, secrets are redacted, and apply never writes when preflight fails.
+## 中文
 
-See [architecture](docs/architecture.md), [release procedure](docs/release.md) and [ACP mapping](docs/acp-mapping.md).
+### 这是什么
 
-## Repository layout
+Grok Build Desktop 把官方 Grok Build CLI 变成可用的桌面编程工作区。CLI 仍是执行运行时并负责 Grok 登录；本应用是控制面：项目、任务、权限、隔离 worktree、终端、diff、事件历史与崩溃恢复。
+
+### 主要能力
+
+- 项目 / 任务侧边栏：运行中、需关注、已完成、已归档
+- 独立 Agent Host：关掉窗口也不会中断已确认的任务
+- 多会话 ACP，支持崩溃恢复与事件回放
+- Git 项目自动 worktree，脏工作区需显式选择策略
+- Plan / Agent / Goal 模式、推理强度、模型选择、上下文用量
+- Markdown 回复、工具活动、计划审批、权限确认、MCP 管理
+- 无产品遥测，工作区数据留在本机 — 见 [PRIVACY.md](PRIVACY.md)
+
+### 使用流程
+
+1. 打开一个项目文件夹。
+2. 描述任务并发送。应用会为 Git 项目准备 worktree、启动 ACP 并发送提示。
+3. 可在侧边栏并行开启其他任务。
+4. 在任务抽屉中查看活动与文件变更。
+5. 确认无误后使用 **Apply to project**（先 dry-run，预检通过才写入主仓库）。
+
+### 下载安装（Apple 芯片）
+
+1. 打开 [Releases](https://github.com/TAOMA-06/grok-build-agent/releases/latest)，下载 `Grok-Build-Desktop-*-macos-arm64.zip`。
+2. 解压后将 **Grok Build Desktop.app** 拖入「应用程序」。
+3. 首次打开：右键 → **打开**（当前为 ad-hoc 签名，需手动允许一次）。
+4. 如提示缺少 CLI，按引导安装官方 Grok CLI 并完成登录。
+
+### 从源码开发
+
+```bash
+cd apps/desktop
+npm install
+npm run app:dev
+```
+
+---
+
+## Repository layout · 仓库结构
 
 ```text
-apps/desktop/       React + Tauri desktop application
-harness/            Optional legacy compatibility rules (off by default)
-scripts/            Local build helpers
-.github/workflows/  macOS CI and signed/notarized release jobs
-docs/               Architecture, contracts and release notes
+apps/desktop/       React + Tauri 桌面应用
+docs/               架构、发布说明与 README 截图
+.github/workflows/  macOS CI / 签名发布流水线
+LICENSE             MIT
 ```
 
-## License
+## License · 许可
 
 MIT — see [LICENSE](LICENSE).
