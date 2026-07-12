@@ -104,6 +104,8 @@ cd src-tauri && cargo test --workspace
 
 More: [architecture](docs/architecture.md) · [release](docs/release.md) · [ACP mapping](docs/acp-mapping.md) · [SECURITY](SECURITY.md) · [THREAT_MODEL](THREAT_MODEL.md)
 
+**Contact:** [taomahj834225@outlook.com](mailto:taomahj834225@outlook.com)
+
 ---
 
 ## 中文
@@ -144,6 +146,8 @@ cd apps/desktop
 npm install
 npm run app:dev
 ```
+
+**联系方式：** [taomahj834225@outlook.com](mailto:taomahj834225@outlook.com)
 
 ---
 
