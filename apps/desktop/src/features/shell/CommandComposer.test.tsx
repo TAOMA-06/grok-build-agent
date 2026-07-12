@@ -194,7 +194,6 @@ describe("CommandComposer", () => {
   it("locks model and runtime controls while Grok is generating", () => {
     renderComposer({ busy: true });
     expect(screen.getByRole("button", { name: /Grok Build/i })).toBeDisabled();
-    expect(screen.getByRole("combobox", { name: "Task sandbox" })).toBeDisabled();
-    expect(screen.getByRole("combobox", { name: "Task permissions" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Agent/i })).toBeDisabled();
   });
 });

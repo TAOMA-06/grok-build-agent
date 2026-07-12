@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useEffect } from "react";
 import { McpManager } from "../mcp/McpManager";
 import { applyLocalePreference, t } from "../../i18n";
+import { normalizeSettings } from "../../contracts";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore } from "../../store";
 import type { Settings } from "../../types";
@@ -26,7 +27,7 @@ export function SettingsDialog({
   const bridge = useDesktopBridge();
   const settings = useAppStore((state) => state.settings);
   const replaceSettings = useAppStore((state) => state.replaceSettings);
-  const [draft, setDraft] = useState(settings);
+  const [draft, setDraft] = useState(() => normalizeSettings(settings));
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [doctorAction, setDoctorAction] = useState<string | null>(null);
@@ -65,9 +66,10 @@ export function SettingsDialog({
   async function save() {
     setSaving(true);
     try {
-      replaceSettings(draft);
-      applyLocalePreference(draft.locale);
-      await bridge.saveSettings(draft);
+      const next = normalizeSettings(draft);
+      replaceSettings(next);
+      applyLocalePreference(next.locale);
+      await bridge.saveSettings(next);
       onOpenChange(false);
     } finally {
       setSaving(false);
@@ -75,7 +77,7 @@ export function SettingsDialog({
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={(next) => { if (next) setDraft(settings); onOpenChange(next); }}>
+    <Dialog.Root open={open} onOpenChange={(next) => { if (next) setDraft(normalizeSettings(settings)); onOpenChange(next); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="gb-dialog-overlay" />
         <Dialog.Content className="gb-settings-dialog">
@@ -118,7 +120,7 @@ export function SettingsDialog({
               <Tabs.Content value="agent">
                 <h3>{t.newTasks}</h3>
                 <label><span>{t.defaultModel}<small>{t.defaultModelHint}</small></span><select value={draft.model} onChange={(event) => patch({ model: event.target.value })}>{!modelsQuery.data?.some((model) => model.id === draft.model) && <option value={draft.model}>{draft.model}</option>}{modelsQuery.data?.map((model) => <option value={model.id} key={model.id}>{model.name}</option>)}</select></label>
-                <label><span>{t.defaultReasoningEffort}<small>{t.defaultReasoningEffortHint}</small></span><select value={draft.defaultReasoningEffort} onChange={(event) => patch({ defaultReasoningEffort: event.target.value })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option></select></label>
+                <label><span>{t.defaultReasoningEffort}<small>{t.defaultReasoningEffortHint}</small></span><select value={draft.defaultReasoningEffort} onChange={(event) => patch({ defaultReasoningEffort: event.target.value })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
                 <label><span>{t.defaultMode}<small>{t.defaultModeHint}</small></span><select value={draft.defaultMode} onChange={(event) => patch({ defaultMode: event.target.value as Settings["defaultMode"] })}><option value="agent">{t.modeAgent}</option><option value="plan">{t.modePlan}</option><option value="goal">{t.modeGoal}</option></select></label>
                 <label><span>{t.permissions}<small>{t.permissionsHint}</small></span><select value={draft.permissionPolicy} onChange={(event) => patch({ permissionPolicy: event.target.value as Settings["permissionPolicy"] })}><option value="workspace_edit">{t.permissionWorkspace}</option><option value="ask_all">{t.permissionAsk}</option><option value="full_auto">{t.permissionAuto}</option></select></label>
                 <label className="gb-switch-row"><span>{t.keepCliUpdated}<small>{t.keepCliUpdatedHint}</small></span><input type="checkbox" checked={draft.autoUpdateCli} onChange={(event) => patch({ autoUpdateCli: event.target.checked })} /></label>

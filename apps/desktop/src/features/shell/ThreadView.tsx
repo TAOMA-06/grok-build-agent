@@ -222,31 +222,51 @@ export function ThreadView({
       </div>
 
       <div className={session?.blocks.length ? "gb-composer-dock" : "gb-composer-dock hero"}>
-        {visibleMode === "plan" && (
-          <div className="gb-plan-mode-banner"><FileCode2 size={14} /> {t.planReadOnly}</div>
-        )}
-        {visibleMode === "goal" && session?.summary.mode !== "goal" && (
-          <div className="gb-goal-controls"><span><Flag size={13} /> {t.goalObjectivePending}</span></div>
-        )}
-        {visibleMode === "goal" && session?.summary.mode === "goal" && (
-          <div className="gb-goal-controls">
-            <span><Flag size={13} /> {session.busy ? t.goalActive : t.goalMode}</span>
-            <button type="button" onClick={() => void onSend("/goal status", [], "goal")}>{t.status}</button>
-            <button type="button" onClick={() => void onSend(session.busy ? "/goal pause" : "/goal resume", [], "goal")}>{session.busy ? t.pause : t.resume}</button>
-            <button type="button" onClick={() => void onSend("/goal clear", [], "goal")}>{t.clear}</button>
-          </div>
-        )}
-        <CommandComposer
-          models={models}
-          busy={session?.busy ?? false}
-          connecting={connecting}
-          onSend={onSend}
-          onCancel={onCancel}
-          onChooseModel={onChooseModel}
-          onChooseEffort={onChooseEffort}
-          onChooseMode={onChooseMode}
-          onLocalCommand={onLocalCommand}
-        />
+        <div
+          className={`gb-composer-shell${visibleMode === "plan" ? " plan" : ""}${
+            visibleMode === "goal" ? " goal" : ""
+          }`}
+        >
+          {visibleMode === "plan" && (
+            <div className="gb-plan-mode-banner" role="status">
+              <span className="gb-plan-mode-icon" aria-hidden>
+                <FileCode2 size={13} strokeWidth={2.25} />
+              </span>
+              <span className="gb-plan-mode-badge">{t.modePlan}</span>
+              <span className="gb-plan-mode-detail">{t.planReadOnlyDetail}</span>
+            </div>
+          )}
+          {visibleMode === "goal" && session?.summary.mode !== "goal" && (
+            <div className="gb-goal-controls">
+              <span className="gb-goal-controls-icon" aria-hidden>
+                <Flag size={12} strokeWidth={2.25} />
+              </span>
+              <span>{t.goalObjectivePending}</span>
+            </div>
+          )}
+          {visibleMode === "goal" && session?.summary.mode === "goal" && (
+            <div className="gb-goal-controls">
+              <span className="gb-goal-controls-icon" aria-hidden>
+                <Flag size={12} strokeWidth={2.25} />
+              </span>
+              <span>{session.busy ? t.goalActive : t.goalMode}</span>
+              <button type="button" onClick={() => void onSend("/goal status", [], "goal")}>{t.status}</button>
+              <button type="button" onClick={() => void onSend(session.busy ? "/goal pause" : "/goal resume", [], "goal")}>{session.busy ? t.pause : t.resume}</button>
+              <button type="button" onClick={() => void onSend("/goal clear", [], "goal")}>{t.clear}</button>
+            </div>
+          )}
+          <CommandComposer
+            models={models}
+            busy={session?.busy ?? false}
+            connecting={connecting}
+            onSend={onSend}
+            onCancel={onCancel}
+            onChooseModel={onChooseModel}
+            onChooseEffort={onChooseEffort}
+            onChooseMode={onChooseMode}
+            onLocalCommand={onLocalCommand}
+          />
+        </div>
         {session?.failedSubmission && (
           <div className="gb-send-failure" role="alert">
             <span>{session.failedSubmission.error}</span>

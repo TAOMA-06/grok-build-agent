@@ -4,8 +4,11 @@ import {
   emptyContextUsage,
   formatTokenCount,
   mergeSelectableModels,
+  resolveEffortForModel,
+  sanitizeDefaultReasoningEffort,
 } from "./model";
 import { extractContextUsage } from "../acp/client";
+import { normalizeSettings, defaultSettings } from "./settings";
 
 describe("reasoning effort helpers", () => {
   it("hides effort controls when the model does not support them", () => {
@@ -52,6 +55,32 @@ describe("reasoning effort helpers", () => {
       contextWindow: 500_000,
     });
     expect(effortOptionsForModel(merged[0]).map((item) => item.value)).toEqual(["high"]);
+  });
+
+  it("maps unsupported settings defaults like xhigh onto high", () => {
+    expect(sanitizeDefaultReasoningEffort("xhigh")).toBe("high");
+    expect(sanitizeDefaultReasoningEffort("max")).toBe("high");
+    expect(sanitizeDefaultReasoningEffort("medium")).toBe("medium");
+    expect(normalizeSettings({
+      ...defaultSettings(),
+      defaultReasoningEffort: "xhigh",
+    }).defaultReasoningEffort).toBe("high");
+  });
+
+  it("resolves preferred xhigh to the catalog default for grok-4.5", () => {
+    const model = {
+      id: "grok-4.5",
+      name: "Grok 4.5",
+      supportsReasoningEffort: true,
+      reasoningEffort: "high",
+      reasoningEfforts: [
+        { id: "low", value: "low", label: "Low Effort" },
+        { id: "medium", value: "medium", label: "Medium Effort" },
+        { id: "high", value: "high", label: "High Effort", default: true },
+      ],
+    };
+    expect(resolveEffortForModel(model, "xhigh")).toBe("high");
+    expect(resolveEffortForModel(model, "low")).toBe("low");
   });
 });
 

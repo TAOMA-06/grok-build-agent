@@ -8,11 +8,12 @@ import {
   FilePlus2,
   Flag,
   FileText,
+  Gauge,
   Paperclip,
   Send,
-  ShieldCheck,
   Square,
   X,
+  Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
@@ -21,13 +22,12 @@ import {
   inferAttachmentMime,
   validateAttachments,
   effortOptionsForModel,
+  resolveEffortForModel,
   formatTokenCount,
   emptyContextUsage,
 } from "../../contracts";
 import type {
   ComposerAttachment,
-  PermissionPolicy,
-  SandboxMode,
   SelectableModel,
   TaskMode,
   ModeSwitchResult,
@@ -37,6 +37,52 @@ import { buildCommandCatalog, parseSlashCommand } from "./commands";
 import { STOP_ARM_MS } from "./composerTiming";
 
 export { STOP_ARM_MS } from "./composerTiming";
+
+/** OpenCode-style circular context meter: fill arc grows with usage %. */
+function ContextUsageRing({
+  percent,
+  warn = false,
+}: {
+  percent: number;
+  warn?: boolean;
+}) {
+  const size = 16;
+  const stroke = 2;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(100, Number.isFinite(percent) ? percent : 0));
+  const offset = circumference - (clamped / 100) * circumference;
+  return (
+    <svg
+      className={`gb-context-ring${warn ? " warn" : ""}`}
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      aria-hidden
+    >
+      <circle
+        className="gb-context-ring-track"
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        strokeWidth={stroke}
+      />
+      <circle
+        className="gb-context-ring-fill"
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        strokeWidth={stroke}
+        strokeDasharray={circumference}
+        strokeDashoffset={offset}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+      />
+    </svg>
+  );
+}
 
 export async function browserAttachment(file: File): Promise<ComposerAttachment> {
   const mimeType = inferAttachmentMime(file.name, file.type);
@@ -99,7 +145,6 @@ export function CommandComposer({
     effectiveMode,
   } = useAppStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const commandMenuRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
   const compositionEndedAtRef = useRef<number | null>(null);
@@ -119,16 +164,15 @@ export function CommandComposer({
   const selectedModel = models.find((model) => model.id === modelId) ?? null;
   const effortOptions = effortOptionsForModel(selectedModel);
   const effortId =
-    effectiveReasoningEffort() ||
-    selectedModel?.reasoningEffort ||
+    resolveEffortForModel(
+      selectedModel,
+      effectiveReasoningEffort() || settings.defaultReasoningEffort,
+    ) ||
     effortOptions.find((option) => option.default)?.value ||
     effortOptions[0]?.value ||
-    settings.defaultReasoningEffort;
+    "";
   const mode = effectiveMode();
   const currentSession = activeSessionId ? sessions[activeSessionId] : null;
-  const sandbox = currentSession?.summary.sandbox ?? settings.sandbox;
-  const permissionPolicy = currentSession?.summary.permissionPolicy ?? settings.permissionPolicy;
-  const runtimeLocked = busy || connecting || Boolean(currentSession?.summary.remoteSessionId);
   const contextUsage = currentSession?.contextUsage ?? emptyContextUsage(selectedModel?.contextWindow);
   const usageWindow = contextUsage.windowTokens ?? selectedModel?.contextWindow ?? null;
   const usagePercent =
@@ -139,6 +183,7 @@ export function CommandComposer({
   const usageWarn =
     usagePercent != null &&
     usagePercent >= (selectedModel?.autoCompactThresholdPercent ?? 85);
+  const hasContextUsage = contextUsage.usedTokens != null || usagePercent != null;
   const capabilitiesQuery = useQuery({
     queryKey: ["capabilities", settings.cliPathOverride || settings.grokPath, settings.cwd],
     queryFn: () => bridge.inspectCapabilities(
@@ -160,7 +205,7 @@ export function CommandComposer({
     const element = textareaRef.current;
     if (!element) return;
     element.style.height = "0px";
-    element.style.height = `${Math.min(220, Math.max(58, element.scrollHeight))}px`;
+    element.style.height = `${Math.min(220, Math.max(52, element.scrollHeight))}px`;
   }, [draft]);
 
   useEffect(() => {
@@ -314,24 +359,6 @@ export function CommandComposer({
     }
   }
 
-  async function updateRuntimeOptions(patch: {
-    sandbox?: SandboxMode;
-    permissionPolicy?: PermissionPolicy;
-  }) {
-    const state = useAppStore.getState();
-    if (state.activeSessionId) {
-      state.updateSummary(state.activeSessionId, {
-        ...patch,
-        updatedAt: new Date().toISOString(),
-      });
-      const summary = useAppStore.getState().sessions[state.activeSessionId]?.summary;
-      if (summary) await bridge.upsertSession(summary);
-      return;
-    }
-    state.setSettings(patch);
-    await bridge.saveSettings(useAppStore.getState().settings);
-  }
-
   async function chooseMode(mode: TaskMode) {
     try {
       const result = await onChooseMode(mode);
@@ -462,173 +489,169 @@ export function CommandComposer({
 
       <div className="gb-composer-footer">
         <div className="gb-composer-tools">
-          <button type="button" className="gb-icon-button" aria-label={t.attachFile} onClick={() => void attachPaths()}>
-            <Paperclip size={16} />
-          </button>
-          {(draft || attachments.length > 0) && (
+          <div className="gb-composer-cluster actions">
             <button
               type="button"
-              className="gb-icon-button"
-              aria-label={t.clearDraft}
-              onClick={() => {
-                setEffectiveDraftText("");
-                setEffectiveAttachments([]);
-              }}
+              className="gb-icon-button composer"
+              aria-label={t.attachFile}
+              onClick={() => void attachPaths()}
             >
-              <X size={15} />
+              <Paperclip size={15} strokeWidth={2} />
             </button>
-          )}
-          <input
-            ref={fileInputRef}
-            hidden
-            type="file"
-            multiple
-            onChange={(event) => void attachBrowserFiles(Array.from(event.target.files ?? []))}
-          />
-
-          <DropdownMenu.Root open={modelOpen} onOpenChange={setModelOpen}>
-            <DropdownMenu.Trigger asChild>
+            {(draft || attachments.length > 0) && (
               <button
                 type="button"
-                className="gb-composer-select"
-                disabled={busy || connecting}
+                className="gb-icon-button composer"
+                aria-label={t.clearDraft}
+                onClick={() => {
+                  setEffectiveDraftText("");
+                  setEffectiveAttachments([]);
+                }}
               >
-                <Bot size={14} /><span>{models.find((model) => model.id === modelId)?.name || modelId}</span><ChevronDown size={13} />
+                <X size={14} strokeWidth={2} />
               </button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content className="gb-dropdown" sideOffset={8} align="start">
-                <DropdownMenu.Label>{t.model}</DropdownMenu.Label>
-                <input
-                  className="gb-model-search"
-                  aria-label={t.searchModels}
-                  value={modelQuery}
-                  onChange={(event) => setModelQuery(event.target.value)}
-                  onKeyDown={(event) => event.stopPropagation()}
-                  placeholder={t.modelSearch}
-                />
-                {models.filter((model) => `${model.name} ${model.id}`.toLowerCase().includes(modelQuery.toLowerCase())).map((model) => (
-                  <DropdownMenu.Item key={model.id} onSelect={() => void onChooseModel(model.id)}>
-                    <span><strong>{model.name}</strong><small>{model.description}</small></span>
-                    {model.id === modelId && <Check size={14} />}
-                  </DropdownMenu.Item>
-                ))}
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
+            )}
+          </div>
 
-          {effortOptions.length > 0 && (
-            <DropdownMenu.Root open={effortOpen} onOpenChange={setEffortOpen}>
+          <div className="gb-composer-cluster selects" role="group" aria-label={t.messageGrok}>
+            <DropdownMenu.Root open={modelOpen} onOpenChange={setModelOpen}>
               <DropdownMenu.Trigger asChild>
                 <button
                   type="button"
-                  className="gb-composer-select"
+                  className="gb-composer-select model"
                   disabled={busy || connecting}
-                  aria-label={t.reasoningEffort}
-                  title={t.reasoningEffortHint}
                 >
-                  <span>{effortOptions.find((option) => option.value === effortId)?.label || effortId}</span>
-                  <ChevronDown size={13} />
+                  <Bot size={13} strokeWidth={2} />
+                  <span>{models.find((model) => model.id === modelId)?.name || modelId}</span>
+                  <ChevronDown size={12} strokeWidth={2.25} className="gb-select-chevron" />
                 </button>
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>
-                <DropdownMenu.Content className="gb-dropdown compact" sideOffset={8} align="start">
-                  <DropdownMenu.Label>{t.reasoningEffort}</DropdownMenu.Label>
-                  {effortOptions.map((option) => (
-                    <DropdownMenu.Item
-                      key={option.value}
-                      onSelect={() => void onChooseEffort(option.value)}
-                    >
-                      <span>
-                        <strong>{option.label}</strong>
-                        {option.description && <small>{option.description}</small>}
-                      </span>
-                      {option.value === effortId && <Check size={14} />}
+                <DropdownMenu.Content className="gb-dropdown" sideOffset={8} align="start">
+                  <DropdownMenu.Label>{t.model}</DropdownMenu.Label>
+                  <input
+                    className="gb-model-search"
+                    aria-label={t.searchModels}
+                    value={modelQuery}
+                    onChange={(event) => setModelQuery(event.target.value)}
+                    onKeyDown={(event) => event.stopPropagation()}
+                    placeholder={t.modelSearch}
+                  />
+                  {models.filter((model) => `${model.name} ${model.id}`.toLowerCase().includes(modelQuery.toLowerCase())).map((model) => (
+                    <DropdownMenu.Item key={model.id} onSelect={() => void onChooseModel(model.id)}>
+                      <span><strong>{model.name}</strong><small>{model.description}</small></span>
+                      {model.id === modelId && <Check size={14} />}
                     </DropdownMenu.Item>
                   ))}
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
-          )}
 
-          <select
-            className="gb-composer-select"
-            aria-label={t.taskSandbox}
-            value={sandbox}
-            disabled={runtimeLocked}
-            onChange={(event) => void updateRuntimeOptions({ sandbox: event.target.value as SandboxMode })}
-          >
-            <option value="workspace">{t.sandboxWorkspace}</option>
-            <option value="strict" disabled>{t.sandboxStrictUnavailable}</option>
-            <option value="none">{t.sandboxOff}</option>
-          </select>
+            {effortOptions.length > 0 && (
+              <DropdownMenu.Root open={effortOpen} onOpenChange={setEffortOpen}>
+                <DropdownMenu.Trigger asChild>
+                  <button
+                    type="button"
+                    className="gb-composer-select effort"
+                    disabled={busy || connecting}
+                    aria-label={t.reasoningEffort}
+                    title={t.reasoningEffortHint}
+                  >
+                    <Gauge size={13} strokeWidth={2} />
+                    <span>{effortOptions.find((option) => option.value === effortId)?.label || effortId}</span>
+                    <ChevronDown size={12} strokeWidth={2.25} className="gb-select-chevron" />
+                  </button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content className="gb-dropdown compact" sideOffset={8} align="start">
+                    <DropdownMenu.Label>{t.reasoningEffort}</DropdownMenu.Label>
+                    {effortOptions.map((option) => (
+                      <DropdownMenu.Item
+                        key={option.value}
+                        onSelect={() => void onChooseEffort(option.value)}
+                      >
+                        <span>
+                          <strong>{option.label}</strong>
+                          {option.description && <small>{option.description}</small>}
+                        </span>
+                        {option.value === effortId && <Check size={14} />}
+                      </DropdownMenu.Item>
+                    ))}
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+            )}
 
-          <select
-            className="gb-composer-select"
-            aria-label={t.taskPermissions}
-            value={permissionPolicy}
-            disabled={runtimeLocked}
-            onChange={(event) => void updateRuntimeOptions({ permissionPolicy: event.target.value as PermissionPolicy })}
-          >
-            <option value="workspace_edit">{t.permissionWorkspace}</option>
-            <option value="ask_all">{t.permissionAsk}</option>
-            <option value="full_auto">{t.permissionAuto}</option>
-          </select>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  type="button"
+                  className={`gb-composer-select mode ${mode}`}
+                  disabled={busy || connecting}
+                >
+                  {mode === "goal" ? (
+                    <Flag size={13} strokeWidth={2} />
+                  ) : mode === "plan" ? (
+                    <FileText size={13} strokeWidth={2} />
+                  ) : (
+                    <Zap size={13} strokeWidth={2} />
+                  )}
+                  <span>{mode === "goal" ? t.modeGoal : mode === "plan" ? t.modePlan : t.modeAgent}</span>
+                  <ChevronDown size={12} strokeWidth={2.25} className="gb-select-chevron" />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content className="gb-dropdown compact" sideOffset={8} align="start">
+                  <DropdownMenu.Item onSelect={() => void chooseMode("agent")}>
+                    <Zap size={15} /><span><strong>{t.modeAgent}</strong><small>{t.modeAgentHint}</small></span>{mode === "agent" && <Check size={14} />}
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item onSelect={() => void chooseMode("plan")}>
+                    <FileText size={15} /><span><strong>{t.modePlan}</strong><small>{t.modePlanHint}</small></span>{mode === "plan" && <Check size={14} />}
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item onSelect={() => void chooseMode("goal")}>
+                    <Flag size={15} /><span><strong>{t.modeGoal}</strong><small>{t.modeGoalHint}</small></span>{mode === "goal" && <Check size={14} />}
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          </div>
 
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild>
-              <button
-                type="button"
-                className={`gb-composer-select ${mode}`}
-                disabled={busy || connecting}
-              >
-                {mode === "goal" ? <Flag size={14} /> : mode === "plan" ? <FileText size={14} /> : <Bot size={14} />}
-                {mode === "goal" ? t.modeGoal : mode === "plan" ? t.modePlan : t.modeAgent}<ChevronDown size={13} />
-              </button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content className="gb-dropdown compact" sideOffset={8} align="start">
-                <DropdownMenu.Item onSelect={() => void chooseMode("agent")}>
-                  <Bot size={15} /><span><strong>{t.modeAgent}</strong><small>{t.modeAgentHint}</small></span>{mode === "agent" && <Check size={14} />}
-                </DropdownMenu.Item>
-                <DropdownMenu.Item onSelect={() => void chooseMode("plan")}>
-                  <FileText size={15} /><span><strong>{t.modePlan}</strong><small>{t.modePlanHint}</small></span>{mode === "plan" && <Check size={14} />}
-                </DropdownMenu.Item>
-                <DropdownMenu.Item onSelect={() => void chooseMode("goal")}>
-                  <Flag size={15} /><span><strong>{t.modeGoal}</strong><small>{t.modeGoalHint}</small></span>{mode === "goal" && <Check size={14} />}
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
-
-          <span className="gb-permission-summary" title={t.runtimePolicy} role="status" aria-live="polite">
-            <ShieldCheck size={14} /> {busy ? t.grokWorking : connecting ? t.connecting : t.ready}
-          </span>
-
-          <button
-            type="button"
-            className={`gb-context-chip${usageWarn ? " warn" : ""}`}
-            title={t.contextUsageHint}
-            onClick={() => void onLocalCommand("/context")}
-          >
-            {formatTokenCount(contextUsage.usedTokens)} / {formatTokenCount(usageWindow)}
-            {usagePercent != null ? ` · ${Math.round(usagePercent)}%` : ""}
-          </button>
+          <div className="gb-composer-cluster meta">
+            <button
+              type="button"
+              className={`gb-context-meter${usageWarn ? " warn" : ""}${hasContextUsage ? " active" : ""}`}
+              title={
+                hasContextUsage
+                  ? `${formatTokenCount(contextUsage.usedTokens)} / ${formatTokenCount(usageWindow)}${
+                      usagePercent != null ? ` · ${Math.round(usagePercent)}%` : ""
+                    }`
+                  : t.contextUsageHint
+              }
+              aria-label={
+                hasContextUsage && usagePercent != null
+                  ? `${t.contextShort} ${Math.round(usagePercent)}%`
+                  : t.contextShort
+              }
+              onClick={() => void onLocalCommand("/context")}
+            >
+              <ContextUsageRing percent={usagePercent ?? 0} warn={usageWarn} />
+            </button>
+          </div>
         </div>
 
         {stopArmed ? (
           <button type="button" className="gb-send stop" aria-label={t.stopGrok} onClick={() => void onCancel()}>
-            <Square size={14} fill="currentColor" />
+            <Square size={12} fill="currentColor" />
           </button>
         ) : (
           <button
             type="button"
-            className="gb-send"
+            className={`gb-send${draft.trim() || attachments.length > 0 ? " ready" : ""}`}
             aria-label={t.sendToGrok}
             disabled={busy || connecting || (!draft.trim() && attachments.length === 0)}
             onClick={() => void submit()}
           >
-            <Send size={16} />
+            <Send size={15} strokeWidth={2.25} />
           </button>
         )}
       </div>

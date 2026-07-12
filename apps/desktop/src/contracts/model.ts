@@ -113,6 +113,9 @@ export function formatTokenCount(n: number | null | undefined): string {
   return String(Math.round(n));
 }
 
+/** Effort levels offered in app settings (Grok catalog today). */
+export const SETTINGS_REASONING_EFFORTS = ["low", "medium", "high"] as const;
+
 /** Prefer catalog options for the active model; fall back to common CLI levels. */
 export function effortOptionsForModel(
   model: SelectableModel | null | undefined,
@@ -127,6 +130,42 @@ export function effortOptionsForModel(
     ];
   }
   return [];
+}
+
+/**
+ * Map unsupported / Codex-style effort strings (e.g. `xhigh`) onto Grok settings values.
+ * Empty becomes `high` so new sessions never spawn with a dead default.
+ */
+export function sanitizeDefaultReasoningEffort(
+  value: string | null | undefined,
+): string {
+  const trimmed = (value ?? "").trim().toLowerCase();
+  if ((SETTINGS_REASONING_EFFORTS as readonly string[]).includes(trimmed)) {
+    return trimmed;
+  }
+  if (trimmed === "xhigh" || trimmed === "max" || trimmed === "extra high") {
+    return "high";
+  }
+  return "high";
+}
+
+/**
+ * Pick an effort that exists on the model catalog.
+ * Falls back to the catalog default, then the first option; `null` when unsupported.
+ */
+export function resolveEffortForModel(
+  model: SelectableModel | null | undefined,
+  preferred: string | null | undefined,
+): string | null {
+  const options = effortOptionsForModel(model);
+  if (!options.length) return null;
+  const want = preferred?.trim();
+  if (want && options.some((option) => option.value === want)) return want;
+  const fromModel = model?.reasoningEffort?.trim();
+  if (fromModel && options.some((option) => option.value === fromModel)) {
+    return fromModel;
+  }
+  return options.find((option) => option.default)?.value ?? options[0]?.value ?? null;
 }
 
 /** Merge model rows, keeping richer catalog metadata (effort / window) over bare ACP ids. */

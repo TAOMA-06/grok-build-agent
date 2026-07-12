@@ -4,6 +4,7 @@ import {
   emptyComposerDraft,
   defaultModeState,
   emptySessionModelState,
+  sanitizeDefaultReasoningEffort,
 } from "./contracts";
 import type {
   AgentStatus,
@@ -315,24 +316,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     const id = get().activeSessionId;
     if (id) {
       const s = get().sessions[id];
-      if (s?.summary.reasoningEffort) return s.summary.reasoningEffort;
+      if (s?.summary.reasoningEffort) {
+        return sanitizeDefaultReasoningEffort(s.summary.reasoningEffort);
+      }
     }
-    return (
+    return sanitizeDefaultReasoningEffort(
       get().provisionalDraft.reasoningEffort ??
-      get().settings.defaultReasoningEffort ??
-      null
+        get().settings.defaultReasoningEffort,
     );
   },
   setEffectiveReasoningEffort: (effort) => {
     const id = get().activeSessionId;
+    const next = sanitizeDefaultReasoningEffort(effort);
     if (id && get().sessions[id]) {
       get().updateSummary(id, {
-        reasoningEffort: effort,
+        reasoningEffort: next,
         updatedAt: new Date().toISOString(),
       });
       return;
     }
-    get().setProvisionalDraft({ reasoningEffort: effort });
+    get().setProvisionalDraft({ reasoningEffort: next });
   },
   effectiveMode: () => {
     const id = get().activeSessionId;

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { buildPromptContent } from "../../contracts";
-import { mergeSelectableModels } from "../../contracts/model";
+import { mergeSelectableModels, resolveEffortForModel } from "../../contracts/model";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore } from "../../store";
 import { t, translate } from "../../i18n";
@@ -9,6 +9,7 @@ import type {
   ComposerAttachment,
   PermissionPolicy,
   ModeSwitchResult,
+  SelectableModel,
   SessionSummary,
   TaskMode,
 } from "../../types";
@@ -51,6 +52,36 @@ function branchSlug(text: string, sessionId: string): string {
 
 function permissionAlwaysApprove(policy: PermissionPolicy): boolean {
   return policy === "full_auto";
+}
+
+function lookupModel(
+  state: ReturnType<typeof useAppStore.getState>,
+  sessionId: string | null | undefined,
+  modelId: string | null | undefined,
+): SelectableModel | null {
+  if (!modelId) return null;
+  const sessionModels = sessionId
+    ? state.sessions[sessionId]?.modelState?.availableModels
+    : undefined;
+  const models = mergeSelectableModels(
+    sessionModels,
+    state.globalModelState.availableModels,
+  );
+  return models.find((model) => model.id === modelId) ?? null;
+}
+
+function resolveRuntimeEffort(
+  state: ReturnType<typeof useAppStore.getState>,
+  summary: Pick<SessionSummary, "sessionId" | "model" | "reasoningEffort">,
+): string | null {
+  const modelId =
+    summary.model || state.effectiveModelId() || state.settings.model || null;
+  return resolveEffortForModel(
+    lookupModel(state, summary.sessionId, modelId),
+    summary.reasoningEffort ||
+      state.effectiveReasoningEffort() ||
+      state.settings.defaultReasoningEffort,
+  );
 }
 
 export function useDesktopController(
@@ -106,7 +137,10 @@ export function useDesktopController(
         attentionRequired: false,
         alwaysApprove: permissionAlwaysApprove(state.settings.permissionPolicy),
         model: state.effectiveModelId() || state.settings.model,
-        reasoningEffort: state.effectiveReasoningEffort() || state.settings.defaultReasoningEffort || null,
+        reasoningEffort: resolveEffortForModel(
+          lookupModel(state, null, state.effectiveModelId() || state.settings.model),
+          state.effectiveReasoningEffort() || state.settings.defaultReasoningEffort,
+        ),
         draft: state.provisionalDraft.text,
         remoteSessionId: null,
       };
@@ -177,11 +211,7 @@ export function useDesktopController(
           taskId: sessionId,
           cwd: summary.executionRoot || summary.worktreePath || summary.workspaceRoot,
           model: summary.model || state.effectiveModelId() || null,
-          reasoningEffort:
-            summary.reasoningEffort ||
-            state.effectiveReasoningEffort() ||
-            state.settings.defaultReasoningEffort ||
-            null,
+          reasoningEffort: resolveRuntimeEffort(state, summary),
           alwaysApprove: permissionAlwaysApprove(policy),
           useHarness: state.settings.useHarness,
           sandbox: summary.sandbox ?? state.settings.sandbox,
@@ -491,11 +521,7 @@ export function useDesktopController(
         taskId: sessionId,
         cwd: summary.executionRoot || summary.worktreePath || summary.workspaceRoot,
         model: summary.model || state.settings.model,
-        reasoningEffort:
-          summary.reasoningEffort ||
-          state.effectiveReasoningEffort() ||
-          state.settings.defaultReasoningEffort ||
-          null,
+        reasoningEffort: resolveRuntimeEffort(state, summary),
         alwaysApprove: permissionAlwaysApprove(
           summary.permissionPolicy ?? state.settings.permissionPolicy,
         ),

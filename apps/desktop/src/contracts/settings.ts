@@ -3,6 +3,9 @@
  * API keys move to Keychain in T03/T12 — never log secret values.
  */
 
+import { sanitizeDefaultReasoningEffort } from "./model";
+import type { SandboxMode } from "./runtime";
+
 export type ThemeId = "dark" | "light" | "system" | string;
 
 export type Settings = {
@@ -82,4 +85,12 @@ export function defaultSettings(): Settings {
     showTimestamps: false,
   };
 }
-import type { SandboxMode } from "./runtime";
+
+/** Clamp persisted settings fields that can go stale across CLI/catalog changes. */
+export function normalizeSettings(settings: Settings): Settings {
+  const defaultReasoningEffort = sanitizeDefaultReasoningEffort(
+    settings.defaultReasoningEffort,
+  );
+  if (defaultReasoningEffort === settings.defaultReasoningEffort) return settings;
+  return { ...settings, defaultReasoningEffort };
+}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BootstrapScreen } from "./features/shell/BootstrapScreen";
 import { AppShell } from "./features/shell/AppShell";
 import { bootstrapStateFromHealth } from "./features/shell/bootstrap";
+import { normalizeSettings } from "./contracts";
 import { applyLocalePreference, t, useTranslation } from "./i18n";
 import { useDesktopBridge } from "./platform/DesktopBridge";
 import { useAppStore } from "./store";
@@ -39,11 +40,15 @@ export default function App() {
       try {
         await bridge.ensureAgentHost();
         if (cancelled) return;
-        const s = await bridge.loadSettings();
+        const loaded = await bridge.loadSettings();
         if (cancelled) return;
+        let s = normalizeSettings(loaded);
         applyLocalePreference(s.locale);
         replaceSettings(s);
         setSettingsLoaded(true);
+        if (s.defaultReasoningEffort !== loaded.defaultReasoningEffort) {
+          await bridge.saveSettings(s);
+        }
         const health = await bridge.runtimeHealth(s.cliPathOverride || s.grokPath || undefined);
         if (cancelled) return;
         setHealth(health);
@@ -54,6 +59,7 @@ export default function App() {
             const migrated = { ...s, onboardingDone: true };
             replaceSettings(migrated);
             await bridge.saveSettings(migrated);
+            s = migrated;
           }
         }
         if (cancelled) return;
