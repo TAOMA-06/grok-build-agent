@@ -49,3 +49,23 @@ apps/desktop/src-tauri/WixTools/
 *.local
 .cache/
 .codegraph/
+
+# Local AI / vibe-coding scratch (do not re-commit)
+.cursor/
+.cursorrules
+.claude/
+.codex/
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
+/PLAN.md
+/TODO.md
+/NOTES.md
+/PROGRESS.md
+/REFACTOR*.md
+docs/scratch/
+docs/**/NOTES.md
+docs/**/PLAN.md
+docs/**/TODO.md
+docs/product-parity*.md
+docs/baseline-env.md

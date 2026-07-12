@@ -1,4 +1,4 @@
-# Type contracts (T01)
+# Type contracts
 
 Shared domain contracts for **Grok Build Community Desktop**.
 
