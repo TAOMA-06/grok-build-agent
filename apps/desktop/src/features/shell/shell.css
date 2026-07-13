@@ -140,7 +140,6 @@
   user-select: none;
 }
 
-.gb-brand-mark,
 .gb-agent-mark,
 .gb-empty-glyph {
   display: grid;
@@ -150,10 +149,13 @@
 }
 
 .gb-brand-mark {
+  display: grid;
+  place-items: center;
   width: 26px;
   height: 26px;
-  border-radius: 7px 3px 7px 3px;
-  font-weight: 760;
+  overflow: hidden;
+  border-radius: 7px;
+  background: #05070c;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
 }
 
@@ -1141,6 +1143,93 @@
   background: color-mix(in srgb, var(--gb-raised) 90%, transparent);
 }
 
+/* Carbon-fiber attach control — fine twill weave + soft top sheen */
+.gb-icon-button.composer.attach {
+  color: rgba(214, 220, 228, 0.82);
+  border-color: rgba(255, 255, 255, 0.1);
+  background-color: #12151a;
+  background-image:
+    linear-gradient(
+      150deg,
+      rgba(255, 255, 255, 0.18) 0%,
+      rgba(255, 255, 255, 0.04) 22%,
+      transparent 48%,
+      rgba(0, 0, 0, 0.28) 100%
+    ),
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.055) 0 1px,
+      transparent 1px 3px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(0, 0, 0, 0.55) 0 1px,
+      transparent 1px 3px
+    ),
+    repeating-linear-gradient(
+      135deg,
+      #1c2128 0 2px,
+      #0f1216 2px 4px
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.32);
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    filter 140ms ease,
+    transform 140ms ease;
+}
+
+.gb-icon-button.composer.attach:hover {
+  color: #f2f5f8;
+  border-color: rgba(255, 255, 255, 0.2);
+  background-color: #12151a;
+  background-image:
+    linear-gradient(
+      150deg,
+      rgba(255, 255, 255, 0.26) 0%,
+      rgba(255, 255, 255, 0.06) 24%,
+      transparent 50%,
+      rgba(0, 0, 0, 0.22) 100%
+    ),
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.07) 0 1px,
+      transparent 1px 3px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(0, 0, 0, 0.5) 0 1px,
+      transparent 1px 3px
+    ),
+    repeating-linear-gradient(
+      135deg,
+      #222830 0 2px,
+      #11151a 2px 4px
+    );
+  filter: brightness(1.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 2px 6px rgba(0, 0, 0, 0.38);
+}
+
+.gb-icon-button.composer.attach:active {
+  filter: brightness(0.94);
+  transform: translateY(0.5px);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.gb-icon-button.composer.attach:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--gb-accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
 .gb-composer-select {
   display: inline-flex;
   height: 30px;
@@ -1915,7 +2004,7 @@
   .gb-status-dot.running { animation: none; }
   .gb-app * { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
 }
-+
+
 /* --------------------------------------------------------------------------
    Mission Control visual system
    Signature: one launch-trajectory rail connects navigation, activity and send.
@@ -1970,53 +2059,48 @@
 }
 
 .gb-brand-mark {
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
+  overflow: hidden;
   border: 1px solid rgba(230, 233, 237, 0.18);
-  border-radius: 7px;
+  border-radius: 8px;
   color: var(--gb-text);
-  background: rgba(230, 233, 237, 0.035);
-  box-shadow: inset 0 0 18px rgba(107, 158, 255, 0.08);
+  background: #05070c;
+  box-shadow:
+    inset 0 0 0 1px rgba(107, 158, 255, 0.08),
+    inset 0 0 18px rgba(107, 158, 255, 0.1);
 }
 
-.gb-brand-mark svg {
-  width: 23px;
-  height: 23px;
-  overflow: visible;
+.gb-brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 52% 46%;
+  display: block;
+  transform: scale(1.65);
+  transform-origin: 52% 46%;
 }
-
-.gb-mission-mark-orbit,
-.gb-mission-mark-body,
-.gb-mission-mark-window,
-.gb-mission-mark-flame {
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.gb-mission-mark-orbit { stroke: var(--gb-accent); stroke-width: 1.2; opacity: 0.7; }
-.gb-mission-mark-body { stroke-width: 1.45; }
-.gb-mission-mark-window { stroke: var(--gb-accent); stroke-width: 1.2; }
-.gb-mission-mark-flame { stroke: var(--gb-danger); stroke-width: 1.35; }
 
 .gb-brand-name {
   display: grid;
-  gap: 2px;
+  gap: 3px;
+  min-width: 0;
   line-height: 1;
 }
 
 .gb-brand-name strong {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 .gb-brand-name small {
   color: var(--gb-faint);
-  font: 7.5px/1 var(--gb-mono);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font: 8px/1.1 var(--gb-mono);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .gb-sidebar-actions {
@@ -2371,7 +2455,7 @@
 .gb-launch-trajectory {
   position: relative;
   width: min(540px, 88vw);
-  aspect-ratio: 1672 / 941;
+  aspect-ratio: 1024 / 576;
   margin-bottom: 10px;
   overflow: hidden;
   color: var(--gb-text);

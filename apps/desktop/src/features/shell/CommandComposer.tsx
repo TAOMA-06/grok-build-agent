@@ -500,7 +500,7 @@ export function CommandComposer({
           <div className="gb-composer-cluster actions">
             <button
               type="button"
-              className="gb-icon-button composer"
+              className="gb-icon-button composer attach"
               aria-label={t.attachFile}
               onClick={() => void attachPaths()}
             >
