@@ -942,7 +942,7 @@
     var(--gb-glass-shadow),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(28px) saturate(140%);
-  transition: border-color 160ms ease, box-shadow 160ms ease;
+  transition: border-color 180ms ease, box-shadow 180ms ease, background 220ms ease;
 }
 
 .gb-composer-shell:focus-within {
@@ -953,36 +953,47 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.78);
 }
 
+/* Mode state is ambient: soft shell tint + quiet status line, not a stacked bar */
 .gb-composer-shell.plan {
-  border-color: color-mix(in srgb, var(--gb-iris) 28%, var(--gb-glass-border));
+  border-color: color-mix(in srgb, var(--gb-iris) 22%, var(--gb-glass-border));
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, white 92%, var(--gb-blush)) 0%,
+    color-mix(in srgb, rgba(255, 250, 249, 0.88) 92%, var(--gb-iris)) 46%,
+    color-mix(in srgb, rgba(253, 223, 220, 0.52) 88%, var(--gb-iris)) 100%
+  );
   box-shadow:
-    inset 3px 0 0 color-mix(in srgb, var(--gb-iris) 72%, var(--gb-blush)),
     var(--gb-glass-shadow),
-    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
 }
 
 .gb-composer-shell.plan:focus-within {
+  border-color: color-mix(in srgb, var(--gb-iris) 36%, var(--gb-glass-border));
   box-shadow:
-    inset 3px 0 0 color-mix(in srgb, var(--gb-iris) 72%, var(--gb-blush)),
-    0 0 0 3px color-mix(in srgb, var(--gb-iris) 22%, transparent),
-    0 18px 48px rgba(48, 61, 103, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+    0 0 0 3px color-mix(in srgb, var(--gb-iris) 16%, transparent),
+    0 18px 48px rgba(48, 61, 103, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
 .gb-composer-shell.goal {
-  border-color: color-mix(in srgb, var(--gb-accent) 28%, var(--gb-glass-border));
+  border-color: color-mix(in srgb, var(--gb-accent) 22%, var(--gb-glass-border));
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, white 92%, var(--gb-accent)) 0%,
+    color-mix(in srgb, rgba(255, 250, 249, 0.88) 94%, var(--gb-accent)) 46%,
+    color-mix(in srgb, rgba(253, 223, 220, 0.5) 90%, var(--gb-accent)) 100%
+  );
   box-shadow:
-    inset 3px 0 0 color-mix(in srgb, var(--gb-accent) 65%, var(--gb-iris)),
     var(--gb-glass-shadow),
-    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
 }
 
 .gb-composer-shell.goal:focus-within {
+  border-color: color-mix(in srgb, var(--gb-accent) 34%, var(--gb-glass-border));
   box-shadow:
-    inset 3px 0 0 color-mix(in srgb, var(--gb-accent) 65%, var(--gb-iris)),
-    0 0 0 3px color-mix(in srgb, var(--gb-accent) 22%, transparent),
-    0 18px 48px rgba(48, 61, 103, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+    0 0 0 3px color-mix(in srgb, var(--gb-accent) 16%, transparent),
+    0 18px 48px rgba(48, 61, 103, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
 .gb-composer {
@@ -1078,9 +1089,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  padding: 4px 10px 10px;
+  padding: 2px 10px 10px;
 }
 
 .gb-composer-tools {
@@ -1099,21 +1110,21 @@
 .gb-composer-cluster {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
-/* Visual grouping: attach | model·effort·mode | context */
+/* Soft grouping: attach · model/effort/mode · context — hairlines, not hard rails */
 .gb-composer-cluster.selects {
-  gap: 2px;
-  margin-inline: 6px;
-  padding-inline: 8px;
-  border-inline: 1px solid color-mix(in srgb, var(--gb-border) 88%, transparent);
+  gap: 1px;
+  margin-inline: 4px;
+  padding-inline: 6px;
+  border-inline: 1px solid color-mix(in srgb, var(--gb-border) 55%, transparent);
 }
 
 .gb-composer-cluster.meta {
   margin-left: auto;
-  padding-left: 4px;
+  padding-left: 2px;
 }
 
 .gb-icon-button.composer {
@@ -1185,11 +1196,9 @@
   cursor: default;
 }
 
-/* Mode chip carries identity — model/effort stay quieter */
+/* Mode chip is the interactive control — keep weight close to sibling selects */
 .gb-composer-select.mode {
-  font-weight: 600;
-  border-color: color-mix(in srgb, var(--gb-border) 70%, transparent);
-  background: color-mix(in srgb, var(--gb-raised) 70%, transparent);
+  font-weight: 560;
 }
 
 .gb-composer-select.mode.agent {
@@ -1198,18 +1207,16 @@
 
 .gb-composer-select.mode.plan,
 .gb-composer-shell.plan .gb-composer-select.mode.plan {
-  color: color-mix(in srgb, var(--gb-accent-strong) 92%, var(--gb-iris));
-  border-color: color-mix(in srgb, var(--gb-iris) 28%, transparent);
-  background: color-mix(in srgb, var(--gb-iris) 12%, var(--gb-accent-dim));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gb-iris) 8%, transparent);
+  color: color-mix(in srgb, var(--gb-accent-strong) 88%, var(--gb-iris));
+  border-color: color-mix(in srgb, var(--gb-iris) 18%, transparent);
+  background: color-mix(in srgb, var(--gb-iris) 8%, var(--gb-raised));
 }
 
 .gb-composer-select.mode.goal,
 .gb-composer-select.goal {
-  color: var(--gb-accent-strong);
-  border-color: color-mix(in srgb, var(--gb-accent) 30%, transparent);
-  background: var(--gb-accent-dim);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gb-accent) 10%, transparent);
+  color: color-mix(in srgb, var(--gb-accent-strong) 92%, var(--gb-accent));
+  border-color: color-mix(in srgb, var(--gb-accent) 18%, transparent);
+  background: color-mix(in srgb, var(--gb-accent-dim) 70%, var(--gb-raised));
 }
 
 .gb-context-meter {
@@ -1327,108 +1334,75 @@
   letter-spacing: 0.01em;
 }
 
-.gb-goal-controls {
+/* Quiet mode caption inside the glass — no stacked header bar */
+.gb-mode-status {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   margin: 0;
-  padding: 8px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--gb-border) 90%, transparent);
-  color: var(--gb-accent-strong);
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--gb-accent-dim) 90%, transparent),
-    color-mix(in srgb, var(--gb-accent-dim) 40%, transparent)
-  );
+  padding: 10px 16px 0;
+  border: 0;
+  color: color-mix(in srgb, var(--gb-muted) 82%, var(--gb-accent-strong));
+  background: transparent;
   font-size: 11px;
-  font-weight: 520;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
 }
 
-.gb-goal-controls > span:not(.gb-goal-controls-icon) {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-right: auto;
-  min-width: 0;
+.gb-mode-status.plan {
+  color: color-mix(in srgb, var(--gb-muted) 70%, var(--gb-accent-strong));
 }
 
-.gb-goal-controls-icon,
-.gb-plan-mode-icon {
-  display: grid;
-  width: 22px;
-  height: 22px;
+.gb-mode-status.goal {
+  color: color-mix(in srgb, var(--gb-muted) 55%, var(--gb-accent-strong));
+}
+
+.gb-mode-status-icon {
   flex: 0 0 auto;
-  place-items: center;
-  border-radius: 7px;
-  color: var(--gb-accent-strong);
-  background: color-mix(in srgb, var(--gb-accent-dim) 90%, white);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gb-accent) 16%, transparent);
+  opacity: 0.78;
 }
 
-.gb-goal-controls button {
-  padding: 4px 8px;
-  border: 1px solid var(--gb-border);
-  border-radius: 6px;
+.gb-mode-status-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gb-mode-status.has-actions {
+  gap: 8px;
+  padding-bottom: 2px;
+}
+
+.gb-mode-status-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.gb-mode-status-actions button {
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--gb-border) 85%, transparent);
+  border-radius: 999px;
   color: var(--gb-muted);
-  background: color-mix(in srgb, var(--gb-panel) 88%, transparent);
+  background: color-mix(in srgb, var(--gb-raised) 55%, transparent);
   font-size: 10px;
   font-weight: 520;
   transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
 }
 
-.gb-goal-controls button:hover {
+.gb-mode-status-actions button:hover {
   color: var(--gb-text);
-  border-color: var(--gb-border-strong);
-  background: var(--gb-raised);
+  border-color: color-mix(in srgb, var(--gb-border-strong) 80%, transparent);
+  background: color-mix(in srgb, var(--gb-raised) 88%, transparent);
 }
 
-.gb-plan-mode-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  padding: 8px 14px;
-  border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--gb-iris) 14%, var(--gb-border));
-  border-radius: 0;
-  color: var(--gb-accent-strong);
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--gb-iris) 14%, var(--gb-blush)),
-    color-mix(in srgb, var(--gb-blush) 42%, transparent) 58%,
-    transparent
-  );
-  box-shadow: none;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-}
-
-.gb-plan-mode-icon {
-  color: color-mix(in srgb, var(--gb-accent-strong) 88%, var(--gb-iris));
-  background: color-mix(in srgb, white 55%, var(--gb-blush));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gb-iris) 18%, transparent);
-}
-
-.gb-plan-mode-badge {
-  flex: 0 0 auto;
-  padding: 2px 7px;
-  border-radius: 999px;
-  color: color-mix(in srgb, var(--gb-accent-strong) 95%, var(--gb-iris));
-  background: color-mix(in srgb, white 48%, var(--gb-accent-dim));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gb-iris) 16%, transparent);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.02em;
-}
-
-.gb-plan-mode-detail {
-  min-width: 0;
-  overflow: hidden;
-  color: color-mix(in srgb, var(--gb-accent-strong) 78%, var(--gb-muted));
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 480;
+/* Tighter top padding when a mode caption is present */
+.gb-composer-shell:has(.gb-mode-status) .gb-composer textarea {
+  padding-top: 8px;
 }
 
 .gb-command-menu,
@@ -1511,52 +1485,55 @@
   box-shadow: none;
 }
 
-:root[data-theme="dark"] .gb-plan-mode-banner {
+:root[data-theme="dark"] .gb-composer-shell.plan {
+  border-color: color-mix(in srgb, var(--gb-blush) 16%, var(--gb-glass-border));
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, rgba(46, 56, 91, 0.96) 88%, var(--gb-blush)) 0%,
+    color-mix(in srgb, rgba(58, 60, 98, 0.9) 90%, var(--gb-blush)) 52%,
+    color-mix(in srgb, rgba(83, 73, 100, 0.82) 92%, var(--gb-blush)) 100%
+  );
+}
+
+:root[data-theme="dark"] .gb-composer-shell.goal {
+  border-color: color-mix(in srgb, var(--gb-accent) 18%, var(--gb-glass-border));
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, rgba(46, 56, 91, 0.96) 90%, var(--gb-accent)) 0%,
+    color-mix(in srgb, rgba(58, 60, 98, 0.9) 92%, var(--gb-accent)) 52%,
+    color-mix(in srgb, rgba(83, 73, 100, 0.82) 94%, var(--gb-accent)) 100%
+  );
+}
+
+:root[data-theme="dark"] .gb-mode-status {
+  color: color-mix(in srgb, var(--gb-muted) 78%, var(--gb-accent));
+}
+
+:root[data-theme="dark"] .gb-mode-status.plan {
+  color: color-mix(in srgb, var(--gb-muted) 72%, var(--gb-accent));
+}
+
+:root[data-theme="dark"] .gb-mode-status.goal {
+  color: color-mix(in srgb, var(--gb-muted) 65%, var(--gb-accent));
+}
+
+:root[data-theme="dark"] .gb-mode-status-actions button {
+  color: var(--gb-muted);
+  border-color: color-mix(in srgb, var(--gb-border) 90%, transparent);
+  background: color-mix(in srgb, var(--gb-raised) 60%, transparent);
+}
+
+:root[data-theme="dark"] .gb-mode-status-actions button:hover {
   color: var(--gb-text);
-  border-bottom-color: color-mix(in srgb, var(--gb-blush) 12%, var(--gb-border));
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--gb-blush) 16%, var(--gb-panel)),
-    color-mix(in srgb, var(--gb-blush) 8%, transparent) 60%,
-    transparent
-  );
-}
-
-:root[data-theme="dark"] .gb-plan-mode-icon {
-  color: var(--gb-accent);
-  background: color-mix(in srgb, var(--gb-blush) 14%, var(--gb-raised));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gb-blush) 18%, transparent);
-}
-
-:root[data-theme="dark"] .gb-plan-mode-badge {
-  color: var(--gb-accent);
-  background: color-mix(in srgb, var(--gb-blush) 14%, var(--gb-raised));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gb-blush) 16%, transparent);
-}
-
-:root[data-theme="dark"] .gb-plan-mode-detail {
-  color: color-mix(in srgb, var(--gb-muted) 88%, var(--gb-accent));
-}
-
-:root[data-theme="dark"] .gb-goal-controls {
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--gb-accent-dim) 70%, transparent),
-    color-mix(in srgb, var(--gb-accent-dim) 30%, transparent)
-  );
-}
-
-:root[data-theme="dark"] .gb-goal-controls-icon {
-  color: var(--gb-accent);
-  background: color-mix(in srgb, var(--gb-accent-dim) 80%, var(--gb-raised));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gb-accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--gb-border-strong) 80%, transparent);
+  background: color-mix(in srgb, var(--gb-raised) 90%, transparent);
 }
 
 :root[data-theme="dark"] .gb-composer-select.mode.plan,
 :root[data-theme="dark"] .gb-composer-shell.plan .gb-composer-select.mode.plan {
   color: var(--gb-accent);
-  border-color: color-mix(in srgb, var(--gb-blush) 22%, transparent);
-  background: color-mix(in srgb, var(--gb-blush) 12%, var(--gb-raised));
+  border-color: color-mix(in srgb, var(--gb-blush) 16%, transparent);
+  background: color-mix(in srgb, var(--gb-blush) 8%, var(--gb-raised));
 }
 
 :root[data-theme="dark"] .gb-send.ready:not(:disabled) {

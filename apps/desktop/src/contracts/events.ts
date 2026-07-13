@@ -52,6 +52,41 @@ export type SessionUpdate = {
 
 export type JsonRpcId = string | number;
 
+export type StructuredAcpNotification = {
+  text: string;
+  level: "info" | "warn" | "error";
+};
+
+/** Normalize Grok Build 0.2.96+ structured system notifications. */
+export function extractStructuredAcpNotification(
+  payload: unknown,
+): StructuredAcpNotification | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as Record<string, unknown>;
+  const params = root.params && typeof root.params === "object"
+    ? root.params as Record<string, unknown>
+    : null;
+  const notification = params?.notification && typeof params.notification === "object"
+    ? params.notification as Record<string, unknown>
+    : root.notification && typeof root.notification === "object"
+      ? root.notification as Record<string, unknown>
+      : null;
+  const value = notification ?? params ?? root;
+  const title = typeof value.title === "string" ? value.title.trim() : "";
+  const bodyValue = value.body ?? value.message;
+  const body = typeof bodyValue === "string" ? bodyValue.trim() : "";
+  if (!title && !body) return null;
+
+  const kind = String(value.kind ?? value.severity ?? value.type ?? "info").toLowerCase();
+  const level = /error|fail|critical/.test(kind)
+    ? "error"
+    : /warn/.test(kind) ? "warn" : "info";
+  return {
+    text: title && body && title !== body ? `${title}\n\n${body}` : title || body,
+    level,
+  };
+}
+
 /** Generic JSON-RPC server → client request (permission, fs, terminal, …). */
 export type ServerRequest = {
   jsonrpc?: string;

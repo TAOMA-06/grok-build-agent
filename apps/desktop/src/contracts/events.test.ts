@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createEventEnvelope,
+  extractStructuredAcpNotification,
   isSessionEventEnvelope,
   type SessionEventEnvelope,
 } from "./events";
@@ -54,6 +55,21 @@ describe("SessionEventEnvelope", () => {
     });
     expect(a.sessionId).not.toBe(b.sessionId);
     expect(a.payload).not.toEqual(b.payload);
+  });
+});
+
+describe("structured ACP notifications", () => {
+  it("normalizes Grok Build kind/title/body notifications", () => {
+    expect(extractStructuredAcpNotification({
+      params: { kind: "warning", title: "Authentication changed", body: "Restart this session." },
+    })).toEqual({
+      text: "Authentication changed\n\nRestart this session.",
+      level: "warn",
+    });
+  });
+
+  it("keeps unstructured lifecycle frames out of the transcript", () => {
+    expect(extractStructuredAcpNotification({ params: { status: "ready" } })).toBeNull();
   });
 });
 

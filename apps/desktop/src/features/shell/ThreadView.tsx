@@ -228,31 +228,26 @@ export function ThreadView({
           }`}
         >
           {visibleMode === "plan" && (
-            <div className="gb-plan-mode-banner" role="status">
-              <span className="gb-plan-mode-icon" aria-hidden>
-                <FileCode2 size={13} strokeWidth={2.25} />
-              </span>
-              <span className="gb-plan-mode-badge">{t.modePlan}</span>
-              <span className="gb-plan-mode-detail">{t.planReadOnlyDetail}</span>
+            <div className="gb-mode-status plan" role="status">
+              <FileCode2 size={12} strokeWidth={2} aria-hidden className="gb-mode-status-icon" />
+              <span className="gb-mode-status-label">{t.planReadOnly}</span>
             </div>
           )}
           {visibleMode === "goal" && session?.summary.mode !== "goal" && (
-            <div className="gb-goal-controls">
-              <span className="gb-goal-controls-icon" aria-hidden>
-                <Flag size={12} strokeWidth={2.25} />
-              </span>
-              <span>{t.goalObjectivePending}</span>
+            <div className="gb-mode-status goal" role="status">
+              <Flag size={12} strokeWidth={2} aria-hidden className="gb-mode-status-icon" />
+              <span className="gb-mode-status-label">{t.goalObjectivePending}</span>
             </div>
           )}
           {visibleMode === "goal" && session?.summary.mode === "goal" && (
-            <div className="gb-goal-controls">
-              <span className="gb-goal-controls-icon" aria-hidden>
-                <Flag size={12} strokeWidth={2.25} />
-              </span>
-              <span>{session.busy ? t.goalActive : t.goalMode}</span>
-              <button type="button" onClick={() => void onSend("/goal status", [], "goal")}>{t.status}</button>
-              <button type="button" onClick={() => void onSend(session.busy ? "/goal pause" : "/goal resume", [], "goal")}>{session.busy ? t.pause : t.resume}</button>
-              <button type="button" onClick={() => void onSend("/goal clear", [], "goal")}>{t.clear}</button>
+            <div className="gb-mode-status goal has-actions" role="status">
+              <Flag size={12} strokeWidth={2} aria-hidden className="gb-mode-status-icon" />
+              <span className="gb-mode-status-label">{session.busy ? t.goalActive : t.goalMode}</span>
+              <div className="gb-mode-status-actions">
+                <button type="button" onClick={() => void onSend("/goal status", [], "goal")}>{t.status}</button>
+                <button type="button" onClick={() => void onSend(session.busy ? "/goal pause" : "/goal resume", [], "goal")}>{session.busy ? t.pause : t.resume}</button>
+                <button type="button" onClick={() => void onSend("/goal clear", [], "goal")}>{t.clear}</button>
+              </div>
             </div>
           )}
           <CommandComposer

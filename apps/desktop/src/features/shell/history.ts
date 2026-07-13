@@ -1,4 +1,5 @@
 import type { CachedSessionEvent } from "../../api/catalog";
+import { extractStructuredAcpNotification } from "../../contracts";
 import type { ChatBlock, SessionUpdate, ToolCall } from "../../types";
 
 function textFrom(content: SessionUpdate["content"] | unknown): string {
@@ -95,6 +96,19 @@ export function normalizeCachedEvents(events: CachedSessionEvent[]): ChatBlock[]
     if (kind === "plan") {
       const text = textFrom(update.content) || (typeof update.plan === "string" ? update.plan : JSON.stringify(update.plan ?? update, null, 2));
       blocks.push({ id: `history-plan-${event.sequence}`, type: "plan", text, at: event.timestamp });
+      continue;
+    }
+    if (event.kind === "notification" || event.kind === "extension") {
+      const notification = extractStructuredAcpNotification(event.payload);
+      if (notification) {
+        blocks.push({
+          id: `history-system-${event.sequence}`,
+          type: "system",
+          text: notification.text,
+          level: notification.level,
+          at: event.timestamp,
+        });
+      }
     }
   }
   return blocks;

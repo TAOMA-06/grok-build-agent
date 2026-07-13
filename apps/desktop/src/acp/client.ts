@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   buildPermissionPrompt,
+  extractStructuredAcpNotification,
   extractPermissionOptions,
   isPermissionMethod,
   isSessionEventEnvelope,
@@ -767,14 +768,15 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
         ) {
           applyContextUsage(sessionId, connectionId, p?.params ?? p ?? event.payload);
         }
-        if (shouldHideAcpNotification(method)) return;
+        const notification = extractStructuredAcpNotification(p?.params ?? p ?? event.payload);
+        if (shouldHideAcpNotification(method) && !notification) return;
         const sid = resolveLocalSessionId(sessionId, connectionId, !isSessionEventEnvelope(event.payload));
         if (sid) {
           useAppStore.getState().addBlock(sid, {
             type: "system",
             id: crypto.randomUUID(),
-            text: `extension: ${method}`,
-            level: "info",
+            text: notification?.text ?? `extension: ${method}`,
+            level: notification?.level ?? "info",
           });
         }
       },
@@ -800,14 +802,15 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
         ) {
           applyContextUsage(sessionId, connectionId, p?.params ?? p ?? event.payload);
         }
-        if (shouldHideAcpNotification(method)) return;
+        const notification = extractStructuredAcpNotification(p?.params ?? p ?? event.payload);
+        if (shouldHideAcpNotification(method) && !notification) return;
         const sid = resolveLocalSessionId(sessionId, connectionId, !isSessionEventEnvelope(event.payload));
         if (sid) {
           useAppStore.getState().addBlock(sid, {
             type: "system",
             id: crypto.randomUUID(),
-            text: `notify: ${method}`,
-            level: "info",
+            text: notification?.text ?? `notify: ${method}`,
+            level: notification?.level ?? "info",
           });
         }
       },

@@ -49,4 +49,20 @@ describe("normalizeCachedEvents", () => {
       expect.objectContaining({ type: "assistant", text: "计划" }),
     ]);
   });
+
+  it("restores structured Grok system notifications", () => {
+    const blocks = normalizeCachedEvents([
+      event(1, "notification", {
+        method: "_x.ai/session_notification",
+        params: { kind: "error", title: "Session stopped", body: "Authentication expired." },
+      }),
+    ]);
+    expect(blocks).toEqual([
+      expect.objectContaining({
+        type: "system",
+        text: "Session stopped\n\nAuthentication expired.",
+        level: "error",
+      }),
+    ]);
+  });
 });
