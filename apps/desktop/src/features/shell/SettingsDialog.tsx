@@ -184,7 +184,14 @@ export function SettingsDialog({
                 <div className="gb-settings-section-head"><h3>Diagnostic bundle</h3><div><button type="button" className="gb-button" onClick={() => void bridge.diagnosticBundlePreview().then(setBundlePreview).catch((error) => setDoctorAction(String(error)))}>Preview</button><button type="button" className="gb-button" disabled={!bundlePreview} onClick={() => void bridge.exportDiagnosticBundle().then((path) => setDoctorAction(path ? `Exported diagnostics to ${path}` : null)).catch((error) => setDoctorAction(String(error)))}>Export previewed bundle</button></div></div>
                 {bundlePreview && <pre className="gb-doctor-preview">{bundlePreview}</pre>}
               </Tabs.Content>
-              <Tabs.Content value="about"><h3>{t.appName}</h3><p className="gb-settings-copy">{t.aboutDescription}</p></Tabs.Content>
+              <Tabs.Content value="about">
+                <div className="gb-about-heading"><span aria-hidden>GB</span><div><h3>{t.appName}</h3><p className="gb-settings-copy">{t.aboutDescription}</p></div></div>
+                <section className="gb-independence-notice">
+                  <strong>{t.independenceTitle}</strong>
+                  <p>{t.independenceDisclaimer}</p>
+                  <p>{t.artworkDisclaimer}</p>
+                </section>
+              </Tabs.Content>
             </div>
           </Tabs.Root>
           <div className="gb-settings-footer"><button type="button" className="gb-button" onClick={() => onOpenChange(false)}>{t.cancel}</button><button type="button" className="gb-button primary" disabled={saving} onClick={() => void save()}>{saving ? t.saving : t.saveChanges}</button></div>

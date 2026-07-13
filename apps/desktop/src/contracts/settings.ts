@@ -78,7 +78,7 @@ export function defaultSettings(): Settings {
     cwd: "",
     onboardingDone: false,
     apiKey: "",
-    theme: "light",
+    theme: "dark",
     locale: "system",
     compactMode: false,
     multilineMode: false,

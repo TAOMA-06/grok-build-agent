@@ -12,6 +12,17 @@ import type { SessionRuntime } from "../../store";
 import type { WorkspaceRecord } from "../../types";
 import { t } from "../../i18n";
 
+function MissionMark() {
+  return (
+    <svg viewBox="0 0 32 32" aria-hidden>
+      <path className="gb-mission-mark-orbit" d="M4.5 21.5C8 28 23 29 28.5 13.5" />
+      <path className="gb-mission-mark-body" d="M17.2 4.6c3.9 2.1 6.1 6.1 5.6 10.5l-5.1 5.1-5.9-5.9 5.4-9.7Z" />
+      <path className="gb-mission-mark-window" d="M18.3 9.1a2.1 2.1 0 1 1-3 3 2.1 2.1 0 0 1 3-3Z" />
+      <path className="gb-mission-mark-flame" d="m11.7 16.1-2.8 5.6 5.6-2.7" />
+    </svg>
+  );
+}
+
 function sessionStatus(session: SessionRuntime): string {
   if (session.busy || session.summary.runState === "streaming") return "running";
   if (session.summary.runState === "awaiting_permission" || session.summary.attentionRequired) return "attention";
@@ -64,8 +75,8 @@ export function ProjectSidebar({
   return (
     <aside className="gb-sidebar">
       <div className="gb-window-drag" data-tauri-drag-region>
-        <div className="gb-brand-mark"><span>G</span></div>
-        <span className="gb-brand-name">Grok Build</span>
+        <div className="gb-brand-mark"><MissionMark /></div>
+        <span className="gb-brand-name"><strong>Grok Build</strong><small>Mission Control</small></span>
       </div>
 
       <div className="gb-sidebar-actions">

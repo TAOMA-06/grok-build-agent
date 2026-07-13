@@ -118,7 +118,7 @@ impl Default for AppSettings {
             cwd: String::new(),
             onboarding_done: false,
             api_key: String::new(),
-            theme: "light".into(),
+            theme: "dark".into(),
             locale: default_locale(),
             compact_mode: false,
             multiline_mode: false,

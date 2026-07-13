@@ -10,7 +10,7 @@ import {
   FileText,
   Gauge,
   Paperclip,
-  Send,
+  Rocket,
   Square,
   X,
   Zap,
@@ -157,6 +157,7 @@ export function CommandComposer({
   const [dismissedCommandDraft, setDismissedCommandDraft] = useState<string | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
   const [effortOpen, setEffortOpen] = useState(false);
+  const [launching, setLaunching] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
   const draft = effectiveDraftText();
   const attachments = effectiveAttachments();
@@ -222,6 +223,12 @@ export function CommandComposer({
     const timer = window.setTimeout(() => setStopArmed(true), STOP_ARM_MS);
     return () => window.clearTimeout(timer);
   }, [busy, connecting]);
+
+  useEffect(() => {
+    if (!launching) return;
+    const timer = window.setTimeout(() => setLaunching(false), 420);
+    return () => window.clearTimeout(timer);
+  }, [launching]);
 
   useEffect(() => {
     const openModel = () => setModelOpen(true);
@@ -324,6 +331,7 @@ export function CommandComposer({
     setCommandError(null);
     setUnknownCommandDraft(null);
     submittingRef.current = true;
+    setLaunching(true);
     try {
       if (parsed?.descriptor.name === "/agent") {
         const result = await onChooseMode("agent");
@@ -370,7 +378,7 @@ export function CommandComposer({
   }
 
   return (
-    <div className="gb-composer" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
+    <div className={`gb-composer${launching ? " is-launching" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
       {attachments.length > 0 && (
         <div className="gb-attachments">
           {attachments.map((attachment) => (
@@ -651,7 +659,7 @@ export function CommandComposer({
             disabled={busy || connecting || (!draft.trim() && attachments.length === 0)}
             onClick={() => void submit()}
           >
-            <Send size={15} strokeWidth={2.25} />
+            <Rocket size={15} strokeWidth={2.15} />
           </button>
         )}
       </div>

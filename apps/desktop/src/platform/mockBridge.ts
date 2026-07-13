@@ -143,7 +143,7 @@ const settings: Settings = {
   ...defaultSettings(),
   cwd: projectPath,
   onboardingDone: true,
-  theme: "light",
+  theme: "dark",
 };
 
 function mockReview(root: string): ReviewSnapshot {

@@ -10,7 +10,6 @@ import {
   MoreHorizontal,
   Pencil,
   ShieldAlert,
-  Sparkles,
   Trash2,
   Search,
   X,
@@ -22,6 +21,18 @@ import { CommandComposer } from "./CommandComposer";
 import { Timeline } from "./Timeline";
 import { t } from "../../i18n";
 import { useAppStore } from "../../store";
+import missionRocketUrl from "../../assets/mission-rocket.jpg";
+
+function LaunchTrajectory() {
+  return (
+    <div className="gb-launch-trajectory" aria-hidden>
+      <img src={missionRocketUrl} alt="" />
+      <div className="gb-launch-scan" />
+      <span className="gb-launch-coordinate">LC-01 · 28.5°N</span>
+      <span className="gb-launch-status">ORBITAL LINK · READY</span>
+    </div>
+  );
+}
 
 function PermissionCard({
   request,
@@ -141,7 +152,7 @@ export function ThreadView({
 
   return (
     <>
-    <main className="gb-thread-view">
+    <main className={`gb-thread-view${session?.busy || connecting ? " is-running" : ""}${session?.blocks.length ? "" : " is-empty"}`}>
       <header className="gb-thread-header" data-tauri-drag-region>
         {session ? (
           <>
@@ -210,7 +221,7 @@ export function ThreadView({
           </div>
         ) : (
           <div className="gb-empty-thread">
-            <div className="gb-empty-glyph"><Sparkles size={22} /></div>
+            <LaunchTrajectory />
             <h1>{t.emptyTitle}</h1>
             <p>{t.emptyDescription}</p>
             <div className="gb-suggestion-row">
@@ -227,18 +238,6 @@ export function ThreadView({
             visibleMode === "goal" ? " goal" : ""
           }`}
         >
-          {visibleMode === "plan" && (
-            <div className="gb-mode-status plan" role="status">
-              <FileCode2 size={12} strokeWidth={2} aria-hidden className="gb-mode-status-icon" />
-              <span className="gb-mode-status-label">{t.planReadOnly}</span>
-            </div>
-          )}
-          {visibleMode === "goal" && session?.summary.mode !== "goal" && (
-            <div className="gb-mode-status goal" role="status">
-              <Flag size={12} strokeWidth={2} aria-hidden className="gb-mode-status-icon" />
-              <span className="gb-mode-status-label">{t.goalObjectivePending}</span>
-            </div>
-          )}
           {visibleMode === "goal" && session?.summary.mode === "goal" && (
             <div className="gb-mode-status goal has-actions" role="status">
               <Flag size={12} strokeWidth={2} aria-hidden className="gb-mode-status-icon" />
