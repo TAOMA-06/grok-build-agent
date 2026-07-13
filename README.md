@@ -15,6 +15,28 @@ This is an **unofficial community project** and is **not affiliated with, endors
 
 ---
 
+## Latest compatibility · Grok Build CLI v0.2.99
+
+Grok Build Desktop now tracks the latest Grok Build CLI workflow with:
+
+- A multiline desktop composer for normal chat-style prompts
+- `PageUp` / `PageDown` transcript scrolling while the composer is focused
+- CLI-aware `/vim-mode` discovery in the command palette when that command is advertised
+
+The official Grok Build CLI remains the runtime and authentication owner; this project does not bundle, replace, or emulate it.
+
+### 最新适配 · Grok Build CLI v0.2.99
+
+Grok Build Desktop 已适配最新 Grok Build CLI 工作流，新增：
+
+- 支持多行输入的桌面任务编辑器
+- 输入框聚焦时，可用 `PageUp` / `PageDown` 滚动当前对话
+- 当 CLI 声明支持时，命令面板会提供 `/vim-mode` 快捷入口
+
+官方 Grok Build CLI 仍负责运行与登录；本项目不会打包、替代或模拟该 CLI。
+
+---
+
 ## Screenshots · 截图
 
 <p align="center">
@@ -29,9 +51,9 @@ This is an **unofficial community project** and is **not affiliated with, endors
 
 | | |
 |---|---|
-| **Workspace** · 工作区 | Deep-space mission workspace with project navigation and Agent / Plan / Goal controls. |
+| **Workspace** · 工作区 | Deep-space mission workspace with project navigation, a multiline composer, and Agent / Plan / Goal controls. |
 | **Settings** · 设置 | Alloy configuration deck for theme, language, agent, permissions, extensions, and diagnostics. |
-| **Command palette** · 命令面板 | Carbon avionics layer for keyboard-first `/plan`, `/effort`, `/diff`, and more. |
+| **Command palette** · 命令面板 | Carbon avionics layer for keyboard-first `/plan`, `/effort`, `/diff`, and CLI-aware `/vim-mode`. |
 
 ---
 
