@@ -14,7 +14,7 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ComposerAttachment, ModeSwitchResult, SelectableModel, ServerRequest, TaskMode } from "../../types";
 import type { SessionRuntime } from "../../store";
 import { CommandComposer } from "./CommandComposer";
@@ -129,6 +129,7 @@ export function ThreadView({
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [titleDraft, setTitleDraft] = useState(session?.summary.title ?? "");
+  const threadScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => setTitleDraft(session?.summary.title ?? ""), [session?.summary.title]);
   useEffect(() => {
     const openRename = () => setRenameOpen(true);
@@ -137,13 +138,22 @@ export function ThreadView({
       setFindOpen(true);
     };
     const viewPlan = () => document.querySelector(".gb-plan-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const scrollTranscript = (event: Event) => {
+      const direction = (event as CustomEvent<"up" | "down">).detail;
+      const container = threadScrollRef.current;
+      if (!container) return;
+      const page = Math.max(container.clientHeight * 0.85, 240);
+      container.scrollBy({ top: direction === "up" ? -page : page, behavior: "smooth" });
+    };
     window.addEventListener("grok:rename-task", openRename);
     window.addEventListener("grok:find-transcript", openFind);
     window.addEventListener("grok:view-plan", viewPlan);
+    window.addEventListener("grok:scroll-transcript", scrollTranscript);
     return () => {
       window.removeEventListener("grok:rename-task", openRename);
       window.removeEventListener("grok:find-transcript", openFind);
       window.removeEventListener("grok:view-plan", viewPlan);
+      window.removeEventListener("grok:scroll-transcript", scrollTranscript);
     };
   }, []);
   const executionRoot = session?.summary.executionRoot || session?.summary.worktreePath || session?.summary.workspaceRoot;
@@ -180,7 +190,7 @@ export function ThreadView({
         ) : <div className="gb-thread-heading new"><strong>{t.newTask}</strong><span>{workspaceName || t.chooseProject}</span></div>}
       </header>
 
-      <div className={session?.blocks.length ? "gb-thread-scroll" : "gb-thread-scroll empty"}>
+      <div ref={threadScrollRef} className={session?.blocks.length ? "gb-thread-scroll" : "gb-thread-scroll empty"}>
         {findOpen && (
           <div className="gb-find-bar">
             <Search size={14} />

@@ -32,6 +32,17 @@ describe("slash command catalog", () => {
     expect(parseSlashCommand("/review", catalog)?.descriptor).toMatchObject({ source: "skill", execution: "acp" });
   });
 
+  it("uses the live ACP Vim command when the CLI advertises it", () => {
+    const catalog = buildCommandCatalog([
+      { name: "/vim-mode", description: "Toggle Vim navigation", input: null },
+    ], []);
+    expect(parseSlashCommand("/vim-mode", catalog)?.descriptor).toMatchObject({
+      source: "acp",
+      execution: "acp",
+      available: true,
+    });
+  });
+
   it("scopes a skill that conflicts with a desktop command", () => {
     const catalog = buildCommandCatalog([], [
       { id: "plan", name: "Plan skill", description: "Custom planner", source: "project", enabled: true },

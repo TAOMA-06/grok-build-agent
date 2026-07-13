@@ -453,6 +453,13 @@ export function CommandComposer({
                 commandMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
                 return;
               }
+              if (event.key === "PageUp" || event.key === "PageDown") {
+                event.preventDefault();
+                window.dispatchEvent(new CustomEvent<"up" | "down">("grok:scroll-transcript", {
+                  detail: event.key === "PageUp" ? "up" : "down",
+                }));
+                return;
+              }
               const submitKey = event.key === "Enter" && (
                 event.metaKey || event.ctrlKey || (!settings.multilineMode && !event.shiftKey)
               );

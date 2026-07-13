@@ -80,6 +80,33 @@ describe("CommandComposer", () => {
     });
   });
 
+  it("keeps Enter as a newline in multiline mode and submits with Command+Enter", async () => {
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, multilineMode: true },
+    }));
+    const { onSend } = renderComposer();
+    const textarea = screen.getByRole("textbox", { name: "Message Grok" });
+    fireEvent.change(textarea, { target: { value: "First line\nSecond line" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.keyDown(textarea, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("First line\nSecond line", [], "agent"));
+  });
+
+  it("pages the transcript when PageUp or PageDown is pressed in the composer", () => {
+    renderComposer();
+    const textarea = screen.getByRole("textbox", { name: "Message Grok" });
+    const directions: string[] = [];
+    const onScrollTranscript = (event: Event) => {
+      directions.push((event as CustomEvent<string>).detail);
+    };
+    window.addEventListener("grok:scroll-transcript", onScrollTranscript);
+    fireEvent.keyDown(textarea, { key: "PageDown" });
+    fireEvent.keyDown(textarea, { key: "PageUp" });
+    window.removeEventListener("grok:scroll-transcript", onScrollTranscript);
+    expect(directions).toEqual(["down", "up"]);
+  });
+
   it("delays Stop so an immediate re-click cannot cancel the send that just started", async () => {
     vi.useFakeTimers();
     const onCancel = vi.fn().mockResolvedValue(undefined);
