@@ -184,6 +184,22 @@ describe("CommandComposer", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("finish the release", [], "goal"));
   });
 
+  it("requires review before Strict Privacy Shield sends a detected secret", async () => {
+    const { onSend } = renderComposer();
+    const textarea = screen.getByRole("textbox", { name: "Message Grok" });
+    fireEvent.change(textarea, { target: { value: "Use xai-abcdefghijklmnop for this test" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(await screen.findByText("Sensitive data detected")).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send redacted" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(
+      "Use [REDACTED:API_KEY] for this test",
+      [],
+      "agent",
+    ));
+  });
+
   it("switches mode from the visible task mode menu", async () => {
     const user = userEvent.setup();
     const onChooseMode = vi.fn().mockImplementation(async (mode) => ({

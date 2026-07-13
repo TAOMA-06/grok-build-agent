@@ -17,3 +17,4 @@ export * from "./mode";
 export * from "./commands";
 export * from "./mcp";
 export * from "./platform";
+export * from "./privacy";

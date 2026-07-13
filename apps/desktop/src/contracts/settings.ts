@@ -8,9 +8,15 @@ import type { SandboxMode } from "./runtime";
 
 export type ThemeId = "dark" | "light" | "system" | string;
 
+/** How aggressively the desktop host refreshes the task contract. */
+export type FocusMode = "economy" | "balanced";
+
+/** Local-only outbound privacy handling. This does not change xAI service settings. */
+export type PrivacyMode = "strict" | "standard";
+
 export type Settings = {
   /** Versioned renderer/host settings contract. */
-  schemaVersion: 4;
+  schemaVersion: 5;
   grokPath: string;
   /** Optional advanced override. Empty means use CLI discovery. */
   cliPathOverride: string;
@@ -20,6 +26,10 @@ export type Settings = {
    * Empty means use the model catalog default / CLI config.
    */
   defaultReasoningEffort: string;
+  /** Short task anchors cost less context; balanced refreshes the complete contract more often. */
+  focusMode: FocusMode;
+  /** Strict mode redacts detected secrets before they are persisted or sent. */
+  privacyMode: PrivacyMode;
   defaultMode: import("./mode").TaskMode;
   permissionPolicy: "workspace_edit" | "ask_all" | "full_auto";
   autoUpdateCli: boolean;
@@ -64,11 +74,13 @@ export type OnboardingStep =
 
 export function defaultSettings(): Settings {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     grokPath: "",
     cliPathOverride: "",
     model: "grok-build",
-    defaultReasoningEffort: "high",
+    defaultReasoningEffort: "medium",
+    focusMode: "balanced",
+    privacyMode: "strict",
     defaultMode: "agent",
     permissionPolicy: "workspace_edit",
     autoUpdateCli: true,
@@ -91,6 +103,19 @@ export function normalizeSettings(settings: Settings): Settings {
   const defaultReasoningEffort = sanitizeDefaultReasoningEffort(
     settings.defaultReasoningEffort,
   );
-  if (defaultReasoningEffort === settings.defaultReasoningEffort) return settings;
-  return { ...settings, defaultReasoningEffort };
+  const focusMode: FocusMode = settings.focusMode === "economy" ? "economy" : "balanced";
+  const privacyMode: PrivacyMode = settings.privacyMode === "standard" ? "standard" : "strict";
+  if (
+    settings.schemaVersion === 5 &&
+    defaultReasoningEffort === settings.defaultReasoningEffort &&
+    focusMode === settings.focusMode &&
+    privacyMode === settings.privacyMode
+  ) return settings;
+  return {
+    ...settings,
+    schemaVersion: 5,
+    defaultReasoningEffort,
+    focusMode,
+    privacyMode,
+  };
 }

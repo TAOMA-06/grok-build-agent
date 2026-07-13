@@ -615,7 +615,14 @@ describe("useDesktopController", () => {
       liveSwitchSupported: false,
       source: "acp_command",
     });
-    const bridge: DesktopBridge = { ...mockDesktopBridge, sendPrompt, confirmSessionMode };
+    const upsertTask = vi.fn().mockResolvedValue(undefined);
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      sendPrompt,
+      confirmSessionMode,
+      getTask: vi.fn().mockResolvedValue(null),
+      upsertTask,
+    };
     const { result } = renderHook(
       () => useDesktopController(async () => "clean_head"),
       { wrapper: wrapper(bridge) },
@@ -631,8 +638,14 @@ describe("useDesktopController", () => {
       expect.objectContaining({
         taskId: "plan-local",
         idempotencyKey: expect.stringMatching(/^prompt:plan-local:/),
+        focusMode: "balanced",
+        privacyMode: "strict",
       }),
     );
+    expect(upsertTask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "plan-local",
+      goal: "inspect without writing",
+    }));
     expect(confirmSessionMode).toHaveBeenCalledWith("connection", "remote", "plan");
   });
 

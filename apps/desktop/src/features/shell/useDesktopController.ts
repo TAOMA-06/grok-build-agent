@@ -307,6 +307,24 @@ export function useDesktopController(
 
       try {
         await bridge.upsertSession(summary);
+        // The first user instruction is the default task focus. It can still be
+        // refined in the Context drawer, but seeding it here prevents later
+        // turns from drifting without repeatedly sending the full transcript.
+        if (firstTurn && text) {
+          const existingTask = await bridge.getTask(sessionId);
+          await bridge.upsertTask({
+            taskId: sessionId,
+            workspaceId: summary.workspaceRoot,
+            state: existingTask?.state ?? "running",
+            goal: existingTask?.goal?.trim() || text,
+            constraints: existingTask?.constraints ?? [],
+            acceptance: existingTask?.acceptance ?? [],
+            allowedPaths: existingTask?.allowedPaths ?? [],
+            verificationCommands: existingTask?.verificationCommands ?? [],
+            createdAt: existingTask?.createdAt ?? summary.createdAt,
+            updatedAt: summary.updatedAt,
+          });
+        }
         await bridge.saveDraft(sessionId, "");
         let target = useAppStore.getState().sessions[sessionId]?.summary;
         const runtimeStatus = useAppStore.getState().status;
@@ -365,6 +383,8 @@ export function useDesktopController(
               taskId: sessionId,
               turnId: messageBlockId,
               idempotencyKey: `prompt:${sessionId}:${messageBlockId}`,
+              focusMode: state.settings.focusMode,
+              privacyMode: state.settings.privacyMode,
             },
           );
         } finally {

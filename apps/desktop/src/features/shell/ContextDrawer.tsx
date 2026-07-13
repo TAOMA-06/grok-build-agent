@@ -41,6 +41,13 @@ function splitPatchHunks(patch: string): string[] {
   return hunks.map((hunk) => [...header, ...hunk].join("\n"));
 }
 
+function focusStrategyLabel(strategy: unknown): string | null {
+  if (strategy === "full") return t.focusStrategyFull;
+  if (strategy === "anchor") return t.focusStrategyAnchor;
+  if (strategy === "initial") return t.focusStrategyInitial;
+  return null;
+}
+
 export function ContextDrawer({
   session,
   onClose,
@@ -96,6 +103,12 @@ export function ContextDrawer({
   const treeQuery = useQuery({ queryKey: ["workspace-tree", root, explorerPath], queryFn: () => bridge.workspaceTree(root, explorerPath) });
   const searchQuery = useQuery({ queryKey: ["workspace-search", root, explorerSearch], queryFn: () => bridge.workspaceSearch(root, explorerSearch), enabled: explorerSearch.trim().length > 1 });
   const previewQuery = useQuery({ queryKey: ["workspace-preview", root, previewPath], queryFn: () => bridge.workspaceRead(root, previewPath!), enabled: Boolean(previewPath) });
+  const latestContext = contextQuery.data?.[0];
+  const latestTaskFocus = latestContext?.entries.find((entry) => entry.kind === "task_contract");
+  const latestFocusStrategy = focusStrategyLabel(latestTaskFocus?.metadata.strategy);
+  const latestFocusProfile = typeof latestTaskFocus?.metadata.profile === "string"
+    ? latestTaskFocus.metadata.profile
+    : null;
   useEffect(() => {
     const task = taskQuery.data;
     if (!task) return;
@@ -433,9 +446,10 @@ export function ContextDrawer({
             <button type="button" className="gb-review-button" disabled={taskSaving} onClick={() => void saveTaskDefinition()}>{taskSaving ? t.saving : t.saveChanges}</button>
           </div>
           <div className="gb-drawer-toolbar"><span>What the Agent saw</span><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => void contextQuery.refetch()}><RefreshCw size={14} /></button></div>
+          {latestTaskFocus && <div className="gb-drawer-activity"><span className="gb-status-dot idle" /><div><strong>{t.taskFocus}</strong><small>{[latestFocusProfile, latestFocusStrategy, `${t.focusBudget} ~${latestTaskFocus.tokenEstimate}/${latestContext?.tokenBudget ?? 0}`].filter(Boolean).join(" · ")}</small></div></div>}
           {contextQuery.data?.length === 0 && <div className="gb-drawer-empty">No Context Manifest has been recorded for this task.</div>}
           {contextQuery.data?.flatMap((manifest) => manifest.entries.map((entry, index) => (
-            <div className="gb-drawer-activity" key={`${manifest.manifestId}-${index}`}><span className={`gb-status-dot ${entry.trust === "trusted" ? "idle" : "running"}`} /><div><strong>{entry.kind}: {entry.source}</strong><small>{entry.trust} · ~{entry.tokenEstimate} tokens{entry.truncatedReason ? ` · ${entry.truncatedReason}` : ""}</small></div></div>
+            <div className="gb-drawer-activity" key={`${manifest.manifestId}-${index}`}><span className={`gb-status-dot ${entry.trust === "trusted" ? "idle" : "running"}`} /><div><strong>{entry.kind}: {entry.source}</strong><small>{entry.trust} · ~{entry.tokenEstimate} tokens{focusStrategyLabel(entry.metadata.strategy) ? ` · ${focusStrategyLabel(entry.metadata.strategy)}` : ""}{entry.truncatedReason ? ` · ${entry.truncatedReason}` : ""}</small></div></div>
           )))}
         </Tabs.Content>
         <Tabs.Content value="verification" className="gb-drawer-content">

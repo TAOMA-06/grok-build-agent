@@ -36,6 +36,10 @@ pub struct AppSettings {
     pub model: String,
     #[serde(default = "default_reasoning_effort")]
     pub default_reasoning_effort: String,
+    #[serde(default = "default_focus_mode")]
+    pub focus_mode: String,
+    #[serde(default = "default_privacy_mode")]
+    pub privacy_mode: String,
     #[serde(default = "default_mode")]
     pub default_mode: String,
     #[serde(default = "default_permission_policy")]
@@ -75,6 +79,10 @@ struct AppSettingsFile {
     pub model: String,
     #[serde(default = "default_reasoning_effort")]
     pub default_reasoning_effort: String,
+    #[serde(default = "default_focus_mode")]
+    pub focus_mode: String,
+    #[serde(default = "default_privacy_mode")]
+    pub privacy_mode: String,
     #[serde(default = "default_mode")]
     pub default_mode: String,
     #[serde(default = "default_permission_policy")]
@@ -109,6 +117,8 @@ impl Default for AppSettings {
             cli_path_override: String::new(),
             model: "grok-build".into(),
             default_reasoning_effort: default_reasoning_effort(),
+            focus_mode: default_focus_mode(),
+            privacy_mode: default_privacy_mode(),
             default_mode: default_mode(),
             permission_policy: default_permission_policy(),
             auto_update_cli: true,
@@ -132,7 +142,7 @@ fn default_locale() -> String {
 }
 
 fn settings_schema_version() -> u32 {
-    4
+    5
 }
 
 fn default_mode() -> String {
@@ -140,7 +150,15 @@ fn default_mode() -> String {
 }
 
 fn default_reasoning_effort() -> String {
-    "high".into()
+    "medium".into()
+}
+
+fn default_focus_mode() -> String {
+    "balanced".into()
+}
+
+fn default_privacy_mode() -> String {
+    "strict".into()
 }
 
 fn default_permission_policy() -> String {
@@ -217,6 +235,8 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
         cli_path_override: file.cli_path_override,
         model: file.model,
         default_reasoning_effort: file.default_reasoning_effort,
+        focus_mode: file.focus_mode,
+        privacy_mode: file.privacy_mode,
         default_mode: file.default_mode,
         permission_policy: file.permission_policy,
         auto_update_cli: file.auto_update_cli,
@@ -248,6 +268,8 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), ConfigError> {
         cli_path_override: settings.cli_path_override.clone(),
         model: settings.model.clone(),
         default_reasoning_effort: settings.default_reasoning_effort.clone(),
+        focus_mode: settings.focus_mode.clone(),
+        privacy_mode: settings.privacy_mode.clone(),
         default_mode: settings.default_mode.clone(),
         permission_policy: settings.permission_policy.clone(),
         auto_update_cli: settings.auto_update_cli,
@@ -278,7 +300,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legacy_settings_receive_v4_defaults_without_losing_values() {
+    fn legacy_settings_receive_v5_defaults_without_losing_values() {
         let file: AppSettingsFile = serde_json::from_value(serde_json::json!({
             "grokPath": "/custom/grok",
             "model": "grok-build",
@@ -289,12 +311,14 @@ mod tests {
             "theme": "dark"
         }))
         .unwrap();
-        assert_eq!(file.schema_version, 4);
+        assert_eq!(file.schema_version, 5);
         assert!(!file.compact_mode);
         assert!(!file.multiline_mode);
         assert!(!file.show_timestamps);
         assert_eq!(file.default_mode, "agent");
-        assert_eq!(file.default_reasoning_effort, "high");
+        assert_eq!(file.default_reasoning_effort, "medium");
+        assert_eq!(file.focus_mode, "balanced");
+        assert_eq!(file.privacy_mode, "strict");
         assert_eq!(file.permission_policy, "workspace_edit");
         assert!(file.auto_update_cli);
         assert!(file.always_approve);

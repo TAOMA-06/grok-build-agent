@@ -130,9 +130,43 @@ pub fn redact_secrets(text: &str) -> String {
             out = out.replace(&key, "[REDACTED]");
         }
     }
+    out = redact_private_key_blocks(&out);
+    out = redact_jwt_tokens(&out);
     out = redact_prefixed_tokens(&out, "xai-");
     out = redact_prefixed_tokens(&out, "sk-");
+    out = redact_prefixed_tokens(&out, "ghp_");
+    out = redact_prefixed_tokens(&out, "github_pat_");
+    out = redact_prefixed_tokens(&out, "glpat-");
+    out = redact_prefixed_tokens(&out, "AKIA");
+    out = redact_prefixed_tokens(&out, "AIza");
     out
+}
+
+/// Sensitive files should not be staged or transmitted by Strict Privacy Shield.
+/// This intentionally errs on the side of caution; users can opt into Standard
+/// mode when a key container is deliberately part of their task.
+pub fn is_sensitive_attachment_name(name: &str) -> bool {
+    let base = name
+        .rsplit(|character| character == '/' || character == '\\')
+        .next()
+        .unwrap_or(name)
+        .to_ascii_lowercase();
+    matches!(
+        base.as_str(),
+        ".env"
+            | "credentials"
+            | "credentials.json"
+            | "id_dsa"
+            | "id_ecdsa"
+            | "id_ed25519"
+            | "id_rsa"
+            | "secrets.json"
+            | "secrets.yaml"
+            | "secrets.yml"
+    ) || base.starts_with(".env.")
+        || [".kdbx", ".key", ".p12", ".pem", ".pfx"]
+            .iter()
+            .any(|extension| base.ends_with(extension))
 }
 
 fn redact_prefixed_tokens(text: &str, prefix: &str) -> String {
@@ -155,6 +189,76 @@ fn redact_prefixed_tokens(text: &str, prefix: &str) -> String {
             out.push_str("[REDACTED]");
         } else {
             out.push_str(&text[start..token_end]);
+        }
+        cursor = token_end;
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
+fn redact_private_key_blocks(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut remaining = text;
+    while let Some(start) = remaining.find("-----BEGIN ") {
+        let (before, block) = remaining.split_at(start);
+        out.push_str(before);
+        let header_end = block.find('\n').unwrap_or(block.len());
+        let header = &block[..header_end];
+        if !header.contains("PRIVATE KEY-----") {
+            out.push_str(header);
+            remaining = &block[header_end..];
+            continue;
+        }
+
+        let footer_start = block[header_end..]
+            .find("-----END ")
+            .map(|offset| header_end + offset);
+        let Some(footer_start) = footer_start else {
+            out.push_str("[REDACTED:PRIVATE_KEY]");
+            remaining = "";
+            break;
+        };
+        let footer_end = block[footer_start..]
+            .find('\n')
+            .map(|offset| footer_start + offset)
+            .unwrap_or(block.len());
+        let footer = &block[footer_start..footer_end];
+        if footer.contains("PRIVATE KEY-----") {
+            out.push_str("[REDACTED:PRIVATE_KEY]");
+            remaining = &block[footer_end..];
+        } else {
+            out.push_str(header);
+            remaining = &block[header_end..];
+        }
+    }
+    out.push_str(remaining);
+    out
+}
+
+fn redact_jwt_tokens(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    while let Some(relative_start) = text[cursor..].find("eyJ") {
+        let start = cursor + relative_start;
+        out.push_str(&text[cursor..start]);
+        let token_end = text[start..]
+            .char_indices()
+            .take_while(|(_, character)| {
+                character.is_ascii_alphanumeric()
+                    || matches!(*character, '-' | '_' | '.')
+            })
+            .map(|(offset, character)| start + offset + character.len_utf8())
+            .last()
+            .unwrap_or(start);
+        let candidate = &text[start..token_end];
+        let parts: Vec<_> = candidate.split('.').collect();
+        if parts.len() == 3
+            && parts.iter().all(|part| part.len() >= 8)
+            && parts.first().is_some_and(|part| part.starts_with("eyJ"))
+        {
+            out.push_str("[REDACTED:JWT]");
+        } else {
+            out.push_str(candidate);
         }
         cursor = token_end;
     }
@@ -194,5 +298,23 @@ mod tests {
         let redacted = redact_secrets(text);
         assert!(redacted.starts_with("制定中文计划，再检查 "));
         assert!(!redacted.contains("abcdefghijklmnop"));
+    }
+
+    #[test]
+    fn redact_masks_common_credentials_and_private_keys() {
+        let text = "ghp_1234567890abcdefghijkl eyJabcdefgh.abcdefgh.abcdefgh BEGIN\n-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----";
+        let redacted = redact_secrets(text);
+        assert!(!redacted.contains("1234567890abcdefghijkl"));
+        assert!(!redacted.contains("eyJabcdefgh.abcdefgh.abcdefgh"));
+        assert!(!redacted.contains("\nsecret\n"));
+        assert!(redacted.contains("[REDACTED:PRIVATE_KEY]"));
+    }
+
+    #[test]
+    fn sensitive_attachment_names_are_detected() {
+        assert!(is_sensitive_attachment_name("/tmp/.env.production"));
+        assert!(is_sensitive_attachment_name("attachment://id/id_ed25519"));
+        assert!(is_sensitive_attachment_name("credentials.json"));
+        assert!(!is_sensitive_attachment_name("src/credentials.ts"));
     }
 }

@@ -103,6 +103,13 @@ Grok Build Desktop turns the official Grok Build CLI into a dependable desktop c
 - Markdown replies, tool activity, plans, permissions, MCP manager
 - No product telemetry; workspace data stays on your Mac — see [PRIVACY.md](PRIVACY.md)
 
+### Focus and privacy controls
+
+- The first task instruction automatically becomes an editable **Task focus** in the Context drawer.
+- **Economy** focus uses short task anchors and refreshes the full task contract less often; **Balanced** favors more regular full refreshes. Both show the injected token estimate and strategy in Context.
+- New installs default to **Medium** reasoning effort and **Strict Privacy Shield** to reduce recurring token use and protect common prompt secrets and high-risk attachments from accidental dispatch.
+- Strict mode redacts detected API keys, access tokens, JWTs, and PEM private keys, and blocks high-risk attachment names. It is local protection only; configure upstream account choices separately. See [PRIVACY.md](PRIVACY.md).
+
 ### Using the app
 
 1. Open a project folder.
@@ -148,6 +155,13 @@ Grok Build Desktop 把官方 Grok Build CLI 变成可用的桌面编程工作区
 - 原创航天任务控制台视觉、飞行器背景与减少动态效果支持
 - Markdown 回复、工具活动、计划审批、权限确认、MCP 管理
 - 无产品遥测，工作区数据留在本机 — 见 [PRIVACY.md](PRIVACY.md)
+
+### 聚焦与隐私控制
+
+- 首条任务指令会自动成为可在 Context 抽屉中编辑的**任务聚焦**。
+- **经济**档使用短任务锚点，更少刷新完整任务合同；**均衡**档会更频繁刷新。两种档位都会在 Context 中显示注入策略和估算 Token。
+- 新安装默认使用**中等**推理强度与**严格隐私防护**，以降低重复 Token 消耗，并避免常见提示词密钥和高风险附件被意外发送。
+- 严格模式会脱敏识别到的 API 密钥、访问令牌、JWT 和 PEM 私钥，并阻止高风险附件名称。这只是本地保护；上游账户选项需单独配置。详见 [PRIVACY.md](PRIVACY.md)。
 
 ### 使用流程
 

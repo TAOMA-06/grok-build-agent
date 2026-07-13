@@ -1,5 +1,7 @@
 /** Versioned control-plane contracts. Rust is the canonical schema source. */
 
+import type { FocusMode, PrivacyMode } from "./settings";
+
 export const HOST_PROTOCOL_VERSION = 1 as const;
 export const EVENT_SCHEMA_VERSION = 1 as const;
 
@@ -129,6 +131,10 @@ export type PromptDispatchContext = {
   taskId: string;
   turnId: string;
   idempotencyKey: string;
+  /** Optional for compatibility with older desktop renderers. */
+  focusMode?: FocusMode;
+  /** Optional for compatibility with older desktop renderers. */
+  privacyMode?: PrivacyMode;
 };
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";

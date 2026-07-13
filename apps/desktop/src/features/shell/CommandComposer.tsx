@@ -11,6 +11,7 @@ import {
   Gauge,
   Paperclip,
   Rocket,
+  ShieldAlert,
   Square,
   X,
   Zap,
@@ -25,6 +26,8 @@ import {
   resolveEffortForModel,
   formatTokenCount,
   emptyContextUsage,
+  inspectPromptPrivacy,
+  isSensitiveAttachmentName,
 } from "../../contracts";
 import type {
   ComposerAttachment,
@@ -153,6 +156,10 @@ export function CommandComposer({
   const [stopArmed, setStopArmed] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [commandError, setCommandError] = useState<string | null>(null);
+  const [privacyReview, setPrivacyReview] = useState<{
+    redactedText: string;
+    labels: string[];
+  } | null>(null);
   const [unknownCommandDraft, setUnknownCommandDraft] = useState<string | null>(null);
   const [dismissedCommandDraft, setDismissedCommandDraft] = useState<string | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
@@ -246,6 +253,13 @@ export function CommandComposer({
 
   function acceptAttachments(next: ComposerAttachment[]) {
     const combined = [...attachments, ...next];
+    const blockedAttachment = settings.privacyMode === "strict"
+      ? combined.find((attachment) => isSensitiveAttachmentName(attachment.name))
+      : undefined;
+    if (blockedAttachment) {
+      setAttachmentError(translate("privacyBlockedAttachment", { name: blockedAttachment.name }));
+      return;
+    }
     const issue = validateAttachments(combined);
     if (issue) {
       const attachment = combined.find((item) => item.name === issue.fileName);
@@ -266,6 +280,13 @@ export function CommandComposer({
   async function attachPaths() {
     const paths = await bridge.chooseFiles();
     if (!paths.length) return;
+    const blockedPath = settings.privacyMode === "strict"
+      ? paths.find((path) => isSensitiveAttachmentName(path))
+      : undefined;
+    if (blockedPath) {
+      setAttachmentError(translate("privacyBlockedAttachment", { name: blockedPath.split(/[\\/]/).pop() ?? blockedPath }));
+      return;
+    }
     try {
       acceptAttachments(await bridge.stageAttachments(paths));
     } catch (error) {
@@ -296,6 +317,12 @@ export function CommandComposer({
               ? translate("attachmentTooLarge", { name: issue.fileName ?? "", limit })
               : translate("attachmentUnsupported", { name: issue.fileName ?? "" }));
       }
+      const blockedAttachment = settings.privacyMode === "strict"
+        ? metadata.find((attachment) => isSensitiveAttachmentName(attachment.name))
+        : undefined;
+      if (blockedAttachment) {
+        throw new Error(translate("privacyBlockedAttachment", { name: blockedAttachment.name }));
+      }
       acceptAttachments(await Promise.all(files.map(browserAttachment)));
     } catch (error) {
       setAttachmentError(String(error));
@@ -312,24 +339,49 @@ export function CommandComposer({
     if (files.length) void attachBrowserFiles(files);
   }
 
-  async function submit() {
-    if (busy || connecting || submittingRef.current || (!draft.trim() && attachments.length === 0)) return;
+  async function submit({
+    text: submittedText = draft,
+    forceMessage = false,
+    skipPrivacyReview = false,
+  }: {
+    text?: string;
+    forceMessage?: boolean;
+    skipPrivacyReview?: boolean;
+  } = {}) {
+    if (busy || connecting || submittingRef.current || (!submittedText.trim() && attachments.length === 0)) return;
     const catalog = buildCommandCatalog(
       currentSession?.availableCommands ?? [],
       capabilitiesQuery.data?.skills ?? [],
     );
-    const parsed = parseSlashCommand(draft, catalog);
-    if (draft.trim().startsWith("/") && !parsed) {
-      setCommandError(t.unknownCommand.replace("{command}", draft.trim().split(/\s/, 1)[0]));
-      setUnknownCommandDraft(draft);
+    const parsed = forceMessage ? null : parseSlashCommand(submittedText, catalog);
+    if (!forceMessage && submittedText.trim().startsWith("/") && !parsed) {
+      setCommandError(t.unknownCommand.replace("{command}", submittedText.trim().split(/\s/, 1)[0]));
+      setUnknownCommandDraft(submittedText);
       return;
     }
     if (parsed && !parsed.descriptor.available) {
       setCommandError(t.commandUnavailable);
       return;
     }
+    const privacy = inspectPromptPrivacy(submittedText, attachments);
+    if (!skipPrivacyReview && settings.privacyMode === "strict") {
+      const blockedAttachment = privacy.blockedAttachmentNames[0];
+      if (blockedAttachment) {
+        setAttachmentError(translate("privacyBlockedAttachment", { name: blockedAttachment }));
+        return;
+      }
+      if (privacy.findings.length > 0) {
+        setPrivacyReview({
+          redactedText: privacy.redactedText,
+          labels: privacy.findings.map((finding) => finding.label),
+        });
+        return;
+      }
+    }
     setCommandError(null);
+    setAttachmentError(null);
     setUnknownCommandDraft(null);
+    setPrivacyReview(null);
     submittingRef.current = true;
     setLaunching(true);
     try {
@@ -358,10 +410,10 @@ export function CommandComposer({
         return;
       }
       if (parsed && parsed.descriptor.execution !== "acp") {
-        await onLocalCommand(draft.trim());
+        await onLocalCommand(submittedText.trim());
         return;
       }
-      await onSend(draft, attachments, mode);
+      await onSend(submittedText, attachments, mode);
     } finally {
       submittingRef.current = false;
     }
@@ -403,9 +455,26 @@ export function CommandComposer({
             <button type="button" onClick={() => {
               setCommandError(null);
               setUnknownCommandDraft(null);
-              void onSend(draft, attachments, mode);
+              void submit({ forceMessage: true });
             }}>{t.sendAsMessage}</button>
           )}
+        </div>
+      )}
+      {privacyReview && (
+        <div className="gb-composer-privacy" role="alert">
+          <span><ShieldAlert size={14} /><b>{t.privacyReviewTitle}</b><small>{privacyReview.labels.join(", ")}</small></span>
+          <p>{t.privacyReviewHint}</p>
+          <div>
+            <button type="button" onClick={() => {
+              setPrivacyReview(null);
+              textareaRef.current?.focus();
+            }}>{t.privacyEditPrompt}</button>
+            <button type="button" onClick={() => {
+              const redactedText = privacyReview.redactedText;
+              setEffectiveDraftText(redactedText);
+              void submit({ text: redactedText, skipPrivacyReview: true });
+            }}>{t.privacySendRedacted}</button>
+          </div>
         </div>
       )}
 
@@ -419,6 +488,7 @@ export function CommandComposer({
               setDismissedCommandDraft(null);
               setUnknownCommandDraft(null);
               setCommandError(null);
+              setPrivacyReview(null);
             }}
             onCompositionStart={() => {
               composingRef.current = true;
@@ -521,6 +591,7 @@ export function CommandComposer({
                 onClick={() => {
                   setEffectiveDraftText("");
                   setEffectiveAttachments([]);
+                  setPrivacyReview(null);
                 }}
               >
                 <X size={14} strokeWidth={2} />

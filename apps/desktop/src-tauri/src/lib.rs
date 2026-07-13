@@ -309,6 +309,8 @@ async fn send_prompt(
         task_id: session_id.clone(),
         turn_id: uuid::Uuid::new_v4().to_string(),
         idempotency_key: uuid::Uuid::new_v4().to_string(),
+        focus_mode: crate::platform::FocusMode::default(),
+        privacy_mode: crate::platform::PrivacyMode::default(),
     });
     let blocks = content.unwrap_or_default();
     if !blocks.is_empty() {
@@ -323,6 +325,8 @@ async fn send_prompt(
             "taskId": context.task_id,
             "turnId": context.turn_id,
             "idempotencyKey": context.idempotency_key,
+            "focusMode": context.focus_mode,
+            "privacyMode": context.privacy_mode,
             "text": text.unwrap_or_default(),
             "content": blocks,
         }),

@@ -1819,6 +1819,23 @@
 }
 .gb-composer-error button { flex: 0 0 auto; padding: 4px 8px; border: 1px solid currentColor; border-radius: 5px; color: inherit; background: transparent; }
 
+.gb-composer-privacy {
+  display: grid;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--gb-ion, #6b9eff) 48%, var(--gb-border));
+  border-radius: 6px;
+  color: var(--gb-text);
+  background: color-mix(in srgb, var(--gb-ion, #6b9eff) 8%, var(--gb-panel));
+  font-size: 10.5px;
+}
+.gb-composer-privacy > span { display: flex; align-items: center; gap: 6px; color: var(--gb-ion, #6b9eff); }
+.gb-composer-privacy > span small { margin-left: auto; color: var(--gb-muted); font-family: var(--gb-mono); font-size: 9px; }
+.gb-composer-privacy p { margin: 0; color: var(--gb-muted); line-height: 1.45; }
+.gb-composer-privacy > div { display: flex; justify-content: flex-end; gap: 6px; }
+.gb-composer-privacy button { padding: 4px 8px; border: 1px solid var(--gb-border); border-radius: 5px; color: var(--gb-text); background: transparent; font: 600 10px var(--gb-font); }
+.gb-composer-privacy button:last-child { border-color: var(--gb-ion, #6b9eff); color: var(--gb-ion, #6b9eff); }
+
 .gb-user-turn.pending { opacity: 0.7; }
 .gb-user-turn.failed { border-left: 2px solid var(--gb-danger); padding-left: 10px; }
 .gb-user-turn.failed .gb-turn-label { color: var(--gb-danger); }
