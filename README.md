@@ -36,7 +36,7 @@ This is an **unofficial community project** and is **not affiliated with xAI**.
 
 ## Download · 安装
 
-### Apple Silicon (M1 / M2 / M3 / M4)
+### Apple Silicon (M1 / M2 / M3 / M4 /M5)
 
 Download the latest **macOS arm64** build from Releases:
 
