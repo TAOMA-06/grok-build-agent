@@ -9,28 +9,29 @@
 
 English · [中文](#中文)
 
-This is an **unofficial community project** and is **not affiliated with xAI**.  
-本项目为**非官方社区项目**，与 xAI **无隶属关系**。
+This is an **unofficial community project** and is **not affiliated with, endorsed by, or sponsored by xAI or SpaceX**. Grok, xAI, SpaceX, and related names and marks belong to their respective owners.
+
+本项目为**非官方社区项目**，与 xAI 或 SpaceX **不存在官方关联、认可或赞助关系**。Grok、xAI、SpaceX 及相关名称与标识归各自权利方所有。
 
 ---
 
 ## Screenshots · 截图
 
 <p align="center">
-  <img src="docs/screenshots/01-home.png" alt="New task workspace" width="900" />
+  <img src="docs/screenshots/01-home.png" alt="Mission Control new task workspace" width="900" />
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/02-settings.png" alt="Settings" width="440" />
+  <img src="docs/screenshots/02-settings.png" alt="Mission Control settings" width="440" />
   &nbsp;
-  <img src="docs/screenshots/03-commands.png" alt="Command palette" width="440" />
+  <img src="docs/screenshots/03-commands.png" alt="Mission Control command palette" width="440" />
 </p>
 
 | | |
 |---|---|
-| **Workspace** · 工作区 | Start a task, pick a project, and talk to Grok in one shell. |
-| **Settings** · 设置 | Theme, language (EN / 简体中文), agent and permissions. |
-| **Command palette** · 命令面板 | Keyboard-first `/plan`, `/effort`, `/diff`, and more. |
+| **Workspace** · 工作区 | Deep-space mission workspace with project navigation and Agent / Plan / Goal controls. |
+| **Settings** · 设置 | Alloy configuration deck for theme, language, agent, permissions, extensions, and diagnostics. |
+| **Command palette** · 命令面板 | Carbon avionics layer for keyboard-first `/plan`, `/effort`, `/diff`, and more. |
 
 ---
 
@@ -76,6 +77,7 @@ Grok Build Desktop turns the official Grok Build CLI into a dependable desktop c
 - Concurrent ACP sessions with crash recovery and event replay
 - Automatic Git worktrees and explicit dirty-worktree choice
 - Plan / Agent / Goal modes, reasoning effort, model picker, context usage
+- Original Mission Control visual system with spacecraft artwork and reduced-motion support
 - Markdown replies, tool activity, plans, permissions, MCP manager
 - No product telemetry; workspace data stays on your Mac — see [PRIVACY.md](PRIVACY.md)
 
@@ -121,6 +123,7 @@ Grok Build Desktop 把官方 Grok Build CLI 变成可用的桌面编程工作区
 - 多会话 ACP，支持崩溃恢复与事件回放
 - Git 项目自动 worktree，脏工作区需显式选择策略
 - Plan / Agent / Goal 模式、推理强度、模型选择、上下文用量
+- 原创航天任务控制台视觉、飞行器背景与减少动态效果支持
 - Markdown 回复、工具活动、计划审批、权限确认、MCP 管理
 - 无产品遥测，工作区数据留在本机 — 见 [PRIVACY.md](PRIVACY.md)
 
