@@ -62,7 +62,7 @@ export type ChatBlock =
       type: "user";
       id: string;
       text: string;
-      delivery?: "pending" | "sent" | "failed";
+      delivery?: "pending" | "queued" | "sent" | "failed";
       at?: string;
     }
   | { type: "assistant"; id: string; text: string; at?: string }

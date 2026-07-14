@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyComposerDraft } from "../../contracts";
@@ -374,6 +374,77 @@ describe("useDesktopController", () => {
     });
     expect(useAppStore.getState().sessions["cancel-local"]?.busy).toBe(false);
     expect(useAppStore.getState().sessions["cancel-local"]?.summary.runState).toBe("cancelled");
+  });
+
+  it("keeps a queued follow-up visible and the task busy until the active turn settles", async () => {
+    const summary: SessionSummary = {
+      sessionId: "queued-local",
+      connectionId: "connection",
+      remoteSessionId: "remote",
+      workspaceRoot: "/repo",
+      title: "Queued task",
+      createdAt: "now",
+      updatedAt: "now",
+      runState: "idle",
+      model: "grok-build",
+      mode: "agent",
+      alwaysApprove: false,
+      sandbox: "workspace",
+    };
+    const resolvers: Array<(value: unknown) => void> = [];
+    const sendPrompt = vi.fn().mockImplementation(
+      () => new Promise<unknown>((resolve) => resolvers.push(resolve)),
+    );
+    useAppStore.setState({
+      sessions: { "queued-local": runtime(summary) },
+      sessionOrder: ["queued-local"],
+      activeSessionId: "queued-local",
+      status: { running: true, connectionId: "connection", sessionId: "remote" },
+    });
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      sendPrompt,
+      upsertSession: vi.fn().mockResolvedValue(undefined),
+      saveDraft: vi.fn().mockResolvedValue(undefined),
+      prepareAttachments: vi.fn().mockResolvedValue([]),
+      appendCachedEvent: vi.fn().mockResolvedValue(undefined),
+    };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+
+    let first!: Promise<void>;
+    await act(async () => {
+      first = result.current.send("Inspect the active task.", [], "agent");
+    });
+    await waitFor(() => expect(sendPrompt).toHaveBeenCalledTimes(1));
+
+    let followUp!: Promise<void>;
+    await act(async () => {
+      followUp = result.current.send("Then run the focused verification.", [], "agent");
+    });
+    await waitFor(() => expect(sendPrompt).toHaveBeenCalledTimes(2));
+
+    const queuedBlock = useAppStore.getState().sessions["queued-local"]?.blocks
+      .find((block) => block.type === "user" && block.text.startsWith("Then run"));
+    expect(queuedBlock).toMatchObject({ delivery: "queued" });
+    expect(useAppStore.getState().sessions["queued-local"]?.busy).toBe(true);
+
+    await act(async () => {
+      resolvers[1]?.({});
+      await followUp;
+    });
+    expect(queuedBlock && useAppStore.getState().sessions["queued-local"]?.blocks
+      .find((block) => block.id === queuedBlock.id)).toMatchObject({ delivery: "sent" });
+    expect(useAppStore.getState().sessions["queued-local"]?.busy).toBe(true);
+
+    await act(async () => {
+      resolvers[0]?.({});
+      await first;
+    });
+    expect(useAppStore.getState().sessions["queued-local"]?.busy).toBe(false);
+    expect(useAppStore.getState().sessions["queued-local"]?.summary.runState).toBe("idle");
   });
 
   it("ignores a premature cancel while reconnecting so the in-flight send can finish", async () => {

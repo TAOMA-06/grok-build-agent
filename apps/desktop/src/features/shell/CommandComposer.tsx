@@ -348,7 +348,25 @@ export function CommandComposer({
     forceMessage?: boolean;
     skipPrivacyReview?: boolean;
   } = {}) {
-    if (busy || connecting || submittingRef.current || (!submittedText.trim() && attachments.length === 0)) return;
+    const emptySubmission = !submittedText.trim() && attachments.length === 0;
+    // Match the CLI's interject gesture: after queueing a follow-up, a second
+    // Enter on an empty composer asks the runtime to stop the current turn so
+    // it can promote the queued message. This also covers the brief period
+    // while the queue request itself is still being acknowledged.
+    if (submittingRef.current) {
+      if (busy && emptySubmission) await onCancel();
+      return;
+    }
+    if (busy && emptySubmission && currentSession?.blocks.some(
+      (block) => block.type === "user" && block.delivery === "queued",
+    )) {
+      await onCancel();
+      return;
+    }
+    // Grok Build can queue a follow-up while a turn is waiting on tools. Keep
+    // the connect gate (there is no remote session yet), but don't turn the
+    // running-state into a dead input field.
+    if (connecting || emptySubmission) return;
     const catalog = buildCommandCatalog(
       currentSession?.availableCommands ?? [],
       capabilitiesQuery.data?.skills ?? [],
@@ -725,21 +743,24 @@ export function CommandComposer({
           </div>
         </div>
 
-        {stopArmed ? (
-          <button type="button" className="gb-send stop" aria-label={t.stopGrok} onClick={() => void onCancel()}>
-            <Square size={12} fill="currentColor" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            className={`gb-send${draft.trim() || attachments.length > 0 ? " ready" : ""}`}
-            aria-label={t.sendToGrok}
-            disabled={busy || connecting || (!draft.trim() && attachments.length === 0)}
-            onClick={() => void submit()}
-          >
-            <Rocket size={15} strokeWidth={2.15} />
-          </button>
-        )}
+        <div className="gb-composer-send-actions">
+          {(!stopArmed || draft.trim() || attachments.length > 0) && (
+            <button
+              type="button"
+              className={`gb-send${draft.trim() || attachments.length > 0 ? " ready" : ""}${busy ? " queue" : ""}`}
+              aria-label={busy ? t.queueToGrok : t.sendToGrok}
+              disabled={connecting || (!draft.trim() && attachments.length === 0)}
+              onClick={() => void submit()}
+            >
+              <Rocket size={15} strokeWidth={2.15} />
+            </button>
+          )}
+          {stopArmed && (
+            <button type="button" className="gb-send stop" aria-label={t.stopGrok} onClick={() => void onCancel()}>
+              <Square size={12} fill="currentColor" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

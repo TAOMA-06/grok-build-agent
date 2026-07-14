@@ -266,6 +266,14 @@ export const mockDesktopBridge: DesktopBridge = {
       rules: [
         { id: "project-rules", name: "Project rules", source: "project", enabled: true },
       ],
+      externalCompat: {
+        remoteSettingsLoaded: false,
+        cells: [
+          { vendor: "cursor", surface: "sessions", enabled: true, source: "default" },
+          { vendor: "claude", surface: "sessions", enabled: true, source: "default" },
+          { vendor: "codex", surface: "sessions", enabled: true, source: "default" },
+        ],
+      },
       raw: null,
     };
   },

@@ -95,10 +95,12 @@ export function useDesktopController(
   } | null>(null);
   /** Bumped on cancel so an in-flight send cannot re-busy or overwrite cancelled state. */
   const cancelEpochRef = useRef(0);
-  /** True only while sendPrompt is in flight — cancelPrompt is meaningful then. */
-  const promptInFlightRef = useRef(false);
-  /** performance.now() when the active send marked busy — gates premature cancel. */
-  const sendBusyAtRef = useRef<number | null>(null);
+  /** Active ACP dispatches by local task. A follow-up can be queued while a turn runs. */
+  const promptInFlightBySessionRef = useRef(new Map<string, number>());
+  /** Keeps a task visibly busy until every accepted prompt settles. */
+  const submissionsInFlightBySessionRef = useRef(new Map<string, number>());
+  /** `performance.now()` when a task first became busy — gates premature cancel. */
+  const sendBusyAtBySessionRef = useRef(new Map<string, number>());
 
   const chooseWorkspace = useCallback(async () => {
     const path = await bridge.chooseDirectory();
@@ -263,6 +265,7 @@ export function useDesktopController(
       const session = useAppStore.getState().sessions[sessionId];
       if (!session) return;
       const firstTurn = session.blocks.length === 0;
+      const queuedBehindActiveTurn = session.busy;
       const displayText = text || `[${attachments.length} attachments]`;
       const previousMode = session.summary.mode ?? "agent";
       const enteringMode = firstTurn || previousMode !== mode;
@@ -293,12 +296,16 @@ export function useDesktopController(
           id: messageBlockId,
           type: "user",
           text: displayText,
-          delivery: "pending",
+          delivery: queuedBehindActiveTurn ? "queued" : "pending",
           at: new Date().toISOString(),
         });
       }
+      const submissionCount = submissionsInFlightBySessionRef.current.get(sessionId) ?? 0;
+      submissionsInFlightBySessionRef.current.set(sessionId, submissionCount + 1);
+      if (submissionCount === 0) {
+        sendBusyAtBySessionRef.current.set(sessionId, performance.now());
+      }
       state.setSessionBusy(sessionId, true);
-      sendBusyAtRef.current = performance.now();
       state.setFailedSubmission(sessionId, null);
       state.setSessionDraft(sessionId, "");
       state.setSessionAttachments(sessionId, []);
@@ -355,12 +362,14 @@ export function useDesktopController(
           attachments.filter((attachment) => attachment.source === "path"),
         );
         if (wasCancelled()) return;
-        // Handed off to the agent — stop showing "sending" while high-effort
-        // reasoning may still stream for a long time.
-        state.updateBlock(sessionId, messageBlockId, {
-          type: "user",
-          delivery: "sent",
-        });
+        // The active turn was already handed to Grok, while follow-ups remain
+        // visibly queued until the runtime acknowledges them.
+        if (!queuedBehindActiveTurn) {
+          state.updateBlock(sessionId, messageBlockId, {
+            type: "user",
+            delivery: "sent",
+          });
+        }
         // Persist the user turn before crossing into the Runtime. This keeps a
         // crash-safe transcript in causal order and matches the dispatch rule:
         // durable intent first, execution second.
@@ -372,7 +381,8 @@ export function useDesktopController(
           payload: { text: displayText },
         });
         if (wasCancelled()) return;
-        promptInFlightRef.current = true;
+        const promptCount = promptInFlightBySessionRef.current.get(sessionId) ?? 0;
+        promptInFlightBySessionRef.current.set(sessionId, promptCount + 1);
         try {
           await bridge.sendPrompt(
             target.connectionId,
@@ -388,7 +398,18 @@ export function useDesktopController(
             },
           );
         } finally {
-          promptInFlightRef.current = false;
+          const remainingPrompts = Math.max(
+            0,
+            (promptInFlightBySessionRef.current.get(sessionId) ?? 0) - 1,
+          );
+          if (remainingPrompts === 0) promptInFlightBySessionRef.current.delete(sessionId);
+          else promptInFlightBySessionRef.current.set(sessionId, remainingPrompts);
+        }
+        if (!wasCancelled() && queuedBehindActiveTurn) {
+          state.updateBlock(sessionId, messageBlockId, {
+            type: "user",
+            delivery: "sent",
+          });
         }
         if (wasCancelled()) return;
         if (enteringMode && target.connectionId && target.remoteSessionId) {
@@ -405,7 +426,9 @@ export function useDesktopController(
           });
         }
         const complete = useAppStore.getState().sessions[sessionId]?.summary;
-        if (complete && !wasCancelled()) {
+        const hasOtherSubmissions =
+          (submissionsInFlightBySessionRef.current.get(sessionId) ?? 0) > 1;
+        if (complete && !wasCancelled() && !hasOtherSubmissions) {
           const next = { ...complete, runState: "idle" as const };
           useAppStore.getState().updateSummary(sessionId, next);
           await bridge.upsertSession(next);
@@ -438,11 +461,16 @@ export function useDesktopController(
         });
         state.updateSummary(sessionId, { runState: "error" });
       } finally {
-        if (!wasCancelled()) {
-          state.setSessionBusy(sessionId, false);
-        }
-        if (sendBusyAtRef.current != null && cancelEpochRef.current === epochAtStart) {
-          sendBusyAtRef.current = null;
+        const remainingSubmissions = Math.max(
+          0,
+          (submissionsInFlightBySessionRef.current.get(sessionId) ?? 0) - 1,
+        );
+        if (remainingSubmissions === 0) {
+          submissionsInFlightBySessionRef.current.delete(sessionId);
+          sendBusyAtBySessionRef.current.delete(sessionId);
+          if (!wasCancelled()) state.setSessionBusy(sessionId, false);
+        } else {
+          submissionsInFlightBySessionRef.current.set(sessionId, remainingSubmissions);
         }
       }
     },
@@ -479,10 +507,11 @@ export function useDesktopController(
       && summary?.connectionId
       && state.status.connectionId === summary.connectionId,
     );
-    const promptInFlight = promptInFlightRef.current;
-    const busyFor = sendBusyAtRef.current == null
+    const promptInFlight = (promptInFlightBySessionRef.current.get(sessionId) ?? 0) > 0;
+    const busyAt = sendBusyAtBySessionRef.current.get(sessionId);
+    const busyFor = busyAt == null
       ? Number.POSITIVE_INFINITY
-      : performance.now() - sendBusyAtRef.current;
+      : performance.now() - busyAt;
     // Match Stop arming: ignore cancel that arrives before Stop is clickable,
     // unless a live prompt/connection already makes cancel meaningful.
     if (!promptInFlight && !connectionIsLive && busyFor < STOP_ARM_MS) {
@@ -490,7 +519,8 @@ export function useDesktopController(
     }
 
     cancelEpochRef.current += 1;
-    sendBusyAtRef.current = null;
+    sendBusyAtBySessionRef.current.delete(sessionId);
+    submissionsInFlightBySessionRef.current.delete(sessionId);
     const shouldCancelPrompt = promptInFlight || connectionIsLive;
 
     // Clear busy/connecting immediately so Stop never leaves the UI stuck,
@@ -499,7 +529,7 @@ export function useDesktopController(
     setConnectingSessionId((current) => (current === sessionId ? null : current));
     state.updateSummary(sessionId, { runState: "cancelled" });
     const pendingUsers = state.sessions[sessionId]?.blocks.filter(
-      (block) => block.type === "user" && block.delivery === "pending",
+      (block) => block.type === "user" && (block.delivery === "pending" || block.delivery === "queued"),
     ) ?? [];
     for (const pendingUser of pendingUsers) {
       state.updateBlock(sessionId, pendingUser.id, {
@@ -511,7 +541,7 @@ export function useDesktopController(
     // Skip cancelPrompt when nothing is live/in-flight — a Send→Stop race with
     // stale connection ids otherwise surfaces "agent is not running".
     if (!shouldCancelPrompt || !summary?.connectionId || !summary.remoteSessionId) {
-      promptInFlightRef.current = false;
+      promptInFlightBySessionRef.current.delete(sessionId);
       return;
     }
     try {
@@ -526,7 +556,7 @@ export function useDesktopController(
         text: translate("cancelFailed", { reason }),
       });
     } finally {
-      promptInFlightRef.current = false;
+      promptInFlightBySessionRef.current.delete(sessionId);
     }
   }, [bridge]);
 

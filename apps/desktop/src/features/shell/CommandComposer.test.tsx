@@ -112,13 +112,44 @@ describe("CommandComposer", () => {
     const onCancel = vi.fn().mockResolvedValue(undefined);
     renderComposer({ busy: true, onCancel });
     expect(screen.queryByRole("button", { name: "Stop Grok" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Send to Grok" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Send to Grok" }));
+    expect(screen.getByRole("button", { name: "Queue message for Grok" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Queue message for Grok" }));
     expect(onCancel).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(STOP_ARM_MS);
     fireEvent.click(screen.getByRole("button", { name: "Stop Grok" }));
     expect(onCancel).toHaveBeenCalled();
     vi.useRealTimers();
+  });
+
+  it("queues a follow-up while Grok is working", async () => {
+    const { onSend } = renderComposer({ busy: true });
+    const textarea = screen.getByRole("textbox", { name: "Message Grok" });
+    fireEvent.change(textarea, { target: { value: "After the current tool finishes, run the focused check." } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(
+      "After the current tool finishes, run the focused check.",
+      [],
+      "agent",
+    ));
+    expect(screen.getByRole("button", { name: "Queue message for Grok" })).not.toBeDisabled();
+  });
+
+  it("uses a second empty Enter to interject after queueing a follow-up", async () => {
+    let acknowledgeQueue!: () => void;
+    const onSend = vi.fn().mockImplementation(() => new Promise<void>((resolve) => {
+      acknowledgeQueue = resolve;
+    }));
+    const onCancel = vi.fn().mockResolvedValue(undefined);
+    renderComposer({ busy: true, onSend, onCancel });
+    const textarea = screen.getByRole("textbox", { name: "Message Grok" });
+    fireEvent.change(textarea, { target: { value: "Queue this focused follow-up." } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    fireEvent.change(textarea, { target: { value: "" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(onCancel).toHaveBeenCalledTimes(1));
+    acknowledgeQueue();
   });
 
   it("shows Stop while busy and invokes onCancel", async () => {

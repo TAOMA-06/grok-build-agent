@@ -13,6 +13,26 @@ import type { Settings } from "../../types";
 
 export type SettingsTab = "general" | "agent" | "permissions" | "extensions" | "diagnostics" | "about";
 
+function compatibilityVendorLabel(vendor: string) {
+  const normalized = vendor.trim().toLowerCase();
+  if (normalized === "claude") return "Claude Code";
+  if (normalized === "codex") return "Codex";
+  if (normalized === "cursor") return "Cursor";
+  return vendor;
+}
+
+function compatibilitySourceLabel(source?: string | null) {
+  if (source === "default") return t.compatibilityDefault;
+  if (source === "remoteOrDefault") return t.compatibilityRemoteOrDefault;
+  return source || t.compatibilityInherited;
+}
+
+function compatibilityStateLabel(enabled?: boolean | null) {
+  if (enabled === true) return t.compatibilityEnabled;
+  if (enabled === false) return t.compatibilityDisabled;
+  return t.compatibilityInherited;
+}
+
 export function SettingsDialog({
   open,
   onOpenChange,
@@ -58,6 +78,10 @@ export function SettingsDialog({
     queryFn: () => bridge.doctorStatus(),
     enabled: open && tab === "diagnostics",
   });
+  const externalCompatibility = capabilitiesQuery.data?.externalCompat ?? null;
+  const compatibilityVendors = externalCompatibility
+    ? [...new Set(externalCompatibility.cells.map((cell) => cell.vendor.toLowerCase()))]
+    : [];
 
   function patch(next: Partial<Settings>) {
     setDraft((current) => ({ ...current, ...next }));
@@ -147,6 +171,41 @@ export function SettingsDialog({
                           : items.map((item) => <div key={item.id}><span><b>{item.name}</b><small>{item.description || item.source || t.enabled}</small></span><i>{item.source}</i></div>)}
                       </section>
                     ))}
+                    {externalCompatibility && (
+                      <section className="gb-external-compatibility">
+                        <header><strong>{t.externalCompatibility}</strong><span>{externalCompatibility.cells.length}</span></header>
+                        <p>{t.externalCompatibilityHint}</p>
+                        {compatibilityVendors.length > 0 && (
+                          <ul className="gb-compatibility-vendors">
+                            {compatibilityVendors.map((vendor) => {
+                              const cells = externalCompatibility.cells.filter(
+                                (cell) => cell.vendor.toLowerCase() === vendor,
+                              );
+                              const sources = [...new Set(cells.map((cell) => compatibilitySourceLabel(cell.source)))];
+                              return (
+                                <li key={vendor}>
+                                  <div className="gb-compatibility-vendor">
+                                    <span><b>{compatibilityVendorLabel(vendor)}</b><small>{sources.join(" · ")}</small></span>
+                                    <i>{cells.filter((cell) => cell.enabled === true).length}/{cells.length}</i>
+                                  </div>
+                                  <div className="gb-compatibility-chips">
+                                    {cells.map((cell) => (
+                                      <span
+                                        className={`gb-compatibility-chip ${cell.enabled === true ? "enabled" : cell.enabled === false ? "disabled" : "inherited"}`}
+                                        key={`${cell.vendor}:${cell.surface}`}
+                                        title={`${cell.surface} · ${compatibilityStateLabel(cell.enabled)}`}
+                                      >
+                                        {cell.surface}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </section>
+                    )}
                   </div>
                 )}
                 {capabilitiesQuery.isError && <div className="gb-settings-placeholder"><Puzzle size={24} /><strong>{t.capabilitiesUnavailable}</strong><p>{String(capabilitiesQuery.error)}</p></div>}

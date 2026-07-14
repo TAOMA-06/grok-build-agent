@@ -141,6 +141,25 @@ pub struct CapabilityItem {
     pub enabled: Option<bool>,
 }
 
+/// A safe, path-free view of the compatibility matrix returned by
+/// `grok inspect --json`. Keep the raw inspect response available for
+/// diagnostics, but expose only the vendor/surface state to the UI.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalCompatibilityCell {
+    pub vendor: String,
+    pub surface: String,
+    pub enabled: Option<bool>,
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalCompatibilitySnapshot {
+    pub remote_settings_loaded: Option<bool>,
+    pub cells: Vec<ExternalCompatibilityCell>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilitySnapshot {
@@ -150,6 +169,8 @@ pub struct CapabilitySnapshot {
     pub mcp_servers: Vec<CapabilityItem>,
     pub commands: Vec<CapabilityItem>,
     pub rules: Vec<CapabilityItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_compat: Option<ExternalCompatibilitySnapshot>,
     pub raw: serde_json::Value,
 }
 
@@ -218,6 +239,46 @@ fn capability_items(value: &serde_json::Value, keys: &[&str]) -> Vec<CapabilityI
     items
 }
 
+fn external_compatibility_from_snapshot(
+    value: &serde_json::Value,
+) -> Option<ExternalCompatibilitySnapshot> {
+    let compatibility = value
+        .get("externalCompat")
+        .or_else(|| value.get("external_compat"))?;
+    let cells = compatibility
+        .get("cells")
+        .and_then(serde_json::Value::as_array)
+        .map(|cells| {
+            cells
+                .iter()
+                .filter_map(|cell| {
+                    let vendor = cell.get("vendor")?.as_str()?.trim();
+                    let surface = cell.get("surface")?.as_str()?.trim();
+                    if vendor.is_empty() || surface.is_empty() {
+                        return None;
+                    }
+                    Some(ExternalCompatibilityCell {
+                        vendor: vendor.to_string(),
+                        surface: surface.to_string(),
+                        enabled: cell.get("enabled").and_then(serde_json::Value::as_bool),
+                        source: cell
+                            .get("source")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(ExternalCompatibilitySnapshot {
+        remote_settings_loaded: compatibility
+            .get("remoteSettingsLoaded")
+            .or_else(|| compatibility.get("remote_settings_loaded"))
+            .and_then(serde_json::Value::as_bool),
+        cells,
+    })
+}
+
 pub fn inspect_capabilities(
     configured: Option<&str>,
     workspace_root: Option<&str>,
@@ -252,6 +313,7 @@ pub fn inspect_capabilities(
         mcp_servers: capability_items(&raw, &["mcpServers", "mcp_servers", "mcp"]),
         commands,
         rules: capability_items(&raw, &["rules", "instructions"]),
+        external_compat: external_compatibility_from_snapshot(&raw),
         raw,
     })
 }
@@ -1801,6 +1863,39 @@ mod tests {
         assert_eq!(hooks.len(), 1);
         assert_eq!(hooks[0].name, "before-run");
         assert_eq!(hooks[0].enabled, Some(true));
+    }
+
+    #[test]
+    fn external_compatibility_keeps_only_vendor_surface_status() {
+        let inspect = serde_json::json!({
+            "externalCompat": {
+                "remoteSettingsLoaded": true,
+                "cells": [
+                    {
+                        "vendor": "cursor",
+                        "surface": "sessions",
+                        "enabled": true,
+                        "source": "default",
+                        "path": "/private/should-not-be-exposed"
+                    },
+                    {
+                        "vendor": "claude",
+                        "surface": "skills",
+                        "enabled": null,
+                        "source": "remoteOrDefault"
+                    },
+                    { "vendor": "", "surface": "rules", "enabled": false }
+                ]
+            }
+        });
+
+        let compatibility = external_compatibility_from_snapshot(&inspect).unwrap();
+        assert_eq!(compatibility.remote_settings_loaded, Some(true));
+        assert_eq!(compatibility.cells.len(), 2);
+        assert_eq!(compatibility.cells[0].vendor, "cursor");
+        assert_eq!(compatibility.cells[0].surface, "sessions");
+        assert_eq!(compatibility.cells[0].enabled, Some(true));
+        assert_eq!(compatibility.cells[1].enabled, None);
     }
 
     #[cfg(unix)]

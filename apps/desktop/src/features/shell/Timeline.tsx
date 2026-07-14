@@ -114,7 +114,7 @@ export function Timeline({
         if (block.type === "user") {
           return (
             <section key={block.id} className={`gb-turn gb-user-turn ${block.delivery ?? "sent"}`}>
-              <div className="gb-turn-label">{t.you}{block.delivery === "pending" ? ` · ${t.sending}` : block.delivery === "failed" ? ` · ${t.failed}` : ""}<Timestamp at={block.at} /></div>
+              <div className="gb-turn-label">{t.you}{block.delivery === "pending" ? ` · ${t.sending}` : block.delivery === "queued" ? ` · ${t.queued}` : block.delivery === "failed" ? ` · ${t.failed}` : ""}<Timestamp at={block.at} /></div>
               <div className="gb-user-prompt">{block.text}</div>
             </section>
           );

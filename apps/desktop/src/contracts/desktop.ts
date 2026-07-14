@@ -67,6 +67,19 @@ export type CapabilityItem = {
   enabled?: boolean;
 };
 
+/** Read-only status from `grok inspect --json`; no external history is exposed. */
+export type ExternalCompatibilityCell = {
+  vendor: string;
+  surface: string;
+  enabled?: boolean | null;
+  source?: string | null;
+};
+
+export type ExternalCompatibilitySnapshot = {
+  remoteSettingsLoaded?: boolean | null;
+  cells: ExternalCompatibilityCell[];
+};
+
 export type CapabilitySnapshot = {
   skills: CapabilityItem[];
   plugins: CapabilityItem[];
@@ -74,6 +87,7 @@ export type CapabilitySnapshot = {
   mcpServers: CapabilityItem[];
   commands: CapabilityItem[];
   rules: CapabilityItem[];
+  externalCompat?: ExternalCompatibilitySnapshot | null;
   raw?: unknown;
 };
 

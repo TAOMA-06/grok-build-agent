@@ -15,23 +15,27 @@ This is an **unofficial community project** and is **not affiliated with, endors
 
 ---
 
-## Latest compatibility · Grok Build CLI v0.2.99
+## Latest compatibility · Grok Build CLI v0.2.101
 
 Grok Build Desktop now tracks the latest Grok Build CLI workflow with:
 
 - A multiline desktop composer for normal chat-style prompts
 - `PageUp` / `PageDown` transcript scrolling while the composer is focused
 - CLI-aware `/vim-mode` discovery in the command palette when that command is advertised
+- Queued follow-up prompts during a running Grok turn, with an explicit queued state and a separate Stop control
+- A read-only Cursor, Claude Code, and Codex compatibility matrix sourced from `grok inspect --json`; it never imports or transmits third-party sessions
 
 The official Grok Build CLI remains the runtime and authentication owner; this project does not bundle, replace, or emulate it.
 
-### 最新适配 · Grok Build CLI v0.2.99
+### 最新适配 · Grok Build CLI v0.2.101
 
 Grok Build Desktop 已适配最新 Grok Build CLI 工作流，新增：
 
 - 支持多行输入的桌面任务编辑器
 - 输入框聚焦时，可用 `PageUp` / `PageDown` 滚动当前对话
 - 当 CLI 声明支持时，命令面板会提供 `/vim-mode` 快捷入口
+- Grok 运行期间可排队后续消息，时间线会明确显示排队状态，并保留独立的停止控制
+- 通过 `grok inspect --json` 只读显示 Cursor、Claude Code 与 Codex 的兼容性矩阵；不会导入或传输第三方会话
 
 官方 Grok Build CLI 仍负责运行与登录；本项目不会打包、替代或模拟该 CLI。
 
