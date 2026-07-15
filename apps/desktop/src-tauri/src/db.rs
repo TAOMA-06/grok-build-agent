@@ -1771,7 +1771,7 @@ impl Database {
         let conn = self.conn.lock();
         let mut statement = conn.prepare(
             "SELECT manifest_id, task_id, turn_id, token_budget, entries_json, created_at
-             FROM context_manifests WHERE task_id = ?1 ORDER BY created_at DESC",
+             FROM context_manifests WHERE task_id = ?1 ORDER BY created_at DESC, rowid DESC",
         )?;
         let rows = statement.query_map(params![task_id], |row| {
             Ok((

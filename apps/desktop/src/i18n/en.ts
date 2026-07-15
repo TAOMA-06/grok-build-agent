@@ -181,8 +181,8 @@ const enValues = {
   mcpProjectWarn:
     "Project scope writes into the workspace .grok/config.toml. Secrets may be committed if you do not use ${VAR} placeholders. Continue?",
   mcpProjectPath: "Project config path",
-  mcpReloadRequired: "MCP changed — agent reload required",
-  mcpReloadNow: "Reload agent now",
+  mcpReloadRequired: "MCP changed — apply it to a new task to preserve the current task's prompt cache",
+  mcpReloadNow: "Start cached-safe task",
   mcpReloadIdle: "Will apply after the current run finishes",
   mcpStatus: "Status",
   mcpTools: "Tools discovered",

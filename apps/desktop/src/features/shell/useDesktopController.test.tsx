@@ -91,7 +91,12 @@ describe("useDesktopController", () => {
       connectionId: "fresh-connection",
       sessionId: "remote-session",
     });
-    const sendPrompt = vi.fn().mockResolvedValue({});
+    const sendPrompt = vi.fn().mockResolvedValue({
+      usage: {
+        input_tokens: 100,
+        input_tokens_details: { cached_tokens: 82 },
+      },
+    });
     const bridge: DesktopBridge = { ...mockDesktopBridge, startAgent, sendPrompt };
     const { result } = renderHook(
       () => useDesktopController(async () => "clean_head"),
@@ -116,6 +121,8 @@ describe("useDesktopController", () => {
         idempotencyKey: expect.stringMatching(/^prompt:persisted-local:/),
       }),
     );
+    expect(useAppStore.getState().sessions[summary.sessionId]?.contextUsage?.promptCache)
+      .toMatchObject({ promptTokens: 100, cachedTokens: 82, hitRatePercent: 82 });
   });
 
   it("keeps a started task model-pinned and offers a cache-safe fork", async () => {

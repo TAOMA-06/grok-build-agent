@@ -184,8 +184,8 @@ export const zhCN: Translation = {
   mcpProjectWarn:
     "项目作用域会写入工作区 .grok/config.toml。若直接写入密钥，可能被提交到仓库。是否继续？",
   mcpProjectPath: "项目配置路径",
-  mcpReloadRequired: "MCP 已变更 — 需要重新加载 Agent",
-  mcpReloadNow: "立即重新加载",
+  mcpReloadRequired: "MCP 已变更 — 请应用到新任务，以保留当前任务的提示词缓存",
+  mcpReloadNow: "新建缓存安全任务",
   mcpReloadIdle: "当前运行结束后再应用",
   mcpStatus: "状态",
   mcpTools: "已发现工具",

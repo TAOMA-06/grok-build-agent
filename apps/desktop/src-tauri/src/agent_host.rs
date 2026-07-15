@@ -1994,7 +1994,6 @@ fn apply_privacy_guardrails(params: &mut PromptParams) -> Result<(), String> {
 struct FocusPolicy {
     full_budget: u64,
     anchor_budget: u64,
-    refresh_every: usize,
 }
 
 #[derive(Clone)]
@@ -2010,12 +2009,10 @@ fn focus_policy(mode: crate::platform::FocusMode) -> FocusPolicy {
         crate::platform::FocusMode::Economy => FocusPolicy {
             full_budget: 320,
             anchor_budget: 96,
-            refresh_every: 6,
         },
         crate::platform::FocusMode::Balanced => FocusPolicy {
             full_budget: 720,
             anchor_budget: 220,
-            refresh_every: 3,
         },
     }
 }
@@ -2028,6 +2025,23 @@ fn prompt_repeats_task_goal(text: &str, goal: &str) -> bool {
         .unwrap_or(text)
         .trim();
     text == goal.trim()
+}
+
+fn prompt_requests_compaction(text: &str) -> bool {
+    text.split_whitespace().next() == Some("/compact")
+}
+
+fn previous_turn_requests_contract_refresh(manifests: &[crate::platform::ContextManifest]) -> bool {
+    manifests.first().is_some_and(|manifest| {
+        manifest.entries.iter().any(|entry| {
+            entry.kind == "user_instruction"
+                && entry
+                    .metadata
+                    .get("refreshTaskContractNextTurn")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+        })
+    })
 }
 
 fn focus_value(value: &str, privacy_mode: crate::platform::PrivacyMode) -> String {
@@ -2183,13 +2197,17 @@ fn apply_task_context(db: &Database, params: &mut PromptParams) -> Result<(), St
         .map_err(|error| error.to_string())?;
     let policy = focus_policy(params.focus_mode);
     let mut token_budget = policy.full_budget;
+    let mut prompt_metadata = BTreeMap::new();
+    if prompt_requests_compaction(&original_text) {
+        prompt_metadata.insert("refreshTaskContractNextTurn".into(), Value::Bool(true));
+    }
     let mut entries = vec![ContextManifestEntry {
         source: "user:prompt".into(),
         kind: "user_instruction".into(),
         trust: "user_trusted".into(),
         token_estimate: (original_text.chars().count() as u64).div_ceil(4),
         truncated_reason: None,
-        metadata: BTreeMap::new(),
+        metadata: prompt_metadata,
     }];
     let mut preamble = String::new();
 
@@ -2209,20 +2227,21 @@ fn apply_task_context(db: &Database, params: &mut PromptParams) -> Result<(), St
                 .goal
                 .as_deref()
                 .is_some_and(|goal| prompt_repeats_task_goal(&original_text, goal));
+        let refresh_after_compaction = previous_turn_requests_contract_refresh(&previous_manifests);
         let strategy = if initial_goal {
             "initial"
-        } else if prior_contracts.is_empty()
-            || task_was_updated
-            || prior_contracts.len() % policy.refresh_every == 0
-        {
+        } else if prior_contracts.is_empty() || task_was_updated || refresh_after_compaction {
             "full"
         } else {
-            "anchor"
+            // The task contract is already part of the immutable conversation
+            // history. Re-appending even a short anchor creates fresh prompt
+            // tokens on every turn and lowers provider prefix-cache efficiency.
+            "history"
         };
-        let focus = if strategy == "initial" {
+        let focus = if matches!(strategy, "initial" | "history") {
             TaskFocus {
                 content: String::new(),
-                token_budget: policy.full_budget,
+                token_budget: 0,
                 strategy,
                 truncated: false,
             }
@@ -2378,7 +2397,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_profiles_bound_repeated_task_contracts() {
+    fn focus_profiles_bound_task_contract_rendering() {
         let task = crate::platform::TaskDefinition {
             task_id: "t1".into(),
             workspace_id: "w1".into(),
@@ -2413,6 +2432,77 @@ mod tests {
             .content
             .contains("Acceptance: The prompt is redacted before dispatch"));
         assert!(full.content.contains("Allowed path: apps/desktop"));
+    }
+
+    fn task_context_test_params(task_id: &str, turn_id: &str, text: &str) -> PromptParams {
+        PromptParams {
+            connection_id: "c1".into(),
+            session_id: "s1".into(),
+            task_id: task_id.into(),
+            turn_id: turn_id.into(),
+            idempotency_key: format!("prompt:{turn_id}"),
+            focus_mode: crate::platform::FocusMode::Balanced,
+            privacy_mode: crate::platform::PrivacyMode::Strict,
+            text: text.into(),
+            content: vec![],
+        }
+    }
+
+    #[test]
+    fn task_contract_is_not_reinjected_until_a_compaction_boundary() {
+        let path = std::env::temp_dir().join(format!(
+            "gbd-focus-cache-{}-{}.sqlite",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let db = Database::open_path(&path).unwrap();
+        let task = crate::platform::TaskDefinition {
+            task_id: "cache-task".into(),
+            workspace_id: "workspace".into(),
+            state: crate::platform::TaskState::Running,
+            goal: Some("Raise prompt cache efficiency".into()),
+            constraints: vec!["Keep the prefix stable".into()],
+            acceptance: vec!["No repeated contract tokens".into()],
+            allowed_paths: vec!["apps/desktop".into()],
+            verification_commands: vec![],
+            created_at: "2026-07-15T00:00:00Z".into(),
+            updated_at: "2026-07-15T00:00:00Z".into(),
+        };
+        db.upsert_task(&task).unwrap();
+
+        let mut first = task_context_test_params(&task.task_id, "turn-1", "Start the work");
+        apply_task_context(&db, &mut first).unwrap();
+        assert!(first.text.starts_with("<platform_task_contract>"));
+
+        let mut continued = task_context_test_params(&task.task_id, "turn-2", "Continue");
+        apply_task_context(&db, &mut continued).unwrap();
+        assert_eq!(continued.text, "Continue");
+        let latest = db.list_context_manifests(&task.task_id).unwrap();
+        let contract = latest[0]
+            .entries
+            .iter()
+            .find(|entry| entry.kind == "task_contract")
+            .unwrap();
+        assert_eq!(contract.token_estimate, 0);
+        assert_eq!(
+            contract
+                .metadata
+                .get("strategy")
+                .and_then(serde_json::Value::as_str),
+            Some("history")
+        );
+
+        let mut compact = task_context_test_params(&task.task_id, "turn-3", "/compact");
+        apply_task_context(&db, &mut compact).unwrap();
+        assert_eq!(compact.text, "/compact");
+
+        let mut after_compact =
+            task_context_test_params(&task.task_id, "turn-4", "Continue after compacting");
+        apply_task_context(&db, &mut after_compact).unwrap();
+        assert!(after_compact.text.starts_with("<platform_task_contract>"));
+
+        drop(db);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

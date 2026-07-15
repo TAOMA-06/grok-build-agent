@@ -426,7 +426,12 @@ export function AppShell() {
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         initialTab={settingsTab}
-        onReloadAgent={controller.reloadActiveAgent}
+        onReloadAgent={async () => {
+          // Tool definitions are part of the provider-cached prefix. Apply MCP
+          // changes to a fresh task so an existing history keeps its warm cache.
+          const sessionId = await controller.createThread();
+          if (sessionId) await controller.reloadActiveAgent();
+        }}
       />
       <DirtyWorktreeDialog open={dirtyDialogOpen} onChoose={resolveDirtyPolicy} />
       <Dialog.Root open={commandOpen} onOpenChange={setCommandOpen}>

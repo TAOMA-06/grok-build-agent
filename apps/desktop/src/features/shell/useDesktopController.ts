@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { buildPromptContent } from "../../contracts";
 import { mergeSelectableModels, resolveEffortForModel } from "../../contracts/model";
+import { extractContextUsage } from "../../acp/client";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore } from "../../store";
 import { t, translate } from "../../i18n";
@@ -385,7 +386,7 @@ export function useDesktopController(
         const promptCount = promptInFlightBySessionRef.current.get(sessionId) ?? 0;
         promptInFlightBySessionRef.current.set(sessionId, promptCount + 1);
         try {
-          await bridge.sendPrompt(
+          const promptResponse = await bridge.sendPrompt(
             target.connectionId,
             target.remoteSessionId,
             promptText,
@@ -398,6 +399,10 @@ export function useDesktopController(
               privacyMode: state.settings.privacyMode,
             },
           );
+          const finalUsage = extractContextUsage(promptResponse);
+          if (finalUsage) {
+            useAppStore.getState().setSessionContextUsage(sessionId, finalUsage);
+          }
         } finally {
           const remainingPrompts = Math.max(
             0,

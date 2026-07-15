@@ -1,7 +1,7 @@
 {
   "name": "grok-build-desktop",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "vitest run src/e2e",
-    "check": "tsc --noEmit && vitest run && npm run build",
+    "benchmark:cache": "node scripts/cache-hit-gate.mjs",
+    "benchmark:cache:test": "node scripts/cache-hit-gate.mjs --self-test",
+    "check": "tsc --noEmit && vitest run && npm run benchmark:cache:test && npm run build",
     "release:check": "node scripts/release-safety-check.mjs",
     "tauri": "tauri",
     "app:dev": "GROK_BUILD_IN_PROCESS_HOST=1 tauri dev",

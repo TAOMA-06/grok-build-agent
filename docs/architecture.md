@@ -51,6 +51,8 @@ Protocol order:
 
 Internal filesystem and terminal requests are handled by the host with workspace guards. Only genuine permission requests reach the renderer. A process exit fails pending RPCs, retains local history and exposes a retryable task error.
 
+Provider cache policy keeps the model and tool schema stable for the lifetime of a started task. Task contracts are append-only: the host injects one full contract, records later turns as `history` with zero repeated contract tokens, and refreshes only after a task-definition change or explicit compaction. MCP changes restart into a new task rather than changing the tool prefix of a warm history. Cache usage is accepted from both ACP notifications and the final `session/prompt` response.
+
 ## Persistence
 
 Settings schema v3 stores user-facing defaults, compact/multiline/timestamp preferences and the system/English/Simplified Chinese locale, while migrating legacy `alwaysApprove`, `useHarness`, model and cwd fields. SQLite schema v4 keeps the v3 session projection for UI compatibility and adds the immutable control-plane event store, task/turn records, prompt dispatch journal, projection checkpoints, tool/permission/artifact/runtime/worktree/job/audit records, context manifests, memory candidates and blob references.
