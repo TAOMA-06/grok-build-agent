@@ -288,6 +288,38 @@ pub fn connection_key_from_config(config: &StartConfig, workspace: PathBuf) -> C
         power_profile: config.power_profile,
         model_id,
         reasoning_effort,
+        privacy_mode: match config.privacy_mode {
+            crate::platform::PrivacyMode::Strict => "strict".into(),
+            crate::platform::PrivacyMode::Standard => "standard".into(),
+        },
+    }
+}
+
+/// Strict privacy is enforced per spawned CLI process, never by editing a
+/// user's global Grok configuration. Each override maps to a documented CLI
+/// environment control and is deliberately absent in Standard mode.
+fn apply_strict_privacy_environment(cmd: &mut Command, privacy_mode: crate::platform::PrivacyMode) {
+    if privacy_mode != crate::platform::PrivacyMode::Strict {
+        return;
+    }
+
+    for (name, value) in [
+        ("GROK_MEMORY", "0"),
+        ("GROK_WEB_FETCH", "0"),
+        ("GROK_RESPECT_GITIGNORE", "1"),
+        ("GROK_CRASH_HANDLER", "0"),
+        ("GROK_CURSOR_SKILLS_ENABLED", "0"),
+        ("GROK_CURSOR_RULES_ENABLED", "0"),
+        ("GROK_CURSOR_AGENTS_ENABLED", "0"),
+        ("GROK_CURSOR_MCPS_ENABLED", "0"),
+        ("GROK_CURSOR_HOOKS_ENABLED", "0"),
+        ("GROK_CLAUDE_SKILLS_ENABLED", "0"),
+        ("GROK_CLAUDE_RULES_ENABLED", "0"),
+        ("GROK_CLAUDE_AGENTS_ENABLED", "0"),
+        ("GROK_CLAUDE_MCPS_ENABLED", "0"),
+        ("GROK_CLAUDE_HOOKS_ENABLED", "0"),
+    ] {
+        cmd.env(name, value);
     }
 }
 
@@ -440,6 +472,7 @@ pub async fn spawn_connection(
         SandboxMode::Strict => "strict",
     };
     cmd.env("GROK_SANDBOX", sandbox);
+    apply_strict_privacy_environment(&mut cmd, config.privacy_mode);
 
     let mut child = cmd
         .spawn()
@@ -843,4 +876,47 @@ fn emit_error(bus: &SharedEventBus, conn: &ConnectionInner, message: String) {
 /// Re-export empty snapshot helper for pool.
 pub fn empty_snapshot() -> RuntimeSnapshot {
     crate::contracts::empty_runtime_snapshot(iso_now())
+}
+
+#[cfg(test)]
+mod privacy_tests {
+    use super::*;
+
+    fn env_value(command: &Command, name: &str) -> Option<String> {
+        command
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| key.to_string_lossy() == name)
+            .and_then(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()))
+    }
+
+    #[test]
+    fn strict_privacy_sets_documented_cli_controls_without_global_config_writes() {
+        let mut command = Command::new("grok");
+        apply_strict_privacy_environment(&mut command, crate::platform::PrivacyMode::Strict);
+
+        assert_eq!(env_value(&command, "GROK_MEMORY"), Some("0".into()));
+        assert_eq!(env_value(&command, "GROK_WEB_FETCH"), Some("0".into()));
+        assert_eq!(
+            env_value(&command, "GROK_RESPECT_GITIGNORE"),
+            Some("1".into())
+        );
+        assert_eq!(
+            env_value(&command, "GROK_CURSOR_MCPS_ENABLED"),
+            Some("0".into())
+        );
+        assert_eq!(
+            env_value(&command, "GROK_CLAUDE_AGENTS_ENABLED"),
+            Some("0".into())
+        );
+    }
+
+    #[test]
+    fn standard_privacy_preserves_existing_cli_environment() {
+        let mut command = Command::new("grok");
+        apply_strict_privacy_environment(&mut command, crate::platform::PrivacyMode::Standard);
+
+        assert_eq!(env_value(&command, "GROK_MEMORY"), None);
+        assert_eq!(env_value(&command, "GROK_WEB_FETCH"), None);
+    }
 }

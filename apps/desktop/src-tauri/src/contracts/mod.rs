@@ -44,6 +44,14 @@ pub struct ConnectionKey {
     /// Reasoning effort used at process spawn (`--reasoning-effort`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Strict and Standard processes must never be pooled together because
+    /// the CLI reads privacy controls only at process startup.
+    #[serde(default = "default_connection_privacy_mode")]
+    pub privacy_mode: String,
+}
+
+fn default_connection_privacy_mode() -> String {
+    "strict".into()
 }
 
 impl ConnectionKey {
@@ -76,9 +84,14 @@ impl ConnectionKey {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .unwrap_or("default");
+        let privacy = if self.privacy_mode.eq_ignore_ascii_case("standard") {
+            "standard"
+        } else {
+            "strict"
+        };
         format!(
-            "{}::{}::{}::{approval}::{model}::{effort}",
-            self.workspace_root, sandbox, profile
+            "{}::{}::{}::{privacy}::{approval}::{model}::{effort}",
+            self.workspace_root, sandbox, profile,
         )
     }
 }
@@ -774,10 +787,11 @@ mod tests {
             power_profile: None,
             model_id: None,
             reasoning_effort: None,
+            privacy_mode: "strict".into(),
         };
         assert_eq!(
             key.key_string(),
-            "/Users/me/proj::workspace::off::ask::default::default"
+            "/Users/me/proj::workspace::off::strict::ask::default::default"
         );
         let with_model = ConnectionKey {
             model_id: Some("grok-4.5".into()),
@@ -786,7 +800,7 @@ mod tests {
         };
         assert_eq!(
             with_model.key_string(),
-            "/Users/me/proj::workspace::off::ask::grok-4.5::high"
+            "/Users/me/proj::workspace::off::strict::ask::grok-4.5::high"
         );
     }
 
@@ -802,6 +816,7 @@ mod tests {
                     power_profile: Some(PowerProfile::Balanced),
                     model_id: Some("grok-build".into()),
                     reasoning_effort: None,
+                    privacy_mode: "strict".into(),
                 },
                 state: ConnectionState::Ready,
                 grok_path: Some("/usr/local/bin/grok".into()),

@@ -55,6 +55,9 @@ apps/desktop/src-tauri/WixTools/
 .cursorrules
 .claude/
 .codex/
+.agents/
+.gemini/
+.grok/
 /AGENTS.md
 /CLAUDE.md
 /GEMINI.md

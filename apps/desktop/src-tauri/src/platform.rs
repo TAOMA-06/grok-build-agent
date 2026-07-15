@@ -329,6 +329,8 @@ pub struct RuntimeLaunchConfig {
     pub model: Option<String>,
     pub sandbox: String,
     #[serde(default)]
+    pub privacy_mode: PrivacyMode,
+    #[serde(default)]
     pub approval_policy: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rules: Option<String>,

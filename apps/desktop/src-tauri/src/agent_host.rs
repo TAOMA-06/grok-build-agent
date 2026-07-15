@@ -2161,7 +2161,9 @@ fn render_task_focus(
 }
 
 fn task_has_focus(task: &crate::platform::TaskDefinition) -> bool {
-    task.goal.as_deref().is_some_and(|goal| !goal.trim().is_empty())
+    task.goal
+        .as_deref()
+        .is_some_and(|goal| !goal.trim().is_empty())
         || !task.constraints.is_empty()
         || !task.acceptance.is_empty()
         || !task.allowed_paths.is_empty()
@@ -2237,7 +2239,10 @@ fn apply_task_context(db: &Database, params: &mut PromptParams) -> Result<(), St
                 crate::platform::FocusMode::Balanced => "balanced".into(),
             }),
         );
-        metadata.insert("taskUpdatedAt".into(), Value::String(task.updated_at.clone()));
+        metadata.insert(
+            "taskUpdatedAt".into(),
+            Value::String(task.updated_at.clone()),
+        );
         entries.push(ContextManifestEntry {
             source: format!("task:{}", task.task_id),
             kind: "task_contract".into(),
@@ -2400,14 +2405,20 @@ mod tests {
             crate::platform::PrivacyMode::Strict,
         );
         assert_eq!(anchor.token_budget, 96);
-        assert!(anchor.content.contains("Goal: Ship a focused privacy control"));
+        assert!(anchor
+            .content
+            .contains("Goal: Ship a focused privacy control"));
         assert_eq!(full.token_budget, 720);
-        assert!(full.content.contains("Acceptance: The prompt is redacted before dispatch"));
+        assert!(full
+            .content
+            .contains("Acceptance: The prompt is redacted before dispatch"));
         assert!(full.content.contains("Allowed path: apps/desktop"));
     }
 
     #[test]
     fn strict_host_guardrail_redacts_content_before_dispatch() {
+        let xai_token = ["xai-", "abcdefghijklmnop"].concat();
+        let github_token = ["ghp_", "1234567890abcdefghijkl"].concat();
         let mut params = PromptParams {
             connection_id: "c1".into(),
             session_id: "s1".into(),
@@ -2416,17 +2427,17 @@ mod tests {
             idempotency_key: "key1".into(),
             focus_mode: crate::platform::FocusMode::Balanced,
             privacy_mode: crate::platform::PrivacyMode::Strict,
-            text: "use xai-abcdefghijklmnop".into(),
+            text: format!("use {xai_token}"),
             content: vec![crate::contracts::PromptContent::Text {
-                text: "and ghp_1234567890abcdefghijkl".into(),
+                text: format!("and {github_token}"),
             }],
         };
 
         apply_privacy_guardrails(&mut params).unwrap();
-        assert!(!params.text.contains("abcdefghijklmnop"));
+        assert!(!params.text.contains(&xai_token));
         match &params.content[0] {
             crate::contracts::PromptContent::Text { text } => {
-                assert!(!text.contains("1234567890abcdefghijkl"));
+                assert!(!text.contains(&github_token));
             }
             _ => panic!("expected text prompt content"),
         }

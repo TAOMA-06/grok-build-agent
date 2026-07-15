@@ -66,6 +66,9 @@ pub struct StartConfig {
     pub use_harness: bool,
     #[serde(default)]
     pub sandbox: Option<SandboxMode>,
+    /// Local desktop privacy policy applied to the spawned Grok process.
+    #[serde(default)]
+    pub privacy_mode: crate::platform::PrivacyMode,
     #[serde(default)]
     pub power_profile: Option<PowerProfile>,
     /// Existing Grok session to restore instead of creating a new one.
@@ -184,6 +187,7 @@ mod tests {
             agent_profile: None,
             use_harness: false,
             sandbox: Some(SandboxMode::None),
+            privacy_mode: crate::platform::PrivacyMode::Strict,
             power_profile: None,
             resume_session_id: None,
         }

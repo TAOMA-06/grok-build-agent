@@ -2,7 +2,7 @@
  * Runtime pool contracts shared by UI and host.
  *
  * A RuntimePool key groups one ACP child process by:
- * workspace root + sandbox mode + power profile + model id.
+ * workspace root + sandbox mode + privacy policy + power profile + model id.
  */
 
 import type { SessionModelState } from "./model";
@@ -35,6 +35,8 @@ export type ConnectionKey = {
    * Included so live-switch failures do not reuse a process with the wrong effort.
    */
   reasoningEffort?: string | null;
+  /** Process-level Grok privacy policy; prevents reuse across different CLI controls. */
+  privacyMode?: import("./settings").PrivacyMode;
 };
 
 export type ConnectionId = string;
@@ -106,6 +108,8 @@ export type StartConfig = {
   agentProfile?: string | null;
   useHarness: boolean;
   sandbox?: SandboxMode;
+  /** Strict is the default and applies local CLI privacy controls at process start. */
+  privacyMode?: import("./settings").PrivacyMode;
   powerProfile?: PowerProfile;
   resumeSessionId?: string | null;
 };
@@ -160,7 +164,8 @@ export function connectionKeyString(key: ConnectionKey): string {
   const profile = key.powerProfile ?? "off";
   const model = key.modelId?.trim() || "default";
   const effort = key.reasoningEffort?.trim() || "default";
-  return `${key.workspaceRoot}::${key.sandbox}::${profile}::${key.alwaysApprove ? "approve" : "ask"}::${model}::${effort}`;
+  const privacy = key.privacyMode === "standard" ? "standard" : "strict";
+  return `${key.workspaceRoot}::${key.sandbox}::${profile}::${privacy}::${key.alwaysApprove ? "approve" : "ask"}::${model}::${effort}`;
 }
 
 export function emptyRuntimeSnapshot(now = new Date().toISOString()): RuntimeSnapshot {

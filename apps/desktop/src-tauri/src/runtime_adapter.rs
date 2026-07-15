@@ -43,6 +43,7 @@ impl GrokAcpAdapter {
                 "strict" => SandboxMode::Strict,
                 _ => SandboxMode::Workspace,
             }),
+            privacy_mode: config.privacy_mode,
             power_profile: None,
             resume_session_id: resume,
         }
@@ -249,6 +250,7 @@ mod tests {
                 workspace_root: workspace.to_string_lossy().into(),
                 model: None,
                 sandbox: "workspace".into(),
+                privacy_mode: crate::platform::PrivacyMode::Strict,
                 approval_policy: "workspace_edit".into(),
                 rules: None,
                 agent_profile: None,

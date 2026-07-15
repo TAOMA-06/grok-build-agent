@@ -3,8 +3,10 @@ import { inspectPromptPrivacy, isSensitiveAttachmentName } from "./privacy";
 
 describe("prompt privacy inspection", () => {
   it("detects and redacts common credentials without changing surrounding text", () => {
+    const xaiToken = ["xai-", "abcdefghijklmnop"].join("");
+    const githubToken = ["ghp_", "1234567890abcdefghijkl"].join("");
     const inspection = inspectPromptPrivacy(
-      "Deploy with xai-abcdefghijklmnop and ghp_1234567890abcdefghijkl.",
+      `Deploy with ${xaiToken} and ${githubToken}.`,
       [],
     );
 
@@ -19,8 +21,13 @@ describe("prompt privacy inspection", () => {
   });
 
   it("finds private keys and blocks high-risk attachment names", () => {
+    const privateKey = [
+      ["-----BEGIN", " PRIVATE KEY-----"].join(""),
+      "secret",
+      ["-----END", " PRIVATE KEY-----"].join(""),
+    ].join("\n");
     const inspection = inspectPromptPrivacy(
-      "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----",
+      privateKey,
       [{ name: ".env.production" }, { name: "notes.md" }],
     );
 

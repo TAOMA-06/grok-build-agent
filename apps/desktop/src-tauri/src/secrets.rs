@@ -244,8 +244,7 @@ fn redact_jwt_tokens(text: &str) -> String {
         let token_end = text[start..]
             .char_indices()
             .take_while(|(_, character)| {
-                character.is_ascii_alphanumeric()
-                    || matches!(*character, '-' | '_' | '.')
+                character.is_ascii_alphanumeric() || matches!(*character, '-' | '_' | '.')
             })
             .map(|(offset, character)| start + offset + character.len_utf8())
             .last()
@@ -286,24 +285,35 @@ mod tests {
 
     #[test]
     fn redact_masks_patterns() {
-        let s = redact_secrets("token xai-abcdefghijklmnop and sk-1234567890abcdef");
-        assert!(!s.contains("xai-abcdefghijklmnop"));
-        assert!(!s.contains("sk-1234567890abcdef"));
+        let xai_token = ["xai-", "abcdefghijklmnop"].concat();
+        let openai_style_token = ["sk-", "1234567890abcdef"].concat();
+        let s = redact_secrets(&format!("token {xai_token} and {openai_style_token}"));
+        assert!(!s.contains(&xai_token));
+        assert!(!s.contains(&openai_style_token));
         assert!(s.contains("[REDACTED]") || s.contains("xai-[REDACTED]"));
     }
 
     #[test]
     fn redact_preserves_unicode_without_panicking() {
-        let text = "制定中文计划，再检查 xai-abcdefghijklmnop 是否脱敏";
-        let redacted = redact_secrets(text);
+        let token = ["xai-", "abcdefghijklmnop"].concat();
+        let text = format!("制定中文计划，再检查 {token} 是否脱敏");
+        let redacted = redact_secrets(&text);
         assert!(redacted.starts_with("制定中文计划，再检查 "));
         assert!(!redacted.contains("abcdefghijklmnop"));
     }
 
     #[test]
     fn redact_masks_common_credentials_and_private_keys() {
-        let text = "ghp_1234567890abcdefghijkl eyJabcdefgh.abcdefgh.abcdefgh BEGIN\n-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----";
-        let redacted = redact_secrets(text);
+        let github_token = ["ghp_", "1234567890abcdefghijkl"].concat();
+        let jwt = ["eyJabcdefgh", "abcdefgh", "abcdefgh"].join(".");
+        let private_key = [
+            ["-----BEGIN", " PRIVATE KEY-----"].concat(),
+            "secret".into(),
+            ["-----END", " PRIVATE KEY-----"].concat(),
+        ]
+        .join("\n");
+        let text = format!("{github_token} {jwt} BEGIN\n{private_key}");
+        let redacted = redact_secrets(&text);
         assert!(!redacted.contains("1234567890abcdefghijkl"));
         assert!(!redacted.contains("eyJabcdefgh.abcdefgh.abcdefgh"));
         assert!(!redacted.contains("\nsecret\n"));

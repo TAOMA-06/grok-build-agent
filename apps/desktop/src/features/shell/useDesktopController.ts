@@ -217,6 +217,7 @@ export function useDesktopController(
           alwaysApprove: permissionAlwaysApprove(policy),
           useHarness: state.settings.useHarness,
           sandbox: summary.sandbox ?? state.settings.sandbox,
+          privacyMode: state.settings.privacyMode,
           resumeSessionId: summary.remoteSessionId ?? null,
           grokPath:
             state.settings.cliPathOverride || state.settings.grokPath || null,
@@ -577,6 +578,7 @@ export function useDesktopController(
         ),
         useHarness: state.settings.useHarness,
         sandbox: summary.sandbox ?? state.settings.sandbox,
+        privacyMode: state.settings.privacyMode,
         resumeSessionId: summary.remoteSessionId ?? null,
         grokPath: state.settings.cliPathOverride || state.settings.grokPath || null,
       });

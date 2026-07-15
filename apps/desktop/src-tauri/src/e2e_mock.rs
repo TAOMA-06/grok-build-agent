@@ -44,6 +44,7 @@ mod tests {
             agent_profile: None,
             use_harness: false,
             sandbox: Some(SandboxMode::None),
+            privacy_mode: crate::platform::PrivacyMode::Strict,
             power_profile: None,
             resume_session_id: None,
         }
