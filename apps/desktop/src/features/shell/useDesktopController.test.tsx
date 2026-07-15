@@ -18,6 +18,7 @@ function wrapper(bridge: DesktopBridge) {
 function runtime(summary: SessionSummary): SessionRuntime {
   return {
     summary,
+    privateChat: false,
     blocks: [],
     tools: [],
     planText: "",
@@ -39,7 +40,14 @@ function runtime(summary: SessionSummary): SessionRuntime {
 describe("useDesktopController", () => {
   beforeEach(() => {
     useAppStore.setState({
-      settings: { ...defaultSettings(), cwd: "/Users/demo/Projects/orbit", onboardingDone: true },
+      settings: {
+        ...defaultSettings(),
+        cwd: "/Users/demo/Projects/orbit",
+        onboardingDone: true,
+        // Most controller tests cover the durable-history path. Private Chat
+        // receives its own explicit persistence test below.
+        privateChat: false,
+      },
       sessions: {},
       sessionOrder: [],
       activeSessionId: null,
@@ -64,6 +72,43 @@ describe("useDesktopController", () => {
     expect(session?.draft).toBe("keep this draft");
     expect(session?.failedSubmission?.text).toBe("keep this draft");
     expect(session?.blocks.find((block) => block.type === "user")).toMatchObject({ delivery: "failed" });
+  });
+
+  it("defaults a Private Chat task to ephemeral desktop state without writing history", async () => {
+    useAppStore.getState().setSettings({ privateChat: true });
+    const upsertSession = vi.fn().mockResolvedValue(undefined);
+    const saveDraft = vi.fn().mockResolvedValue(undefined);
+    const appendCachedEvent = vi.fn().mockResolvedValue(undefined);
+    const getTask = vi.fn().mockResolvedValue(null);
+    const upsertTask = vi.fn().mockResolvedValue(undefined);
+    const sendPrompt = vi.fn().mockResolvedValue(null);
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      upsertSession,
+      saveDraft,
+      appendCachedEvent,
+      getTask,
+      upsertTask,
+      sendPrompt,
+    };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+
+    await act(async () => {
+      await result.current.send("keep this out of local history", [], "agent");
+    });
+
+    const sessionId = useAppStore.getState().activeSessionId;
+    expect(sessionId).toBeTruthy();
+    expect(useAppStore.getState().sessions[sessionId!]?.privateChat).toBe(true);
+    expect(sendPrompt).toHaveBeenCalled();
+    expect(upsertSession).not.toHaveBeenCalled();
+    expect(saveDraft).not.toHaveBeenCalled();
+    expect(appendCachedEvent).not.toHaveBeenCalled();
+    expect(getTask).not.toHaveBeenCalled();
+    expect(upsertTask).not.toHaveBeenCalled();
   });
 
   it("reconnects a persisted task before sending when its process is no longer live", async () => {

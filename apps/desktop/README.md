@@ -11,7 +11,11 @@ Use `npm run dev` for the browser MockBridge preview and `npm run check` for Typ
 
 Tasks support Agent, Plan and Goal modes. The mode in Settings is only the default for new tasks; the composer controls the active task and persists a switch only after Grok confirms it. Plan remains read-only until its in-task approval action returns the same ACP session to Agent mode.
 
-Each first user instruction seeds the task focus shown in the Context drawer. Economy and Balanced control the initial contract budget. The contract is then reused from immutable conversation history instead of being appended on every turn; it is injected again only when the task changes or after an explicit `/compact` boundary. Strict Privacy Shield is the default local outbound guardrail; it redacts detected text secrets and blocks high-risk attachment names before local persistence or dispatch. It does not replace upstream Grok/xAI account privacy settings; see [`../../PRIVACY.md`](../../PRIVACY.md).
+Each first user instruction seeds the task focus shown in the Context drawer. Economy and Balanced control the initial contract budget. The contract is then reused from immutable conversation history instead of being appended on every turn; it is injected again only when the task changes or after an explicit `/compact` boundary. Strict Privacy Shield is the default local outbound guardrail; it redacts detected text secrets and blocks high-risk attachment names before local persistence or dispatch. See [`../../PRIVACY.md`](../../PRIVACY.md).
+
+**Privacy Mode** is on by default and maps to Grok Build `/privacy opt-out` (coding data retention opt-out). When an agent is connected and signed in, the desktop app syncs this preference via `x.ai/privacy/setCodingDataRetention`.
+
+New tasks also start with **Private Chat** enabled. This is a local desktop retention setting: private tasks remain in memory only and skip the app's durable session history, draft, transcript cache, task contract, and verification records.
 
 Prompt-cache changes must pass a weighted A/B gate against a same-turn CLI trace. Export provider usage responses as JSON or JSONL, then run `npm run benchmark:cache -- --baseline cli.jsonl --candidate desktop.jsonl`. The gate requires the desktop run to have the same turn count, a strictly higher weighted cache-hit rate, fewer uncached prompt tokens, and no higher cost when both traces include cost.
 

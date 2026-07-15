@@ -33,6 +33,8 @@ export { defaultSettings };
 
 export type SessionRuntime = {
   summary: SessionSummary;
+  /** Never restored after app restart; private sessions deliberately have no durable history. */
+  privateChat: boolean;
   blocks: ChatBlock[];
   tools: ToolCall[];
   planText: string;
@@ -67,6 +69,7 @@ type SessionSlice = {
   sessionOrder: string[];
   activeSessionId: string | null;
   ensureSession: (summary: SessionSummary) => void;
+  setSessionPrivateChat: (id: string, privateChat: boolean) => void;
   setActiveSession: (id: string | null) => void;
   updateSummary: (id: string, patch: Partial<SessionSummary>) => void;
   setSessionDraft: (id: string, draft: string) => void;
@@ -162,6 +165,7 @@ type AppState = SettingsSlice &
 function emptyRuntime(summary: SessionSummary): SessionRuntime {
   return {
     summary,
+    privateChat: false,
     blocks: [],
     tools: [],
     planText: "",
@@ -386,6 +390,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
       set({ sessions });
     }
+  },
+
+  setSessionPrivateChat: (id, privateChat) => {
+    const s = get().sessions[id];
+    if (!s) return;
+    set({
+      sessions: { ...get().sessions, [id]: { ...s, privateChat } },
+    });
   },
 
   setActiveSession: (activeSessionId) => set({ activeSessionId }),

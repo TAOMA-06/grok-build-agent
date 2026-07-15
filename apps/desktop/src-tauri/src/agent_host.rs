@@ -1167,6 +1167,25 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                 .map_err(|error| error.to_string()),
             Err(error) => Err(error.to_string()),
         },
+        "privacy.setCodingDataRetention" => {
+            let privacy_mode_on = request
+                .params
+                .get("privacyMode")
+                .or_else(|| request.params.get("codingDataPrivacy"))
+                .and_then(|v| v.as_bool())
+                .or_else(|| {
+                    request
+                        .params
+                        .get("codingDataRetentionOptOut")
+                        .and_then(|v| v.as_bool())
+                })
+                .unwrap_or(true);
+            state
+                .runtime
+                .set_coding_data_privacy(privacy_mode_on)
+                .await
+                .map_err(|error| error.to_string())
+        }
         "permission.decide" => match serde_json::from_value::<PermissionResponse>(request.params) {
             Ok(route) => {
                 let request_id = route.id.clone();

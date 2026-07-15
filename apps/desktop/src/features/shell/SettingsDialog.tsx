@@ -1,8 +1,8 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Tabs from "@radix-ui/react-tabs";
 import { useQuery } from "@tanstack/react-query";
-import { Bot, Info, Puzzle, RefreshCw, Settings2, ShieldCheck, Stethoscope, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { Bot, Ghost, Info, Puzzle, RefreshCw, Settings2, ShieldCheck, Stethoscope, Trash2, X } from "lucide-react";
+import { useRef, useState } from "react";
 import { useEffect } from "react";
 import { McpManager } from "../mcp/McpManager";
 import { applyLocalePreference, t } from "../../i18n";
@@ -49,6 +49,9 @@ export function SettingsDialog({
   const replaceSettings = useAppStore((state) => state.replaceSettings);
   const [draft, setDraft] = useState(() => normalizeSettings(settings));
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const saveRevision = useRef(0);
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [doctorAction, setDoctorAction] = useState<string | null>(null);
   const [bundlePreview, setBundlePreview] = useState<string | null>(null);
@@ -87,21 +90,52 @@ export function SettingsDialog({
     setDraft((current) => ({ ...current, ...next }));
   }
 
-  async function save() {
+  async function persist(next: Settings, closeWhenSaved = false) {
+    const revision = ++saveRevision.current;
+    const normalized = normalizeSettings(next);
     setSaving(true);
+    setSaveError(null);
+    replaceSettings(normalized);
+    applyLocalePreference(normalized.locale);
+    const write = saveQueue.current.then(() => bridge.saveSettings(normalized));
+    saveQueue.current = write.catch(() => undefined);
     try {
-      const next = normalizeSettings(draft);
-      replaceSettings(next);
-      applyLocalePreference(next.locale);
-      await bridge.saveSettings(next);
-      onOpenChange(false);
+      await write;
+      if (closeWhenSaved && revision === saveRevision.current) onOpenChange(false);
+    } catch (error) {
+      if (revision === saveRevision.current) setSaveError(String(error));
     } finally {
-      setSaving(false);
+      if (revision === saveRevision.current) setSaving(false);
+    }
+  }
+
+  async function save() {
+    await persist(draft, true);
+  }
+
+  function applyImmediately(next: Partial<Settings>) {
+    const updated = normalizeSettings({ ...draft, ...next });
+    setDraft(updated);
+    void persist(updated);
+  }
+
+  async function applyCodingDataPrivacy(enabled: boolean) {
+    const updated = normalizeSettings({ ...draft, codingDataPrivacy: enabled });
+    setDraft(updated);
+    await persist(updated);
+    // Best-effort account sync when an agent is already running.
+    try {
+      await bridge.setCodingDataPrivacy(enabled);
+    } catch (error) {
+      const message = String(error);
+      // NotRunning is expected when no agent is active; keep the local preference.
+      if (/not running|NotRunning/i.test(message)) return;
+      setSaveError(message);
     }
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={(next) => { if (next) setDraft(normalizeSettings(settings)); onOpenChange(next); }}>
+    <Dialog.Root open={open} onOpenChange={(next) => { if (next) { setDraft(normalizeSettings(settings)); setSaveError(null); } onOpenChange(next); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="gb-dialog-overlay" />
         <Dialog.Content className="gb-settings-dialog">
@@ -122,7 +156,15 @@ export function SettingsDialog({
               <Tabs.Content value="general">
                 <h3>{t.appearance}</h3>
                 <label><span>{t.theme}<small>{t.themeHint}</small></span><select value={draft.theme} onChange={(event) => patch({ theme: event.target.value })}><option value="dark">{t.themeDark}</option><option value="light">{t.themeLight}</option><option value="system">{t.themeSystem}</option></select></label>
-                <label><span>{t.language}<small>{t.languageHint}</small></span><select value={draft.locale} onChange={(event) => patch({ locale: event.target.value as Settings["locale"] })}><option value="system">{t.languageSystem}</option><option value="en">{t.languageEnglish}</option><option value="zh-CN">{t.languageChinese}</option></select></label>
+                <label><span>{t.language}<small>{t.languageHint}</small></span><select aria-label={t.language} value={draft.locale} onChange={(event) => applyImmediately({ locale: event.target.value as Settings["locale"] })}><option value="system">{t.languageSystem}</option><option value="en">{t.languageEnglish}</option><option value="zh-CN">{t.languageChinese}</option></select></label>
+                <h3 className="gb-settings-heading-icon"><Ghost size={15} /> {t.codingDataPrivacy}</h3>
+                <label className="gb-switch-row"><span>{t.codingDataPrivacy}<small>{t.codingDataPrivacyHint}</small></span><input aria-label={t.codingDataPrivacy} type="checkbox" checked={draft.codingDataPrivacy} onChange={(event) => applyCodingDataPrivacy(event.target.checked)} /></label>
+                <p className="gb-settings-copy">{draft.codingDataPrivacy ? t.codingDataPrivacyOn : t.codingDataPrivacyOff}</p>
+                <p className="gb-settings-copy">{t.codingDataPrivacyBoundary}</p>
+                <h3 className="gb-settings-heading-icon"><Ghost size={15} /> {t.privateChat}</h3>
+                <label className="gb-switch-row"><span>{t.privateChat}<small>{t.privateChatHint}</small></span><input aria-label={t.privateChat} type="checkbox" checked={draft.privateChat} onChange={(event) => applyImmediately({ privateChat: event.target.checked })} /></label>
+                <p className="gb-settings-copy">{draft.privateChat ? t.privateChatOn : t.privateChatOff}</p>
+                <p className="gb-settings-copy">{t.privateChatServiceBoundary}</p>
               </Tabs.Content>
               <Tabs.Content value="permissions">
                 <div className="gb-settings-section-head"><h3>{t.permissions}</h3><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => void policyRulesQuery.refetch()}><RefreshCw size={14} /></button></div>
@@ -147,7 +189,7 @@ export function SettingsDialog({
                 <label><span>{t.defaultReasoningEffort}<small>{t.defaultReasoningEffortHint}</small></span><select value={draft.defaultReasoningEffort} onChange={(event) => patch({ defaultReasoningEffort: event.target.value })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
                 <label><span>{t.defaultMode}<small>{t.defaultModeHint}</small></span><select value={draft.defaultMode} onChange={(event) => patch({ defaultMode: event.target.value as Settings["defaultMode"] })}><option value="agent">{t.modeAgent}</option><option value="plan">{t.modePlan}</option><option value="goal">{t.modeGoal}</option></select></label>
                 <label><span>{t.focusMode}<small>{t.focusModeHint}</small></span><select value={draft.focusMode} onChange={(event) => patch({ focusMode: event.target.value as Settings["focusMode"] })}><option value="economy">{t.focusEconomy} · {t.focusEconomyHint}</option><option value="balanced">{t.focusBalanced} · {t.focusBalancedHint}</option></select></label>
-                <label className="gb-switch-row"><span>{t.privacyShield}<small>{t.privacyShieldHint}</small></span><input type="checkbox" checked={draft.privacyMode === "strict"} onChange={(event) => patch({ privacyMode: event.target.checked ? "strict" : "standard" })} /></label>
+                <label className="gb-switch-row"><span>{t.privacyShield}<small>{t.privacyShieldHint}</small></span><input aria-label={t.privacyShield} type="checkbox" checked={draft.privacyMode === "strict"} onChange={(event) => patch({ privacyMode: event.target.checked ? "strict" : "standard" })} /></label>
                 <p className="gb-settings-copy">{draft.privacyMode === "strict" ? t.privacyStrict : t.privacyStandard}</p>
                 <p className="gb-settings-copy">{t.privacyServiceBoundary}</p>
                 <label><span>{t.permissions}<small>{t.permissionsHint}</small></span><select value={draft.permissionPolicy} onChange={(event) => patch({ permissionPolicy: event.target.value as Settings["permissionPolicy"] })}><option value="workspace_edit">{t.permissionWorkspace}</option><option value="ask_all">{t.permissionAsk}</option><option value="full_auto">{t.permissionAuto}</option></select></label>
@@ -257,7 +299,7 @@ export function SettingsDialog({
               </Tabs.Content>
             </div>
           </Tabs.Root>
-          <div className="gb-settings-footer"><button type="button" className="gb-button" onClick={() => onOpenChange(false)}>{t.cancel}</button><button type="button" className="gb-button primary" disabled={saving} onClick={() => void save()}>{saving ? t.saving : t.saveChanges}</button></div>
+          <div className="gb-settings-footer">{saveError && <span className="gb-settings-save-error" role="alert">{saveError}</span>}<button type="button" className="gb-button" onClick={() => onOpenChange(false)}>{t.cancel}</button><button type="button" className="gb-button primary" disabled={saving} onClick={() => void save()}>{saving ? t.saving : t.saveChanges}</button></div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

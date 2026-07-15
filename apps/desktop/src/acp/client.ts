@@ -173,6 +173,20 @@ export async function confirmSessionMode(
   return invoke("confirm_session_mode", { connectionId, sessionId, mode });
 }
 
+/**
+ * Sync Grok Privacy Mode (coding data retention opt-out) to the active agent.
+ * `privacyModeOn === true` maps to CLI `/privacy opt-out`.
+ * Requires a running agent; fails with NotRunning / auth errors when unavailable.
+ */
+export async function setCodingDataPrivacy(privacyModeOn: boolean): Promise<{
+  ok?: boolean;
+  privacyMode?: boolean;
+  codingDataRetentionOptOut?: boolean;
+  result?: unknown;
+}> {
+  return invoke("set_coding_data_privacy", { privacyMode: privacyModeOn });
+}
+
 export async function inspectAttachments(
   paths: string[],
 ): Promise<import("../contracts").ComposerAttachment[]> {

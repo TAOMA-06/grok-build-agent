@@ -524,6 +524,21 @@ async fn acp_request(
     .await
 }
 
+/// Enable or disable Grok Privacy Mode (coding data retention opt-out) on the active agent.
+#[tauri::command]
+async fn set_coding_data_privacy(
+    state: State<'_, AppState>,
+    privacy_mode: bool,
+) -> Result<Value, acp::AcpError> {
+    host_request(
+        &state,
+        "privacy.setCodingDataRetention",
+        serde_json::json!({ "privacyMode": privacy_mode }),
+        Some(rpc_meta("privacy", None)),
+    )
+    .await
+}
+
 #[tauri::command]
 async fn respond_server_request(
     state: State<'_, AppState>,
@@ -1610,6 +1625,7 @@ pub fn run() {
             set_session_mode,
             confirm_session_mode,
             acp_request,
+            set_coding_data_privacy,
             respond_server_request,
             list_permission_requests,
             list_policy_rules,

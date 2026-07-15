@@ -40,6 +40,11 @@ pub struct AppSettings {
     pub focus_mode: String,
     #[serde(default = "default_privacy_mode")]
     pub privacy_mode: String,
+    /// Grok Privacy Mode: coding data retention opt-out (account-level). Default on.
+    #[serde(default = "default_coding_data_privacy")]
+    pub coding_data_privacy: bool,
+    #[serde(default = "default_private_chat")]
+    pub private_chat: bool,
     #[serde(default = "default_mode")]
     pub default_mode: String,
     #[serde(default = "default_permission_policy")]
@@ -83,6 +88,10 @@ struct AppSettingsFile {
     pub focus_mode: String,
     #[serde(default = "default_privacy_mode")]
     pub privacy_mode: String,
+    #[serde(default = "default_coding_data_privacy")]
+    pub coding_data_privacy: bool,
+    #[serde(default = "default_private_chat")]
+    pub private_chat: bool,
     #[serde(default = "default_mode")]
     pub default_mode: String,
     #[serde(default = "default_permission_policy")]
@@ -119,6 +128,8 @@ impl Default for AppSettings {
             default_reasoning_effort: default_reasoning_effort(),
             focus_mode: default_focus_mode(),
             privacy_mode: default_privacy_mode(),
+            coding_data_privacy: default_coding_data_privacy(),
+            private_chat: default_private_chat(),
             default_mode: default_mode(),
             permission_policy: default_permission_policy(),
             auto_update_cli: true,
@@ -142,7 +153,7 @@ fn default_locale() -> String {
 }
 
 fn settings_schema_version() -> u32 {
-    5
+    7
 }
 
 fn default_mode() -> String {
@@ -159,6 +170,14 @@ fn default_focus_mode() -> String {
 
 fn default_privacy_mode() -> String {
     "strict".into()
+}
+
+fn default_coding_data_privacy() -> bool {
+    true
+}
+
+fn default_private_chat() -> bool {
+    true
 }
 
 fn default_permission_policy() -> String {
@@ -237,6 +256,8 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
         default_reasoning_effort: file.default_reasoning_effort,
         focus_mode: file.focus_mode,
         privacy_mode: file.privacy_mode,
+        coding_data_privacy: file.coding_data_privacy,
+        private_chat: file.private_chat,
         default_mode: file.default_mode,
         permission_policy: file.permission_policy,
         auto_update_cli: file.auto_update_cli,
@@ -270,6 +291,8 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), ConfigError> {
         default_reasoning_effort: settings.default_reasoning_effort.clone(),
         focus_mode: settings.focus_mode.clone(),
         privacy_mode: settings.privacy_mode.clone(),
+        coding_data_privacy: settings.coding_data_privacy,
+        private_chat: settings.private_chat,
         default_mode: settings.default_mode.clone(),
         permission_policy: settings.permission_policy.clone(),
         auto_update_cli: settings.auto_update_cli,
@@ -300,7 +323,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn legacy_settings_receive_v5_defaults_without_losing_values() {
+    fn legacy_settings_receive_v7_defaults_without_losing_values() {
         let file: AppSettingsFile = serde_json::from_value(serde_json::json!({
             "grokPath": "/custom/grok",
             "model": "grok-build",
@@ -311,7 +334,7 @@ mod tests {
             "theme": "dark"
         }))
         .unwrap();
-        assert_eq!(file.schema_version, 5);
+        assert_eq!(file.schema_version, 7);
         assert!(!file.compact_mode);
         assert!(!file.multiline_mode);
         assert!(!file.show_timestamps);
@@ -319,6 +342,8 @@ mod tests {
         assert_eq!(file.default_reasoning_effort, "medium");
         assert_eq!(file.focus_mode, "balanced");
         assert_eq!(file.privacy_mode, "strict");
+        assert!(file.coding_data_privacy);
+        assert!(file.private_chat);
         assert_eq!(file.permission_policy, "workspace_edit");
         assert!(file.auto_update_cli);
         assert!(file.always_approve);

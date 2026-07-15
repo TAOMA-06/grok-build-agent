@@ -16,7 +16,7 @@ export type PrivacyMode = "strict" | "standard";
 
 export type Settings = {
   /** Versioned renderer/host settings contract. */
-  schemaVersion: 5;
+  schemaVersion: 7;
   grokPath: string;
   /** Optional advanced override. Empty means use CLI discovery. */
   cliPathOverride: string;
@@ -30,6 +30,19 @@ export type Settings = {
   focusMode: FocusMode;
   /** Strict mode redacts detected secrets before they are persisted or sent. */
   privacyMode: PrivacyMode;
+  /**
+   * Grok Privacy Mode preference (account-level coding data retention opt-out).
+   * When true, the desktop app asks the connected Grok agent to enable Privacy Mode
+   * via `x.ai/privacy/setCodingDataRetention` (`codingDataRetentionOptOut: true`),
+   * matching CLI `/privacy opt-out`. Requires login; ZDR/admin policies may lock it.
+   */
+  codingDataPrivacy: boolean;
+  /**
+   * New desktop tasks start as local-only private sessions. Their transcript,
+   * drafts, task contract and session row are kept out of this app's durable
+   * history. Separate from account-level Grok Privacy Mode above.
+   */
+  privateChat: boolean;
   defaultMode: import("./mode").TaskMode;
   permissionPolicy: "workspace_edit" | "ask_all" | "full_auto";
   autoUpdateCli: boolean;
@@ -74,13 +87,15 @@ export type OnboardingStep =
 
 export function defaultSettings(): Settings {
   return {
-    schemaVersion: 5,
+    schemaVersion: 7,
     grokPath: "",
     cliPathOverride: "",
     model: "grok-build",
     defaultReasoningEffort: "medium",
     focusMode: "balanced",
     privacyMode: "strict",
+    codingDataPrivacy: true,
+    privateChat: true,
     defaultMode: "agent",
     permissionPolicy: "workspace_edit",
     autoUpdateCli: true,
@@ -105,17 +120,24 @@ export function normalizeSettings(settings: Settings): Settings {
   );
   const focusMode: FocusMode = settings.focusMode === "economy" ? "economy" : "balanced";
   const privacyMode: PrivacyMode = settings.privacyMode === "standard" ? "standard" : "strict";
+  // Missing / legacy fields default to Privacy Mode ON (coding data not used for training).
+  const codingDataPrivacy = (settings as { codingDataPrivacy?: boolean }).codingDataPrivacy !== false;
+  const privateChat = settings.privateChat !== false;
   if (
-    settings.schemaVersion === 5 &&
+    settings.schemaVersion === 7 &&
     defaultReasoningEffort === settings.defaultReasoningEffort &&
     focusMode === settings.focusMode &&
-    privacyMode === settings.privacyMode
+    privacyMode === settings.privacyMode &&
+    codingDataPrivacy === settings.codingDataPrivacy &&
+    privateChat === settings.privateChat
   ) return settings;
   return {
     ...settings,
-    schemaVersion: 5,
+    schemaVersion: 7,
     defaultReasoningEffort,
     focusMode,
     privacyMode,
+    codingDataPrivacy,
+    privateChat,
   };
 }

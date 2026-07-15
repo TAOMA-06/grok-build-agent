@@ -126,6 +126,7 @@ pub fn is_write_method(method: &str) -> bool {
             | "session.setMode"
             | "session.confirmMode"
             | "runtime.request"
+            | "privacy.setCodingDataRetention"
             | "permission.decide"
     ) || matches!(
         method,

@@ -704,6 +704,43 @@ impl RuntimePool {
         conn.request(method, params, DEFAULT_TIMEOUT).await
     }
 
+    /// Apply Grok Privacy Mode (coding data retention opt-out) on the active agent.
+    /// Maps to CLI `/privacy opt-out|opt-in` via `x.ai/privacy/setCodingDataRetention`.
+    pub async fn set_coding_data_privacy(&self, privacy_mode_on: bool) -> Result<Value, AcpError> {
+        let conn = self.active_connection().ok_or(AcpError::NotRunning)?;
+        // `privacy_mode_on == true` means opt out of training/retention (Privacy Mode).
+        let opt_out = privacy_mode_on;
+        let params_candidates = [
+            json!({ "codingDataRetentionOptOut": opt_out }),
+            json!({ "optOut": opt_out }),
+            json!({ "coding_data_retention_opt_out": opt_out }),
+        ];
+        let mut last_err = AcpError::Message(
+            "x.ai/privacy/setCodingDataRetention failed with all known param shapes".into(),
+        );
+        for params in params_candidates {
+            match conn
+                .request(
+                    "x.ai/privacy/setCodingDataRetention",
+                    params,
+                    Duration::from_secs(20),
+                )
+                .await
+            {
+                Ok(value) => {
+                    return Ok(json!({
+                        "ok": true,
+                        "privacyMode": privacy_mode_on,
+                        "codingDataRetentionOptOut": opt_out,
+                        "result": value,
+                    }));
+                }
+                Err(err) => last_err = err,
+            }
+        }
+        Err(last_err)
+    }
+
     pub async fn request_on(
         &self,
         connection_id: &str,

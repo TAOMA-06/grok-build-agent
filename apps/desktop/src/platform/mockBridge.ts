@@ -183,6 +183,13 @@ export const mockDesktopBridge: DesktopBridge = {
   async saveSettings(next: Settings) {
     Object.assign(settings, next);
   },
+  async setCodingDataPrivacy(privacyModeOn: boolean) {
+    return {
+      ok: true,
+      privacyMode: privacyModeOn,
+      codingDataRetentionOptOut: privacyModeOn,
+    };
+  },
   async runtimeHealth() {
     return health;
   },

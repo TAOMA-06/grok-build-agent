@@ -1850,7 +1850,11 @@
 .gb-settings-placeholder strong { color: var(--gb-text); font-size: 12px; }
 .gb-settings-placeholder p,
 .gb-settings-copy { margin: 0; color: var(--gb-muted); font-size: 11px; line-height: 1.55; }
+.gb-settings-heading-icon { display: flex; align-items: center; gap: 7px; }
 .gb-settings-footer { display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding: 0 14px; border-top: 1px solid var(--gb-border); }
+.gb-settings-save-error { margin-right: auto; overflow: hidden; color: var(--gb-danger); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+
+.gb-private-chat-pill { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--gb-ion, #6b9eff) 55%, transparent); border-radius: 999px; color: var(--gb-ion, #6b9eff); background: color-mix(in srgb, var(--gb-ion, #6b9eff) 10%, transparent); font: 700 10px var(--gb-mono); text-transform: uppercase; letter-spacing: .04em; }
 
 .gb-decision-dialog { width: min(460px, calc(100vw - 48px)); padding: 22px; border-radius: 12px; }
 .gb-decision-dialog h2 { margin: 0 0 7px; font-size: 17px; }

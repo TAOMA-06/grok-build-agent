@@ -21,7 +21,7 @@ export type DirtyPolicy = "clean_head" | "copy_dirty";
 export type DesktopController = {
   connectingSessionId: string | null;
   chooseWorkspace(): Promise<string | null>;
-  createThread(mode?: TaskMode): Promise<string | null>;
+  createThread(mode?: TaskMode, privateChat?: boolean): Promise<string | null>;
   send(text: string, attachments: ComposerAttachment[], mode: TaskMode): Promise<void>;
   retryFailed(): Promise<void>;
   cancel(): Promise<void>;
@@ -53,6 +53,13 @@ function branchSlug(text: string, sessionId: string): string {
 
 function permissionAlwaysApprove(policy: PermissionPolicy): boolean {
   return policy === "full_auto";
+}
+
+function isPrivateChatSession(
+  state: ReturnType<typeof useAppStore.getState>,
+  sessionId: string,
+): boolean {
+  return state.sessions[sessionId]?.privateChat === true;
 }
 
 function lookupModel(
@@ -119,10 +126,11 @@ export function useDesktopController(
   }, [bridge]);
 
   const createThread = useCallback(
-    async (mode?: TaskMode) => {
+    async (mode?: TaskMode, privateChatOverride?: boolean) => {
       const state = useAppStore.getState();
       const workspaceRoot = state.settings.cwd || (await chooseWorkspace());
       if (!workspaceRoot) return null;
+      const privateChat = privateChatOverride ?? state.settings.privateChat;
       const now = new Date().toISOString();
       const sessionId = crypto.randomUUID();
       const summary: SessionSummary = {
@@ -148,8 +156,9 @@ export function useDesktopController(
         remoteSessionId: null,
       };
       state.ensureSession(summary);
+      state.setSessionPrivateChat(sessionId, privateChat);
       state.setActiveSession(sessionId);
-      await bridge.upsertSession(summary);
+      if (!privateChat) await bridge.upsertSession(summary);
       return sessionId;
     },
     [bridge, chooseWorkspace],
@@ -197,7 +206,7 @@ export function useDesktopController(
         updatedAt: new Date().toISOString(),
       };
       state.updateSummary(sessionId, next);
-      await bridge.upsertSession(next);
+      if (!isPrivateChatSession(state, sessionId)) await bridge.upsertSession(next);
       return next;
     },
     [bridge, chooseDirtyPolicy],
@@ -232,6 +241,9 @@ export function useDesktopController(
         if (status.availableCommands) {
           state.setSessionCommands(sessionId, status.availableCommands);
         }
+        // Best-effort: apply desktop Privacy Mode preference to the account-level
+        // Grok `/privacy` control once an agent connection is live.
+        void bridge.setCodingDataPrivacy(state.settings.codingDataPrivacy).catch(() => undefined);
         summary = {
           ...summary,
           connectionId: status.connectionId ?? null,
@@ -240,7 +252,7 @@ export function useDesktopController(
           updatedAt: new Date().toISOString(),
         };
         state.updateSummary(sessionId, summary);
-        await bridge.upsertSession(summary);
+        if (!isPrivateChatSession(state, sessionId)) await bridge.upsertSession(summary);
         return status;
       } finally {
         setConnectingSessionId(null);
@@ -266,6 +278,7 @@ export function useDesktopController(
       const epochAtStart = cancelEpochRef.current;
       const session = useAppStore.getState().sessions[sessionId];
       if (!session) return;
+      const privateChat = session.privateChat;
       const firstTurn = session.blocks.length === 0;
       const queuedBehindActiveTurn = session.busy;
       const displayText = text || `[${attachments.length} attachments]`;
@@ -315,11 +328,11 @@ export function useDesktopController(
       const wasCancelled = () => cancelEpochRef.current !== epochAtStart;
 
       try {
-        await bridge.upsertSession(summary);
+        if (!privateChat) await bridge.upsertSession(summary);
         // The first user instruction is the default task focus. It can still be
         // refined in the Context drawer, but seeding it here prevents later
         // turns from drifting without repeatedly sending the full transcript.
-        if (firstTurn && text) {
+        if (!privateChat && firstTurn && text) {
           const existingTask = await bridge.getTask(sessionId);
           await bridge.upsertTask({
             taskId: sessionId,
@@ -334,7 +347,7 @@ export function useDesktopController(
             updatedAt: summary.updatedAt,
           });
         }
-        await bridge.saveDraft(sessionId, "");
+        if (!privateChat) await bridge.saveDraft(sessionId, "");
         let target = useAppStore.getState().sessions[sessionId]?.summary;
         const runtimeStatus = useAppStore.getState().status;
         const connectionIsLive = Boolean(
@@ -372,16 +385,18 @@ export function useDesktopController(
             delivery: "sent",
           });
         }
-        // Persist the user turn before crossing into the Runtime. This keeps a
-        // crash-safe transcript in causal order and matches the dispatch rule:
-        // durable intent first, execution second.
-        await bridge.appendCachedEvent({
-          sessionId,
-          sequence: Date.now(),
-          timestamp: new Date().toISOString(),
-          kind: "user",
-          payload: { text: displayText },
-        });
+        if (!privateChat) {
+          // Persist the user turn before crossing into the Runtime. This keeps a
+          // crash-safe transcript in causal order and matches the dispatch rule:
+          // durable intent first, execution second.
+          await bridge.appendCachedEvent({
+            sessionId,
+            sequence: Date.now(),
+            timestamp: new Date().toISOString(),
+            kind: "user",
+            payload: { text: displayText },
+          });
+        }
         if (wasCancelled()) return;
         const promptCount = promptInFlightBySessionRef.current.get(sessionId) ?? 0;
         promptInFlightBySessionRef.current.set(sessionId, promptCount + 1);
@@ -437,7 +452,7 @@ export function useDesktopController(
         if (complete && !wasCancelled() && !hasOtherSubmissions) {
           const next = { ...complete, runState: "idle" as const };
           useAppStore.getState().updateSummary(sessionId, next);
-          await bridge.upsertSession(next);
+          if (!privateChat) await bridge.upsertSession(next);
         }
       } catch (error) {
         if (wasCancelled()) return;
@@ -445,7 +460,7 @@ export function useDesktopController(
         if (current && current.draft === "" && current.attachments.length === 0) {
           state.setSessionDraft(sessionId, rawText);
           state.setSessionAttachments(sessionId, attachments);
-          await bridge.saveDraft(sessionId, rawText).catch(() => undefined);
+          if (!privateChat) await bridge.saveDraft(sessionId, rawText).catch(() => undefined);
         }
         state.updateBlock(sessionId, messageBlockId, {
           type: "user",
@@ -596,7 +611,8 @@ export function useDesktopController(
       };
       state.updateSummary(sessionId, next);
       state.setAgentReloadRequired(false);
-      await bridge.upsertSession(next);
+      if (!isPrivateChatSession(state, sessionId)) await bridge.upsertSession(next);
+      void bridge.setCodingDataPrivacy(state.settings.codingDataPrivacy).catch(() => undefined);
     } finally {
       setConnectingSessionId(null);
     }
@@ -630,7 +646,9 @@ export function useDesktopController(
       state.setEffectiveModelId(modelId);
       {
         const next = useAppStore.getState().sessions[sessionId]?.summary;
-        if (next) await bridge.upsertSession(next);
+        if (next && !isPrivateChatSession(useAppStore.getState(), sessionId)) {
+          await bridge.upsertSession(next);
+        }
       }
     },
     [bridge],
@@ -675,7 +693,9 @@ export function useDesktopController(
         }
       }
       const next = useAppStore.getState().sessions[sessionId]?.summary;
-      if (next) await bridge.upsertSession(next);
+      if (next && !isPrivateChatSession(useAppStore.getState(), sessionId)) {
+        await bridge.upsertSession(next);
+      }
     },
     [bridge, reloadActiveAgent],
   );
@@ -716,7 +736,9 @@ export function useDesktopController(
         // Mode selection is usable immediately. A transient Host persistence
         // failure must not be reported as a mode-switch failure; the summary is
         // persisted again when the task is sent.
-        if (next) await bridge.upsertSession(next).catch(() => undefined);
+        if (next && !isPrivateChatSession(useAppStore.getState(), sessionId)) {
+          await bridge.upsertSession(next).catch(() => undefined);
+        }
         return {
           kind: "switched",
           state: { ...session.modeState, currentMode: mode, source: "desktop" },
@@ -758,7 +780,9 @@ export function useDesktopController(
         state.setSessionModeState(sessionId, result.state);
         state.updateSummary(sessionId, { mode, updatedAt: new Date().toISOString() });
         const next = useAppStore.getState().sessions[sessionId]?.summary;
-        if (next) await bridge.upsertSession(next).catch(() => undefined);
+        if (next && !isPrivateChatSession(useAppStore.getState(), sessionId)) {
+          await bridge.upsertSession(next).catch(() => undefined);
+        }
         return result;
       }
       if (result.kind === "command_required" && mode !== "goal") {
@@ -774,7 +798,9 @@ export function useDesktopController(
         state.setSessionModeState(sessionId, modeState);
         state.updateSummary(sessionId, { mode, updatedAt: new Date().toISOString() });
         const next = useAppStore.getState().sessions[sessionId]?.summary;
-        if (next) await bridge.upsertSession(next).catch(() => undefined);
+        if (next && !isPrivateChatSession(useAppStore.getState(), sessionId)) {
+          await bridge.upsertSession(next).catch(() => undefined);
+        }
         return { kind: "switched", state: modeState };
       }
       if (result.kind === "command_required" && mode === "goal") {
@@ -807,7 +833,7 @@ export function useDesktopController(
       commandHint: null,
       mode,
     });
-    const newId = await createThread(mode);
+    const newId = await createThread(mode, source.privateChat);
     if (newId) {
       state.setSessionAttachments(newId, attachments);
       state.updateSummary(newId, {
@@ -818,7 +844,7 @@ export function useDesktopController(
       });
       state.clearProvisionalDraft();
       const next = useAppStore.getState().sessions[newId]?.summary;
-      if (next) await bridge.upsertSession(next);
+      if (next && !source.privateChat) await bridge.upsertSession(next);
     }
     setPendingModelFork(null);
   }, [bridge, createThread, pendingModelFork]);
@@ -909,7 +935,9 @@ export function useDesktopController(
         state.setSessionBusy(localSessionId, false);
       }
       const next = useAppStore.getState().sessions[localSessionId]?.summary;
-      if (next) await bridge.upsertSession(next);
+      if (next && !isPrivateChatSession(useAppStore.getState(), localSessionId)) {
+        await bridge.upsertSession(next);
+      }
     },
     [bridge],
   );

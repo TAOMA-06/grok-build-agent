@@ -108,6 +108,16 @@ export interface DesktopBridge {
     sessionId: string,
     mode: import("../types").TaskMode,
   ): Promise<SessionModeState>;
+  /**
+   * Apply Grok Privacy Mode on the active agent (account-level coding data opt-out).
+   * `privacyModeOn === true` means Privacy Mode enabled (`/privacy opt-out`).
+   */
+  setCodingDataPrivacy(privacyModeOn: boolean): Promise<{
+    ok?: boolean;
+    privacyMode?: boolean;
+    codingDataRetentionOptOut?: boolean;
+    result?: unknown;
+  }>;
   stageAttachments(paths: string[]): Promise<ComposerAttachment[]>;
   prepareAttachments(files: ComposerAttachment[]): Promise<PromptContent[]>;
   listMcpServers(grokPath?: string, workspaceRoot?: string | null): Promise<McpListResult>;

@@ -82,6 +82,7 @@ export function ContextDrawer({
   const [terminalPorts, setTerminalPorts] = useState<number[]>([]);
   const root = session.summary.executionRoot || session.summary.worktreePath || session.summary.workspaceRoot;
   const taskId = session.summary.sessionId;
+  const privateChat = session.privateChat;
   const reviewQuery = useQuery({
     queryKey: ["git-review", root],
     queryFn: () => bridge.gitReview(root),
@@ -92,13 +93,13 @@ export function ContextDrawer({
     queryFn: () => bridge.gitFilePatch(root, selectedPath!, Boolean(selectedFile?.staged)),
     enabled: Boolean(selectedPath),
   });
-  const taskQuery = useQuery({ queryKey: ["task-definition", taskId], queryFn: () => bridge.getTask(taskId) });
-  const contextQuery = useQuery({ queryKey: ["context-manifests", taskId], queryFn: () => bridge.listContextManifests(taskId) });
-  const verificationQuery = useQuery({ queryKey: ["verification-results", taskId], queryFn: () => bridge.listVerificationResults(taskId) });
+  const taskQuery = useQuery({ queryKey: ["task-definition", taskId], queryFn: () => bridge.getTask(taskId), enabled: !privateChat });
+  const contextQuery = useQuery({ queryKey: ["context-manifests", taskId], queryFn: () => bridge.listContextManifests(taskId), enabled: !privateChat });
+  const verificationQuery = useQuery({ queryKey: ["verification-results", taskId], queryFn: () => bridge.listVerificationResults(taskId), enabled: !privateChat });
   const completionQuery = useQuery({
     queryKey: ["completion-gate", taskId],
     queryFn: () => bridge.taskCompletionGate(taskId),
-    enabled: Boolean(taskQuery.data),
+    enabled: !privateChat && Boolean(taskQuery.data),
   });
   const treeQuery = useQuery({ queryKey: ["workspace-tree", root, explorerPath], queryFn: () => bridge.workspaceTree(root, explorerPath) });
   const searchQuery = useQuery({ queryKey: ["workspace-search", root, explorerSearch], queryFn: () => bridge.workspaceSearch(root, explorerSearch), enabled: explorerSearch.trim().length > 1 });
@@ -164,6 +165,7 @@ export function ContextDrawer({
 
   const lines = (value: string) => value.split("\n").map((line) => line.trim()).filter(Boolean);
   async function saveTaskDefinition() {
+    if (privateChat) return;
     setTaskSaving(true);
     const now = new Date().toISOString();
     try {
@@ -317,7 +319,7 @@ export function ContextDrawer({
       const result = await bridge.applyWorktreeChanges(applyRequest);
       const next = { ...session.summary, appliedAt: result.appliedAt };
       useAppStore.getState().updateSummary(session.summary.sessionId, next);
-      await bridge.upsertSession(next);
+      if (!privateChat) await bridge.upsertSession(next);
       setApplyOpen(false);
     } catch (error) {
       setApplyError(String(error));
@@ -336,8 +338,8 @@ export function ContextDrawer({
         <Tabs.List>
           <Tabs.Trigger value="changes"><FileCode2 size={14} /> {t.changes} <span>{reviewQuery.data?.files.length ?? 0}</span></Tabs.Trigger>
           <Tabs.Trigger value="activity"><Activity size={14} /> {t.tasks} <span>{session.tools.length}</span></Tabs.Trigger>
-          <Tabs.Trigger value="context"><Eye size={14} /> Context <span>{contextQuery.data?.length ?? 0}</span></Tabs.Trigger>
-          <Tabs.Trigger value="verification"><ListChecks size={14} /> Verify <span>{verificationQuery.data?.length ?? 0}</span></Tabs.Trigger>
+          {!privateChat && <Tabs.Trigger value="context"><Eye size={14} /> Context <span>{contextQuery.data?.length ?? 0}</span></Tabs.Trigger>}
+          {!privateChat && <Tabs.Trigger value="verification"><ListChecks size={14} /> Verify <span>{verificationQuery.data?.length ?? 0}</span></Tabs.Trigger>}
           <Tabs.Trigger value="files"><Folder size={14} /> Files</Tabs.Trigger>
           <Tabs.Trigger value="terminal"><TerminalSquare size={14} /> Terminal <span>{terminalTabs.length}</span></Tabs.Trigger>
         </Tabs.List>
@@ -435,7 +437,7 @@ export function ContextDrawer({
             </div>
           ))}
         </Tabs.Content>
-        <Tabs.Content value="context" className="gb-drawer-content">
+        {!privateChat && <Tabs.Content value="context" className="gb-drawer-content">
           <div className="gb-drawer-toolbar"><span>Task contract</span><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => void taskQuery.refetch()}><RefreshCw size={14} /></button></div>
           <div className="gb-task-contract">
             <label>Goal<textarea value={taskGoal} onChange={(event) => setTaskGoal(event.target.value)} /></label>
@@ -451,15 +453,15 @@ export function ContextDrawer({
           {contextQuery.data?.flatMap((manifest) => manifest.entries.map((entry, index) => (
             <div className="gb-drawer-activity" key={`${manifest.manifestId}-${index}`}><span className={`gb-status-dot ${entry.trust === "trusted" ? "idle" : "running"}`} /><div><strong>{entry.kind}: {entry.source}</strong><small>{entry.trust} · ~{entry.tokenEstimate} tokens{focusStrategyLabel(entry.metadata.strategy) ? ` · ${focusStrategyLabel(entry.metadata.strategy)}` : ""}{entry.truncatedReason ? ` · ${entry.truncatedReason}` : ""}</small></div></div>
           )))}
-        </Tabs.Content>
-        <Tabs.Content value="verification" className="gb-drawer-content">
+        </Tabs.Content>}
+        {!privateChat && <Tabs.Content value="verification" className="gb-drawer-content">
           <div className="gb-drawer-toolbar"><span>Completion gate</span><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => { void verificationQuery.refetch(); void completionQuery.refetch(); }}><RefreshCw size={14} /></button></div>
           {!taskQuery.data && <div className="gb-drawer-empty">Save the task contract to enable platform verification.</div>}
           {taskQuery.data?.verificationCommands.map((command) => <div className="gb-drawer-activity" key={command}><div><strong>{command}</strong><small>Required verification</small></div><div><button type="button" className="gb-review-button" disabled={verificationRunning !== null} onClick={() => void executeVerification(command)}>{verificationRunning === command ? "Running…" : "Run"}</button><button type="button" className="gb-icon-button" title="Not run" onClick={() => void recordVerification(command, "not_run")}>–</button><button type="button" className="gb-icon-button" title="Blocked" onClick={() => void recordVerification(command, "blocked")}>!</button></div></div>)}
           {completionQuery.data && <div className={completionQuery.data.ready ? "gb-apply-status ready" : "gb-apply-status blocked"}><strong>{completionQuery.data.ready ? "Ready to complete" : "Verification required"}</strong><span>{completionQuery.data.blockers.join(" · ") || "No unresolved platform blockers."}</span></div>}
           {completionQuery.data?.ready && taskQuery.data?.state === "verifying" && <button type="button" className="gb-review-button" onClick={() => void bridge.completeTask(taskId).then(() => { void taskQuery.refetch(); void completionQuery.refetch(); })}>Mark task completed</button>}
           {verificationQuery.data?.map((result) => <div className="gb-drawer-activity" key={result.verificationId}><span className={`gb-status-dot ${result.status === "passed" ? "idle" : "running"}`} /><div><strong>{result.command}</strong><small>{result.status}{result.summary ? ` · ${result.summary}` : ""}</small></div></div>)}
-        </Tabs.Content>
+        </Tabs.Content>}
         <Tabs.Content value="terminal" className="gb-drawer-content">
           <div className="gb-drawer-toolbar"><span>Task terminals</span><button type="button" className="gb-icon-button" aria-label="New terminal" onClick={() => void createTerminal()}><Plus size={14} /></button></div>
           <div className="gb-terminal-tabs">

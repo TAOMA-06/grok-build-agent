@@ -194,17 +194,24 @@ export function AppShell() {
 
   async function renameActiveThread(title: string) {
     const id = useAppStore.getState().activeSessionId;
-    const summary = id ? useAppStore.getState().sessions[id]?.summary : null;
+    const session = id ? useAppStore.getState().sessions[id] : null;
+    const summary = session?.summary ?? null;
     if (!id || !summary) return;
     const next = { ...summary, title, updatedAt: new Date().toISOString() };
     useAppStore.getState().updateSummary(id, next);
-    await bridge.upsertSession(next);
+    if (!session.privateChat) await bridge.upsertSession(next);
   }
 
   async function archiveActiveThread() {
     const id = useAppStore.getState().activeSessionId;
-    const summary = id ? useAppStore.getState().sessions[id]?.summary : null;
+    const session = id ? useAppStore.getState().sessions[id] : null;
+    const summary = session?.summary ?? null;
     if (!id || !summary) return;
+    if (session.privateChat) {
+      removeSession(id);
+      setDrawerOpen(false);
+      return;
+    }
     const next = { ...summary, archived: !summary.archived, updatedAt: new Date().toISOString() };
     useAppStore.getState().updateSummary(id, next);
     await bridge.upsertSession(next);
@@ -214,12 +221,13 @@ export function AppShell() {
 
   async function deleteActiveThread() {
     const id = useAppStore.getState().activeSessionId;
-    const summary = id ? useAppStore.getState().sessions[id]?.summary : null;
+    const session = id ? useAppStore.getState().sessions[id] : null;
+    const summary = session?.summary ?? null;
     if (!id || !summary) return;
     if (summary.worktreePath) {
       await bridge.deleteWorktree(summary.worktreePath, summary.workspaceRoot, true);
     }
-    await bridge.deleteSession(id);
+    if (!session.privateChat) await bridge.deleteSession(id);
     removeSession(id);
     setDrawerOpen(false);
   }
@@ -491,17 +499,18 @@ export function AppShell() {
               ))}
             </div>
             <div className="gb-confirm-actions">
-              <button type="button" className="gb-button" disabled={!activeSession} onClick={() => {
-                if (!activeSession) return;
+              <button type="button" className="gb-button" onClick={() => {
+                if (!activeSession || activeSession.privateChat) return;
                 setTranscriptExportStatus("Exporting…");
                 void bridge.exportTranscript(activeSession.summary.sessionId, "markdown").then((path) => setTranscriptExportStatus(path ? `Exported to ${path}` : null)).catch((error) => setTranscriptExportStatus(`Export failed: ${String(error)}`));
-              }}>Export Markdown</button>
-              <button type="button" className="gb-button" disabled={!activeSession} onClick={() => {
-                if (!activeSession) return;
+              }} disabled={!activeSession || activeSession.privateChat}>Export Markdown</button>
+              <button type="button" className="gb-button" onClick={() => {
+                if (!activeSession || activeSession.privateChat) return;
                 setTranscriptExportStatus("Exporting…");
                 void bridge.exportTranscript(activeSession.summary.sessionId, "json").then((path) => setTranscriptExportStatus(path ? `Exported to ${path}` : null)).catch((error) => setTranscriptExportStatus(`Export failed: ${String(error)}`));
-              }}>Export JSON</button>
+              }} disabled={!activeSession || activeSession.privateChat}>Export JSON</button>
             </div>
+            {activeSession?.privateChat && <p className="gb-settings-copy">{t.privateChatPersistenceUnavailable}</p>}
             {transcriptExportStatus && <p className="gb-settings-copy">{transcriptExportStatus}</p>}
           </Dialog.Content>
         </Dialog.Portal>

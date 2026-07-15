@@ -7,6 +7,7 @@ import {
   FileCode2,
   Flag,
   FolderKanban,
+  Ghost,
   MoreHorizontal,
   Pencil,
   ShieldAlert,
@@ -172,6 +173,7 @@ export function ThreadView({
             </div>
             <div className="gb-thread-header-actions">
               <span className={`gb-run-pill ${session.busy ? "running" : session.summary.runState}`} role="status" aria-live="polite"><CircleDot size={12} />{session.busy ? t.grokWorking : t.runState[session.summary.runState] ?? session.summary.runState}</span>
+              {session.privateChat && <span className="gb-private-chat-pill" title={t.privateChatLocalOnly}><Ghost size={12} /> {t.privateChatActive}</span>}
               {executionRoot && <button type="button" className="gb-header-button" onClick={() => void onOpenPath(executionRoot)}><ExternalLink size={14} /> {t.open}</button>}
               <button type="button" className={drawerOpen ? "gb-header-button active" : "gb-header-button"} onClick={onToggleDrawer}><FileCode2 size={14} /> {t.changes}{changesVisible && <span className="gb-change-dot" />}</button>
               <DropdownMenu.Root>
@@ -179,7 +181,7 @@ export function ThreadView({
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content className="gb-dropdown compact" sideOffset={7} align="end">
                     <DropdownMenu.Item onSelect={() => setRenameOpen(true)}><Pencil size={14} /> {t.rename}</DropdownMenu.Item>
-                    <DropdownMenu.Item onSelect={() => void onArchive()}><Archive size={14} /> {session.summary.archived ? t.restore : t.archive}</DropdownMenu.Item>
+                    {!session.privateChat && <DropdownMenu.Item onSelect={() => void onArchive()}><Archive size={14} /> {session.summary.archived ? t.restore : t.archive}</DropdownMenu.Item>}
                     <DropdownMenu.Separator className="gb-dropdown-separator" />
                     <DropdownMenu.Item className="danger" onSelect={() => setDeleteOpen(true)}><Trash2 size={14} /> {t.delete}</DropdownMenu.Item>
                   </DropdownMenu.Content>

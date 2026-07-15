@@ -33,6 +33,7 @@ describe("ACP session event routing", () => {
       sessions: {
         [foreground.sessionId]: {
           summary: foreground,
+          privateChat: false,
           blocks: [],
           tools: [],
           planText: "",
@@ -51,6 +52,7 @@ describe("ACP session event routing", () => {
         },
         [background.sessionId]: {
           summary: background,
+          privateChat: false,
           blocks: [],
           tools: [],
           planText: "",
