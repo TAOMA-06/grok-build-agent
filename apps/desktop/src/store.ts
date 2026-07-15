@@ -470,8 +470,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSessionContextUsage: (id, contextUsage) => {
     const s = get().sessions[id];
     if (!s) return;
+    const previous = s.contextUsage;
+    const merged = contextUsage && previous
+      ? {
+          ...contextUsage,
+          usedTokens: contextUsage.usedTokens ?? previous.usedTokens,
+          windowTokens: contextUsage.windowTokens ?? previous.windowTokens,
+          usagePercent: contextUsage.usagePercent ?? previous.usagePercent,
+          promptCache: contextUsage.promptCache ?? previous.promptCache,
+        }
+      : contextUsage;
     set({
-      sessions: { ...get().sessions, [id]: { ...s, contextUsage } },
+      sessions: { ...get().sessions, [id]: { ...s, contextUsage: merged } },
     });
   },
 

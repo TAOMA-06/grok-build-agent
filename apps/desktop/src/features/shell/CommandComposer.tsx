@@ -192,6 +192,19 @@ export function CommandComposer({
     usagePercent != null &&
     usagePercent >= (selectedModel?.autoCompactThresholdPercent ?? 85);
   const hasContextUsage = contextUsage.usedTokens != null || usagePercent != null;
+  const promptCache = contextUsage.promptCache;
+  const cacheHitPercent = promptCache?.hitRatePercent ?? null;
+  const cacheSummary = promptCache
+    ? `${t.promptCacheShort} ${
+        cacheHitPercent == null ? "—" : `${Math.round(cacheHitPercent)}%`
+      } · ${formatTokenCount(promptCache.cachedTokens)} / ${formatTokenCount(
+        promptCache.promptTokens,
+      )}${
+        promptCache.costUsd == null
+          ? ""
+          : ` · $${promptCache.costUsd.toFixed(promptCache.costUsd < 0.01 ? 5 : 3)}`
+      }`
+    : null;
   const capabilitiesQuery = useQuery({
     queryKey: ["capabilities", settings.cliPathOverride || settings.grokPath, settings.cwd],
     queryFn: () => bridge.inspectCapabilities(
@@ -721,6 +734,15 @@ export function CommandComposer({
           </div>
 
           <div className="gb-composer-cluster meta">
+            {cacheHitPercent != null && (
+              <span
+                className="gb-cache-hit"
+                title={cacheSummary ?? undefined}
+                aria-label={cacheSummary ?? undefined}
+              >
+                C{Math.round(cacheHitPercent)}%
+              </span>
+            )}
             <button
               type="button"
               className={`gb-context-meter${usageWarn ? " warn" : ""}${hasContextUsage ? " active" : ""}`}
@@ -728,7 +750,7 @@ export function CommandComposer({
                 hasContextUsage
                   ? `${formatTokenCount(contextUsage.usedTokens)} / ${formatTokenCount(usageWindow)}${
                       usagePercent != null ? ` · ${Math.round(usagePercent)}%` : ""
-                    }`
+                    }${cacheSummary ? ` · ${cacheSummary}` : ""}`
                   : t.contextUsageHint
               }
               aria-label={

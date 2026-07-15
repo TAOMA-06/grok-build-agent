@@ -256,17 +256,19 @@ export function extractContextUsage(
 ): import("../types").SessionContextUsage | null {
   if (!payload || typeof payload !== "object") return null;
   const root = payload as Record<string, unknown>;
-  const nested =
-    (root.update && typeof root.update === "object"
-      ? (root.update as Record<string, unknown>)
-      : null) ??
-    (root.params && typeof root.params === "object"
-      ? (root.params as Record<string, unknown>)
-      : null) ??
-    (root.usage && typeof root.usage === "object"
-      ? (root.usage as Record<string, unknown>)
-      : null) ??
-    root;
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  const params = asRecord(root.params);
+  const update = asRecord(root.update) ?? asRecord(params?.update);
+  const nested = update ?? params ?? root;
+  const usage =
+    asRecord(update?.usage) ??
+    asRecord(params?.usage) ??
+    asRecord(root.usage) ??
+    // Some ACP extensions emit the provider usage body directly as the update.
+    nested;
   const usedTokens = asFiniteNumber(
     nested.usedTokens ??
       nested.used_tokens ??
@@ -301,13 +303,59 @@ export function extractContextUsage(
   ) {
     usagePercent = (usedTokens / windowTokens) * 100;
   }
-  if (usedTokens == null && windowTokens == null && usagePercent == null) {
+
+  const promptDetails =
+    asRecord(usage.prompt_tokens_details) ??
+    asRecord(usage.promptTokensDetails) ??
+    asRecord(usage.input_tokens_details) ??
+    asRecord(usage.inputTokensDetails);
+  const promptTokens = asFiniteNumber(
+    usage.promptTokens ??
+      usage.prompt_tokens ??
+      usage.inputTokens ??
+      usage.input_tokens ??
+      usage.promptTextTokens ??
+      usage.prompt_text_tokens,
+  );
+  const cachedTokens = asFiniteNumber(
+    promptDetails?.cachedTokens ??
+      promptDetails?.cached_tokens ??
+      usage.cachedPromptTextTokens ??
+      usage.cached_prompt_text_tokens ??
+      usage.cachedTokens ??
+      usage.cached_tokens,
+  );
+  const costUsd = asFiniteNumber(usage.costUsd ?? usage.cost_usd);
+  const costTicks = asFiniteNumber(
+    usage.costInUsdTicks ?? usage.cost_in_usd_ticks,
+  );
+  const promptCache = cachedTokens == null
+    ? null
+    : {
+        promptTokens,
+        cachedTokens,
+        uncachedTokens:
+          promptTokens == null ? null : Math.max(0, promptTokens - cachedTokens),
+        hitRatePercent:
+          promptTokens != null && promptTokens > 0
+            ? (cachedTokens / promptTokens) * 100
+            : null,
+        costUsd: costUsd ?? (costTicks == null ? null : costTicks / 10_000_000_000),
+      };
+
+  if (
+    usedTokens == null &&
+    windowTokens == null &&
+    usagePercent == null &&
+    promptCache == null
+  ) {
     return null;
   }
   return {
     usedTokens,
     windowTokens,
     usagePercent,
+    promptCache,
     source: "acp",
     updatedAt: new Date().toISOString(),
   };

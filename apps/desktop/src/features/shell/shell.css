@@ -1336,6 +1336,20 @@
   color: var(--gb-warning);
 }
 
+.gb-cache-hit {
+  min-width: 34px;
+  padding: 3px 5px;
+  border: 1px solid color-mix(in srgb, var(--gb-success) 24%, var(--gb-border));
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--gb-success) 78%, var(--gb-muted));
+  background: color-mix(in srgb, var(--gb-success) 7%, transparent);
+  font-family: var(--gb-mono);
+  font-size: 9px;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .gb-context-ring {
   display: block;
   color: inherit;

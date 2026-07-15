@@ -106,6 +106,26 @@ describe("context usage helpers", () => {
     });
   });
 
+  it("extracts xAI prompt-cache accounting from a nested ACP update", () => {
+    const usage = extractContextUsage({
+      update: {
+        sessionUpdate: "usage_update",
+        usage: {
+          prompt_tokens: 1_000,
+          prompt_tokens_details: { cached_tokens: 800 },
+          cost_in_usd_ticks: 25_000_000,
+        },
+      },
+    });
+    expect(usage?.promptCache).toMatchObject({
+      promptTokens: 1_000,
+      cachedTokens: 800,
+      uncachedTokens: 200,
+      hitRatePercent: 80,
+      costUsd: 0.0025,
+    });
+  });
+
   it("seeds catalog window when usage is unknown", () => {
     expect(emptyContextUsage(200_000)).toMatchObject({
       usedTokens: null,

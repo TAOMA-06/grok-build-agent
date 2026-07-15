@@ -118,7 +118,7 @@ describe("useDesktopController", () => {
     );
   });
 
-  it("restarts the agent when live model switch is unsupported", async () => {
+  it("keeps a started task model-pinned and offers a cache-safe fork", async () => {
     const summary: SessionSummary = {
       sessionId: "local",
       connectionId: "connection",
@@ -137,23 +137,11 @@ describe("useDesktopController", () => {
       sessionOrder: ["local"],
       activeSessionId: "local",
     });
-    const restartAgent = vi.fn().mockResolvedValue({
-      running: true,
-      connectionId: "connection-2",
-      sessionId: "remote-2",
-      cwd: "/repo",
-      grokPath: null,
-      lastError: null,
-      model: null,
-      mode: null,
-      availableCommands: [],
-    });
+    const setSessionModel = vi.fn();
+    const restartAgent = vi.fn();
     const bridge: DesktopBridge = {
       ...mockDesktopBridge,
-      setSessionModel: vi.fn().mockResolvedValue({
-        kind: "new_session_required",
-        reason: "unsupported",
-      }),
+      setSessionModel,
       restartAgent,
       upsertSession: vi.fn().mockResolvedValue(undefined),
     };
@@ -164,16 +152,15 @@ describe("useDesktopController", () => {
     await act(async () => {
       await result.current.chooseModel("grok-4.5");
     });
-    expect(useAppStore.getState().sessions.local?.summary.model).toBe("grok-4.5");
-    expect(restartAgent).toHaveBeenCalled();
-    expect(result.current.pendingModelFork).toBeNull();
+    expect(useAppStore.getState().sessions.local?.summary.model).toBe("grok-build");
+    expect(setSessionModel).not.toHaveBeenCalled();
+    expect(restartAgent).not.toHaveBeenCalled();
+    expect(result.current.pendingModelFork).toMatchObject({ modelId: "grok-4.5" });
   });
 
-  it("restarts after unexpected end-of-file during model switch", async () => {
+  it("changes the model in place before a task has a remote session", async () => {
     const summary: SessionSummary = {
       sessionId: "local",
-      connectionId: "connection",
-      remoteSessionId: "remote",
       workspaceRoot: "/repo",
       title: "Task",
       createdAt: "now",
@@ -188,21 +175,10 @@ describe("useDesktopController", () => {
       sessionOrder: ["local"],
       activeSessionId: "local",
     });
-    const restartAgent = vi.fn().mockResolvedValue({
-      running: true,
-      connectionId: "connection-2",
-      sessionId: "remote-2",
-      cwd: "/repo",
-      grokPath: null,
-      lastError: null,
-      model: null,
-      mode: null,
-      availableCommands: [],
-    });
+    const setSessionModel = vi.fn();
     const bridge: DesktopBridge = {
       ...mockDesktopBridge,
-      setSessionModel: vi.fn().mockRejectedValue(new Error("unexpected end of file")),
-      restartAgent,
+      setSessionModel,
       upsertSession: vi.fn().mockResolvedValue(undefined),
     };
     const { result } = renderHook(
@@ -212,8 +188,9 @@ describe("useDesktopController", () => {
     await act(async () => {
       await result.current.chooseModel("grok-4.5");
     });
-    expect(restartAgent).toHaveBeenCalled();
     expect(useAppStore.getState().sessions.local?.summary.model).toBe("grok-4.5");
+    expect(setSessionModel).not.toHaveBeenCalled();
+    expect(result.current.pendingModelFork).toBeNull();
   });
 
   it("keeps provisional mode independent and persists a confirmed live mode switch", async () => {

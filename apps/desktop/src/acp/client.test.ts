@@ -115,6 +115,33 @@ describe("ACP session event routing", () => {
     expect(useAppStore.getState().sessions["local-foreground"]?.blocks).toEqual([]);
   });
 
+  it("keeps cache accounting when a later context update arrives", () => {
+    handleSessionUpdate({
+      sessionUpdate: "usage_update",
+      usage: {
+        input_tokens: 2_000,
+        input_tokens_details: { cached_tokens: 1_500 },
+      },
+    } as never, "remote-2", "conn-1");
+    handleSessionUpdate({
+      sessionUpdate: "context_update",
+      totalContextTokens: 12_000,
+      contextWindowTokens: 200_000,
+    }, "remote-2", "conn-1");
+
+    expect(useAppStore.getState().sessions["local-background"]?.contextUsage)
+      .toMatchObject({
+        usedTokens: 12_000,
+        windowTokens: 200_000,
+        promptCache: {
+          promptTokens: 2_000,
+          cachedTokens: 1_500,
+          uncachedTokens: 500,
+          hitRatePercent: 75,
+        },
+      });
+  });
+
   it("streams thought chunks from array-shaped ACP content", async () => {
     handleSessionUpdate({
       sessionUpdate: "agent_thought_chunk",

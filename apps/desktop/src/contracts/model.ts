@@ -61,6 +61,15 @@ export type SessionContextUsage = {
   usedTokens: number | null;
   windowTokens: number | null;
   usagePercent: number | null;
+  /** Latest provider request's prompt-cache accounting, when exposed by ACP. */
+  promptCache: {
+    promptTokens: number | null;
+    cachedTokens: number;
+    uncachedTokens: number | null;
+    hitRatePercent: number | null;
+    /** Exact provider charge for the request, after cache discounts. */
+    costUsd: number | null;
+  } | null;
   source: "acp" | "slash" | "estimate" | "catalog" | "unknown";
   updatedAt: string;
 };
@@ -101,6 +110,7 @@ export function emptyContextUsage(
     usedTokens: null,
     windowTokens: windowTokens ?? null,
     usagePercent: null,
+    promptCache: null,
     source: windowTokens != null ? "catalog" : "unknown",
     updatedAt: new Date().toISOString(),
   };

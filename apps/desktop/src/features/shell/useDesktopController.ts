@@ -606,80 +606,29 @@ export function useDesktopController(
         return;
       }
       if (state.sessions[sessionId]?.busy) return;
-      // Persist the choice first so reconnect/restart uses the new connection key.
+      const summary = state.sessions[sessionId]?.summary;
+      if (!summary) return;
+      const currentModelId =
+        summary.model ??
+        state.sessions[sessionId]?.modelState?.currentModelId ??
+        state.settings.model;
+      if (currentModelId === modelId) return;
+
+      // Provider prompt caches are model-scoped. Keep a started task pinned to
+      // its original model so switching does not cold-start the full history on
+      // another model (or mutate a connection that also hosts other sessions).
+      if (summary.remoteSessionId) {
+        setPendingModelFork({ modelId, reason: t.modelCachePinnedReason });
+        return;
+      }
+
       state.setEffectiveModelId(modelId);
-      const summary = useAppStore.getState().sessions[sessionId]?.summary;
-      if (!summary?.connectionId || !summary.remoteSessionId) {
+      {
         const next = useAppStore.getState().sessions[sessionId]?.summary;
         if (next) await bridge.upsertSession(next);
-        return;
       }
-
-      let result;
-      try {
-        result = await bridge.setSessionModel(
-          summary.connectionId,
-          summary.remoteSessionId,
-          modelId,
-        );
-      } catch {
-        // Stale host / dead ACP pipe after an in-place app replace often surfaces
-        // as "unexpected end of file". Reconnect with the new model instead.
-        try {
-          await reloadActiveAgent();
-          const next = useAppStore.getState().sessions[sessionId]?.summary;
-          // Persistence failures must not surface as model-switch failures.
-          if (next) await bridge.upsertSession(next).catch(() => undefined);
-        } catch (error) {
-          state.addBlock(sessionId, {
-            id: crypto.randomUUID(),
-            type: "system",
-            level: "error",
-            text: translate("modelSwitchFailed", { reason: String(error) }),
-          });
-        }
-        return;
-      }
-
-      if (result.kind === "new_session_required") {
-        try {
-          await reloadActiveAgent();
-          const next = useAppStore.getState().sessions[sessionId]?.summary;
-          if (next) await bridge.upsertSession(next).catch(() => undefined);
-        } catch (error) {
-          setPendingModelFork({ modelId, reason: result.reason });
-          state.addBlock(sessionId, {
-            id: crypto.randomUUID(),
-            type: "system",
-            level: "error",
-            text: translate("modelSwitchFailed", { reason: String(error) }),
-          });
-        }
-        return;
-      }
-
-      const prev = useAppStore.getState().sessions[sessionId]?.modelState;
-      const merged = {
-        ...result.state,
-        availableModels: mergeSelectableModels(
-          result.state.availableModels,
-          prev?.availableModels,
-          useAppStore.getState().globalModelState.availableModels,
-        ),
-      };
-      state.setSessionModelState(sessionId, merged);
-      state.setGlobalModelState({
-        ...useAppStore.getState().globalModelState,
-        currentModelId: modelId,
-        availableModels: mergeSelectableModels(
-          useAppStore.getState().globalModelState.availableModels,
-          merged.availableModels,
-        ),
-      });
-      const next = useAppStore.getState().sessions[sessionId]?.summary;
-      if (next) await bridge.upsertSession(next).catch(() => undefined);
     },
-    [bridge, reloadActiveAgent],
+    [bridge],
   );
 
   const chooseEffort = useCallback(
