@@ -11,8 +11,9 @@ New installations enable three complementary privacy controls by default:
 | Control | Scope | Default | Effect |
 |---------|--------|---------|--------|
 | **Privacy Mode** | Grok / xAI account | **On** | Coding session data is not used to train or improve the product (`/privacy opt-out` / `codingDataRetentionOptOut`) |
-| **Private Chat** | This desktop app | **On** | Task history, drafts, and transcript cache stay out of local durable storage |
+| **Private Chat** | This desktop app | **Off** (durable coding) | When on, task history, drafts, contracts, and verification stay out of local durable storage |
 | **Privacy Shield (Strict)** | Local outbound prompts | **On** | Redact common secrets and block high-risk attachment names before send |
+| **Orchestrator harness** | Session rules | **On** | Injects plan/explore/verify guidance for first-class agent behavior |
 
 ### Grok Privacy Mode (account-level)
 
@@ -29,7 +30,7 @@ The desktop stores your desired Privacy Mode flag locally and re-applies it when
 
 ### Local Private Chat
 
-**Private Chat** is enabled by default for new desktop tasks. While it is on, the desktop app keeps the task only in memory and does not write its session row, draft, cached transcript events, task contract, context manifests, verification records, or transcript export to this application's local history. A private task is therefore not restored when the desktop app restarts.
+**Private Chat** is **off by default** so coding tasks keep durable history, task contracts, and verification. When you turn it on, the desktop app keeps the task only in memory and does not write its session row, draft, cached transcript events, task contract, context manifests, verification records, or transcript export to this application's local history. A private task is therefore not restored when the desktop app restarts.
 
 This is a desktop-local retention control. It does not replace account-level Privacy Mode above.
 

@@ -45,21 +45,21 @@ describe("SettingsDialog", () => {
       expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ locale: "en" }));
     });
     expect(t.settings).toBe("Settings");
-    expect(screen.getByRole("checkbox", { name: "Private Chat" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Private Chat" })).not.toBeChecked();
   });
 
-  it("shows Private Chat on the default page, enables it by default, and persists changes immediately", async () => {
+  it("shows Private Chat off by default (durable coding) and persists enable immediately", async () => {
     const saveSettings = vi.fn().mockResolvedValue(undefined);
     renderDialog({ ...mockDesktopBridge, saveSettings });
 
     const privateChat = screen.getByRole("checkbox", { name: "Private Chat（私密会话）" });
-    expect(privateChat).toBeChecked();
+    expect(privateChat).not.toBeChecked();
     fireEvent.click(privateChat);
 
     await waitFor(() => {
-      expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ privateChat: false }));
+      expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ privateChat: true }));
     });
-    expect(screen.getByText("已关闭 · 新任务会保存在本机，用于历史记录和崩溃恢复。")).toBeInTheDocument();
+    expect(screen.getByText(/只在当前桌面端运行期间可见/)).toBeInTheDocument();
   });
 
   it("shows Privacy Mode on by default and syncs to the agent when toggled", async () => {

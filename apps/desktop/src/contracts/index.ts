@@ -18,3 +18,4 @@ export * from "./commands";
 export * from "./mcp";
 export * from "./platform";
 export * from "./privacy";
+export * from "./taskSeed";

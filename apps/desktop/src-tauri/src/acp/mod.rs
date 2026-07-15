@@ -143,7 +143,19 @@ pub fn probe_grok(configured: Option<&str>) -> GrokProbe {
 }
 
 pub fn default_harness_rules() -> String {
-    include_str!("../../../../../harness/AGENTS.md").to_string()
+    let agents = include_str!("../../../../../harness/AGENTS.md").trim();
+    // Keep verify guidance short so harness injection stays cache-friendly.
+    let verify = r#"
+## Verify skill (desktop digest)
+
+After substantial edits:
+1. Detect tooling from manifests (package.json, Cargo.toml, pyproject, go.mod, xcodeproj).
+2. Prefer project scripts (`npm test`, `npm run check`, `cargo test`, etc.).
+3. Run the tightest useful checks; if they fail, fix root cause and re-run.
+4. Report commands run, pass/fail, and remaining risks.
+5. Align with platform `Verify:` lines in the task contract when present.
+"#;
+    format!("{agents}\n{verify}")
 }
 
 #[cfg(test)]

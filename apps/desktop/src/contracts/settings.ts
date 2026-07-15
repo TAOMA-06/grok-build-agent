@@ -38,9 +38,9 @@ export type Settings = {
    */
   codingDataPrivacy: boolean;
   /**
-   * New desktop tasks start as local-only private sessions. Their transcript,
-   * drafts, task contract and session row are kept out of this app's durable
-   * history. Separate from account-level Grok Privacy Mode above.
+   * Local-only private sessions skip durable history (drafts, transcript cache,
+   * task contracts, verification). Default off so coding tasks stay durable and
+   * verifiable. Separate from account-level Grok Privacy Mode above.
    */
   privateChat: boolean;
   defaultMode: import("./mode").TaskMode;
@@ -95,12 +95,12 @@ export function defaultSettings(): Settings {
     focusMode: "balanced",
     privacyMode: "strict",
     codingDataPrivacy: true,
-    privateChat: true,
+    privateChat: false,
     defaultMode: "agent",
     permissionPolicy: "workspace_edit",
     autoUpdateCli: true,
     alwaysApprove: false,
-    useHarness: false,
+    useHarness: true,
     sandbox: "workspace",
     cwd: "",
     onboardingDone: false,
@@ -122,14 +122,17 @@ export function normalizeSettings(settings: Settings): Settings {
   const privacyMode: PrivacyMode = settings.privacyMode === "standard" ? "standard" : "strict";
   // Missing / legacy fields default to Privacy Mode ON (coding data not used for training).
   const codingDataPrivacy = (settings as { codingDataPrivacy?: boolean }).codingDataPrivacy !== false;
-  const privateChat = settings.privateChat !== false;
+  // Durable coding default: only true when explicitly enabled.
+  const privateChat = settings.privateChat === true;
+  const useHarness = settings.useHarness !== false;
   if (
     settings.schemaVersion === 7 &&
     defaultReasoningEffort === settings.defaultReasoningEffort &&
     focusMode === settings.focusMode &&
     privacyMode === settings.privacyMode &&
     codingDataPrivacy === settings.codingDataPrivacy &&
-    privateChat === settings.privateChat
+    privateChat === settings.privateChat &&
+    useHarness === settings.useHarness
   ) return settings;
   return {
     ...settings,
@@ -139,5 +142,6 @@ export function normalizeSettings(settings: Settings): Settings {
     privacyMode,
     codingDataPrivacy,
     privateChat,
+    useHarness,
   };
 }

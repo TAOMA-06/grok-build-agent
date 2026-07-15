@@ -15,11 +15,13 @@ The harness makes Grok Build **use** its strengths instead of only exposing them
 
 ## How Desktop loads it
 
-When **Inject orchestrator harness** is on, the ACP host embeds `harness/AGENTS.md` into:
+When **Orchestrator harness** is on (default for new installs), the ACP host embeds `harness/AGENTS.md` plus a short verify-skill digest into:
 
 ```json
 session/new → params._meta.rules
 ```
+
+Workspace `AGENTS.md` / `Agents.md` (up to 32 KB) is also appended when present so project conventions travel with the session.
 
 ## How TUI users load it
 

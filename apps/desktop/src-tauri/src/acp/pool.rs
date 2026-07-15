@@ -9,11 +9,47 @@ use crate::contracts::{ConnectionState, RuntimeSnapshot};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Runtime as TauriRuntime};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);
+const PROJECT_RULES_MAX_BYTES: usize = 32 * 1024;
+
+/// Load a bounded AGENTS.md (or Agents.md) from the workspace for session rules.
+fn load_project_rules(cwd: &str) -> Option<String> {
+    let root = Path::new(cwd);
+    for name in ["AGENTS.md", "Agents.md", "agents.md"] {
+        let path = root.join(name);
+        let Some(meta) = std::fs::metadata(&path).ok() else {
+            continue;
+        };
+        if !meta.is_file() || meta.len() == 0 {
+            continue;
+        }
+        let Some(raw) = std::fs::read(&path).ok() else {
+            continue;
+        };
+        if raw.is_empty() {
+            continue;
+        }
+        let slice = if raw.len() > PROJECT_RULES_MAX_BYTES {
+            &raw[..PROJECT_RULES_MAX_BYTES]
+        } else {
+            &raw[..]
+        };
+        let text = String::from_utf8_lossy(slice);
+        let body = text.trim();
+        if body.is_empty() {
+            continue;
+        }
+        return Some(format!(
+            "# Project rules ({name})\n\n{body}\n"
+        ));
+    }
+    None
+}
 
 #[derive(Clone, Default)]
 pub struct RuntimePool {
@@ -344,6 +380,13 @@ impl RuntimePool {
                 rules = harness;
             } else {
                 rules = format!("{harness}\n\n{rules}");
+            }
+        }
+        if let Some(project_rules) = load_project_rules(cwd) {
+            if rules.is_empty() {
+                rules = project_rules;
+            } else {
+                rules = format!("{rules}\n\n{project_rules}");
             }
         }
 
@@ -1182,5 +1225,25 @@ mod capability_tests {
         ]));
         assert_eq!(modes.len(), 3);
         assert_eq!(modes[1].id, "plan");
+    }
+
+    #[test]
+    fn load_project_rules_skips_missing_primary_and_finds_lowercase() {
+        let dir = std::env::temp_dir().join(format!(
+            "gb-project-rules-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Empty dir: no rules — metadata miss must not short-circuit into a panic/error.
+        assert!(load_project_rules(dir.to_str().unwrap()).is_none());
+        let rules_path = dir.join("agents.md");
+        std::fs::write(&rules_path, " Prefer worktrees.\n").unwrap();
+        let loaded = load_project_rules(dir.to_str().unwrap()).expect("should find agents rules");
+        assert!(loaded.contains("Prefer worktrees."));
+        assert!(loaded.contains("# Project rules ("));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

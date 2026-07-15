@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { defaultSettings, normalizeSettings, type Settings } from "./settings";
 
-describe("settings privacy defaults", () => {
-  it("defaults Privacy Mode, Private Chat, and Strict Privacy Shield to on", () => {
+describe("settings agent defaults", () => {
+  it("defaults durable coding with harness and Privacy Mode on", () => {
     const settings = defaultSettings();
     expect(settings.schemaVersion).toBe(7);
     expect(settings.codingDataPrivacy).toBe(true);
-    expect(settings.privateChat).toBe(true);
+    expect(settings.privateChat).toBe(false);
+    expect(settings.useHarness).toBe(true);
     expect(settings.privacyMode).toBe("strict");
   });
 
@@ -19,14 +20,19 @@ describe("settings privacy defaults", () => {
     const normalized = normalizeSettings(legacy);
     expect(normalized.schemaVersion).toBe(7);
     expect(normalized.codingDataPrivacy).toBe(true);
-    expect(normalized.privateChat).toBe(true);
+    expect(normalized.privateChat).toBe(false);
+    expect(normalized.useHarness).toBe(true);
   });
 
-  it("preserves an explicit Privacy Mode off preference", () => {
+  it("preserves explicit privateChat and harness off preferences", () => {
     const normalized = normalizeSettings({
       ...defaultSettings(),
       codingDataPrivacy: false,
+      privateChat: true,
+      useHarness: false,
     });
     expect(normalized.codingDataPrivacy).toBe(false);
+    expect(normalized.privateChat).toBe(true);
+    expect(normalized.useHarness).toBe(false);
   });
 });

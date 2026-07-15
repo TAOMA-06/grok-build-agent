@@ -1870,6 +1870,8 @@ impl Database {
             .ok_or_else(|| DbError::Message("unknown task".into()))?;
         let verification = self.list_verification_results(task_id)?;
         let mut blockers = Vec::new();
+        // Only Passed evidence satisfies the gate. NotRun/Blocked/Failed all block
+        // completion so "done" always means verified (or no commands declared).
         for command in &task.verification_commands {
             match verification
                 .iter()
@@ -1877,23 +1879,22 @@ impl Database {
                 .find(|result| &result.command == command)
             {
                 None => blockers.push(format!("verification not recorded: {command}")),
+                Some(result) if matches!(result.status, VerificationStatus::Passed) => {}
                 Some(result) if matches!(result.status, VerificationStatus::Failed) => {
                     blockers.push(format!("verification failed: {command}"));
                 }
-                Some(result)
-                    if matches!(
-                        result.status,
-                        VerificationStatus::NotRun | VerificationStatus::Blocked
-                    ) && result
-                        .summary
-                        .as_deref()
-                        .unwrap_or_default()
-                        .trim()
-                        .is_empty() =>
-                {
-                    blockers.push(format!("verification reason missing: {command}"));
+                Some(result) if matches!(result.status, VerificationStatus::Blocked) => {
+                    blockers.push(format!(
+                        "verification blocked: {command}{}",
+                        result
+                            .summary
+                            .as_deref()
+                            .filter(|s| !s.trim().is_empty())
+                            .map(|s| format!(" ({s})"))
+                            .unwrap_or_default()
+                    ));
                 }
-                Some(_) => {}
+                Some(_) => blockers.push(format!("verification not run: {command}")),
             }
         }
         let conn = self.conn.lock();

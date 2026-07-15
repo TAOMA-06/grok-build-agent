@@ -52,6 +52,7 @@ pub struct AppSettings {
     #[serde(default = "default_true")]
     pub auto_update_cli: bool,
     pub always_approve: bool,
+    #[serde(default = "default_use_harness")]
     pub use_harness: bool,
     #[serde(default)]
     pub sandbox: SandboxMode,
@@ -99,6 +100,7 @@ struct AppSettingsFile {
     #[serde(default = "default_true")]
     pub auto_update_cli: bool,
     pub always_approve: bool,
+    #[serde(default = "default_use_harness")]
     pub use_harness: bool,
     #[serde(default)]
     pub sandbox: SandboxMode,
@@ -134,7 +136,7 @@ impl Default for AppSettings {
             permission_policy: default_permission_policy(),
             auto_update_cli: true,
             always_approve: false,
-            use_harness: false,
+            use_harness: default_use_harness(),
             sandbox: SandboxMode::Workspace,
             cwd: String::new(),
             onboarding_done: false,
@@ -177,6 +179,11 @@ fn default_coding_data_privacy() -> bool {
 }
 
 fn default_private_chat() -> bool {
+    // Durable coding tasks by default (history, contracts, verification).
+    false
+}
+
+fn default_use_harness() -> bool {
     true
 }
 
@@ -343,7 +350,7 @@ mod tests {
         assert_eq!(file.focus_mode, "balanced");
         assert_eq!(file.privacy_mode, "strict");
         assert!(file.coding_data_privacy);
-        assert!(file.private_chat);
+        assert!(!file.private_chat);
         assert_eq!(file.permission_policy, "workspace_edit");
         assert!(file.auto_update_cli);
         assert!(file.always_approve);

@@ -46,6 +46,78 @@ fn plan_blocks_fs_write(mode: &str, method: &str) -> bool {
     mode == "plan" && is_fs_write_method(method)
 }
 
+/// Conservative plan-mode shell guard: block common write/mutation patterns while
+/// still allowing read-only inspection commands.
+fn plan_mode_blocks_terminal_write(command: &str, args: &[String]) -> bool {
+    let program = std::path::Path::new(command)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(command)
+        .to_ascii_lowercase();
+    let joined = args.join(" ").to_ascii_lowercase();
+    let script = if matches!(
+        program.as_str(),
+        "sh" | "bash" | "zsh" | "fish" | "cmd" | "cmd.exe" | "pwsh" | "powershell"
+    ) {
+        joined.as_str()
+    } else {
+        // Non-shell: block known mutating tools entirely in plan mode.
+        return matches!(
+            program.as_str(),
+            "rm" | "mv"
+                | "cp"
+                | "tee"
+                | "sed"
+                | "install"
+                | "chmod"
+                | "chown"
+                | "git"
+                | "npm"
+                | "pnpm"
+                | "yarn"
+                | "cargo"
+                | "pip"
+                | "pip3"
+        ) && !is_plan_mode_read_only_tool(&program, args);
+    };
+
+    // Shell -c payload heuristics.
+    script.contains('>')
+        || script.contains(">>")
+        || script.contains(" tee ")
+        || script.contains("|tee")
+        || script.contains("rm ")
+        || script.contains("mv ")
+        || script.contains("cp ")
+        || script.contains("sed -i")
+        || script.contains("git commit")
+        || script.contains("git push")
+        || script.contains("git reset")
+        || script.contains("git checkout")
+        || script.contains("npm install")
+        || script.contains("npm publish")
+        || script.contains("cargo install")
+        || script.contains("pip install")
+}
+
+fn is_plan_mode_read_only_tool(program: &str, args: &[String]) -> bool {
+    match program {
+        "git" => args.first().is_some_and(|arg| {
+            matches!(
+                arg.as_str(),
+                "status" | "diff" | "log" | "show" | "branch" | "rev-parse" | "ls-files"
+            )
+        }),
+        "cargo" => args.first().is_some_and(|arg| {
+            matches!(arg.as_str(), "check" | "test" | "clippy" | "tree" | "metadata")
+        }),
+        "npm" | "pnpm" | "yarn" => args.first().is_some_and(|arg| {
+            matches!(arg.as_str(), "test" | "run" | "ls" | "list" | "view" | "pack")
+        }),
+        _ => false,
+    }
+}
+
 fn safe_plan_file_path(session_id: &str, params: &Value) -> Option<std::path::PathBuf> {
     let requested = std::path::PathBuf::from(params.get("path")?.as_str()?);
     if requested.file_name()?.to_str()? != "plan.md" || !requested.is_absolute() {
@@ -179,6 +251,22 @@ pub async fn handle_server_request(
                 return Ok(());
             };
             let (command, args) = parse_create_params(&params)?;
+            let mode = conn
+                .session_mode_state(&routed_session_id)
+                .current_mode
+                .to_ascii_lowercase();
+            if mode == "plan" && plan_mode_blocks_terminal_write(&command, &args) {
+                respond(
+                    conn,
+                    id,
+                    Err(AcpError::Message(
+                        "PLAN_MODE_READ_ONLY: write-capable shell commands are blocked until the plan is approved"
+                            .into(),
+                    )),
+                )
+                .await?;
+                return Ok(());
+            }
             let secret_refs = params
                 .get("env")
                 .and_then(Value::as_array)
@@ -447,6 +535,18 @@ mod tests {
         assert!(plan_blocks_fs_write("plan", "fs/write_text_file"));
         assert!(!plan_blocks_fs_write("plan", "fs/read_text_file"));
         assert!(!plan_blocks_fs_write("agent", "fs/write_text_file"));
+        assert!(plan_mode_blocks_terminal_write(
+            "/bin/zsh",
+            &["-lc".into(), "echo hi > /tmp/x".into()]
+        ));
+        assert!(!plan_mode_blocks_terminal_write(
+            "git",
+            &["status".into()]
+        ));
+        assert!(plan_mode_blocks_terminal_write(
+            "git",
+            &["commit".into(), "-am".into(), "x".into()]
+        ));
     }
 
     #[test]

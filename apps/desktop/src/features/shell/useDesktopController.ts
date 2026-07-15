@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { buildPromptContent } from "../../contracts";
+import { buildPromptContent, seedTaskFromPrompt } from "../../contracts";
 import { mergeSelectableModels, resolveEffortForModel } from "../../contracts/model";
 import { extractContextUsage } from "../../acp/client";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
@@ -334,15 +334,35 @@ export function useDesktopController(
         // turns from drifting without repeatedly sending the full transcript.
         if (!privateChat && firstTurn && text) {
           const existingTask = await bridge.getTask(sessionId);
+          const root = summary.executionRoot || summary.worktreePath || summary.workspaceRoot;
+          let markerNames: string[] = [];
+          try {
+            const entries = await bridge.workspaceTree(root, null);
+            markerNames = entries
+              .map((entry) => entry.name || entry.path.split(/[\\/]/).pop() || "")
+              .filter(Boolean);
+          } catch {
+            markerNames = [];
+          }
+          const seeded = seedTaskFromPrompt(text, {
+            markerNames,
+            existing: {
+              goal: existingTask?.goal ?? undefined,
+              constraints: existingTask?.constraints,
+              acceptance: existingTask?.acceptance,
+              allowedPaths: existingTask?.allowedPaths,
+              verificationCommands: existingTask?.verificationCommands,
+            },
+          });
           await bridge.upsertTask({
             taskId: sessionId,
             workspaceId: summary.workspaceRoot,
             state: existingTask?.state ?? "running",
-            goal: existingTask?.goal?.trim() || text,
-            constraints: existingTask?.constraints ?? [],
-            acceptance: existingTask?.acceptance ?? [],
-            allowedPaths: existingTask?.allowedPaths ?? [],
-            verificationCommands: existingTask?.verificationCommands ?? [],
+            goal: seeded.goal,
+            constraints: seeded.constraints,
+            acceptance: seeded.acceptance,
+            allowedPaths: seeded.allowedPaths,
+            verificationCommands: seeded.verificationCommands,
             createdAt: existingTask?.createdAt ?? summary.createdAt,
             updatedAt: summary.updatedAt,
           });
