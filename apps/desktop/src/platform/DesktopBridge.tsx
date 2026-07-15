@@ -118,8 +118,8 @@ export interface DesktopBridge {
     codingDataRetentionOptOut?: boolean;
     result?: unknown;
   }>;
-  stageAttachments(paths: string[]): Promise<ComposerAttachment[]>;
-  prepareAttachments(files: ComposerAttachment[]): Promise<PromptContent[]>;
+  stageAttachments(paths: string[], privateChat?: boolean): Promise<ComposerAttachment[]>;
+  prepareAttachments(files: ComposerAttachment[], privateChat?: boolean): Promise<PromptContent[]>;
   listMcpServers(grokPath?: string, workspaceRoot?: string | null): Promise<McpListResult>;
   upsertMcpServer(input: McpServerInput, grokPath?: string): Promise<string>;
   removeMcpServer(
@@ -130,17 +130,40 @@ export interface DesktopBridge {
     name?: string | null,
     options?: { grokPath?: string; workspaceRoot?: string | null },
   ): Promise<McpDoctorResult[]>;
-  gitReview(workspaceRoot: string): Promise<ReviewSnapshot>;
-  gitFilePatch(workspaceRoot: string, path: string, staged: boolean): Promise<string>;
-  gitFileAction(workspaceRoot: string, path: string, action: GitFileAction): Promise<GitMutationResult>;
-  gitHunkAction(workspaceRoot: string, path: string, patch: string, action: GitFileAction): Promise<GitMutationResult>;
-  gitCommit(workspaceRoot: string, message: string): Promise<GitCommitResult>;
-  gitCreateCheckpoint(workspaceRoot: string): Promise<GitCheckpoint>;
-  gitCheckpointRestorePreview(workspaceRoot: string, checkpointId: string): Promise<GitCheckpointRestorePreview>;
-  gitRestoreCheckpoint(workspaceRoot: string, checkpointId: string): Promise<GitCheckpoint>;
-  workspaceTree(workspaceRoot: string, path?: string | null): Promise<WorkspaceEntry[]>;
-  workspaceSearch(workspaceRoot: string, query: string): Promise<WorkspaceEntry[]>;
-  workspaceRead(workspaceRoot: string, path: string): Promise<WorkspacePreview>;
+  gitReview(workspaceRoot: string, privateChat?: boolean): Promise<ReviewSnapshot>;
+  gitFilePatch(workspaceRoot: string, path: string, staged: boolean, privateChat?: boolean): Promise<string>;
+  gitFileAction(
+    workspaceRoot: string,
+    path: string,
+    action: GitFileAction,
+    privateChat?: boolean,
+  ): Promise<GitMutationResult>;
+  gitHunkAction(
+    workspaceRoot: string,
+    path: string,
+    patch: string,
+    action: GitFileAction,
+    privateChat?: boolean,
+  ): Promise<GitMutationResult>;
+  gitCommit(workspaceRoot: string, message: string, privateChat?: boolean): Promise<GitCommitResult>;
+  gitCreateCheckpoint(workspaceRoot: string, privateChat?: boolean): Promise<GitCheckpoint>;
+  gitCheckpointRestorePreview(
+    workspaceRoot: string,
+    checkpointId: string,
+    privateChat?: boolean,
+  ): Promise<GitCheckpointRestorePreview>;
+  gitRestoreCheckpoint(
+    workspaceRoot: string,
+    checkpointId: string,
+    privateChat?: boolean,
+  ): Promise<GitCheckpoint>;
+  workspaceTree(
+    workspaceRoot: string,
+    path?: string | null,
+    privateChat?: boolean,
+  ): Promise<WorkspaceEntry[]>;
+  workspaceSearch(workspaceRoot: string, query: string, privateChat?: boolean): Promise<WorkspaceEntry[]>;
+  workspaceRead(workspaceRoot: string, path: string, privateChat?: boolean): Promise<WorkspacePreview>;
   listPolicyRules(workspaceId?: string | null): Promise<StoredPolicyRule[]>;
   deletePolicyRule(ruleId: string): Promise<void>;
   doctorStatus(): Promise<DoctorStatus>;
@@ -173,9 +196,15 @@ export interface DesktopBridge {
     ref?: string | null;
     path?: string | null;
     branch?: string | null;
+    privateChat?: boolean;
     dirtyPolicy: "clean_head" | "copy_dirty";
   }): Promise<WorktreeSummary>;
-  deleteWorktree(path: string, mainWorkspace: string, force: boolean): Promise<void>;
+  deleteWorktree(
+    path: string,
+    mainWorkspace: string,
+    force: boolean,
+    privateChat?: boolean,
+  ): Promise<void>;
   previewWorktreeApply(req: WorktreeApplyRequest): Promise<WorktreeApplyPreview>;
   applyWorktreeChanges(req: WorktreeApplyRequest): Promise<WorktreeApplyResult>;
 }

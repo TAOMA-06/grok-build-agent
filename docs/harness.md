@@ -21,7 +21,7 @@ When **Orchestrator harness** is on (default for new installs), the ACP host emb
 session/new → params._meta.rules
 ```
 
-Workspace `AGENTS.md` / `Agents.md` (up to 32 KB) is also appended when present so project conventions travel with the session.
+Workspace `AGENTS.md` / `Agents.md` (up to 32 KB) is also appended when present so project conventions travel with the session. The host reads it through a no-follow workspace file handle, accepts only a regular non-linked file, and rejects links or paths that resolve outside the workspace. Its content is XML-escaped, wrapped as untrusted repository data, and preceded by an explicit rule that it cannot override user intent, authorization, privacy, or safety policy.
 
 ## How TUI users load it
 

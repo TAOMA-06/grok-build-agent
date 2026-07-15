@@ -196,7 +196,7 @@ export function AppShell() {
     const id = useAppStore.getState().activeSessionId;
     const session = id ? useAppStore.getState().sessions[id] : null;
     const summary = session?.summary ?? null;
-    if (!id || !summary) return;
+    if (!id || !session || !summary) return;
     const next = { ...summary, title, updatedAt: new Date().toISOString() };
     useAppStore.getState().updateSummary(id, next);
     if (!session.privateChat) await bridge.upsertSession(next);
@@ -206,8 +206,11 @@ export function AppShell() {
     const id = useAppStore.getState().activeSessionId;
     const session = id ? useAppStore.getState().sessions[id] : null;
     const summary = session?.summary ?? null;
-    if (!id || !summary) return;
+    if (!id || !session || !summary) return;
     if (session.privateChat) {
+      if (summary.worktreePath) {
+        await bridge.deleteWorktree(summary.worktreePath, summary.workspaceRoot, true, true);
+      }
       removeSession(id);
       setDrawerOpen(false);
       return;
@@ -223,9 +226,14 @@ export function AppShell() {
     const id = useAppStore.getState().activeSessionId;
     const session = id ? useAppStore.getState().sessions[id] : null;
     const summary = session?.summary ?? null;
-    if (!id || !summary) return;
+    if (!id || !session || !summary) return;
     if (summary.worktreePath) {
-      await bridge.deleteWorktree(summary.worktreePath, summary.workspaceRoot, true);
+      await bridge.deleteWorktree(
+        summary.worktreePath,
+        summary.workspaceRoot,
+        true,
+        session.privateChat,
+      );
     }
     if (!session.privateChat) await bridge.deleteSession(id);
     removeSession(id);

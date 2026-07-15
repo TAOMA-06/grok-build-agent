@@ -12,18 +12,17 @@ pub fn classify_terminal_action(
     args: &[String],
     secret_refs: Vec<String>,
 ) -> ActionRequest {
-    let program = Path::new(command)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or(command)
-        .to_ascii_lowercase();
+    let program = program_name(command);
     let mut effect = ActionEffect::Execute;
     let mut risk = RiskLevel::Low;
 
     if is_shell_wrapper(&program, args) || is_inline_interpreter(&program, args) {
         risk = RiskLevel::High;
     }
-    if is_network_program(&program) {
+    if is_network_program(&program)
+        || is_git_network_operation(&program, args)
+        || is_package_install(&program, args)
+    {
         effect = ActionEffect::Network;
         risk = RiskLevel::High;
     }
@@ -31,7 +30,7 @@ pub fn classify_terminal_action(
         effect = ActionEffect::ExternalSideEffect;
         risk = RiskLevel::Critical;
     }
-    if is_destructive_git(&program, args) {
+    if is_destructive_git(&program, args) || is_destructive_filesystem_command(&program) {
         effect = ActionEffect::Destructive;
         risk = RiskLevel::Critical;
     }
@@ -54,6 +53,60 @@ pub fn classify_terminal_action(
         deadline: crate::acp::iso_now(),
         metadata: Default::default(),
     }
+}
+
+fn program_name(command: &str) -> String {
+    Path::new(command)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(command)
+        .to_ascii_lowercase()
+}
+
+/// Automatic verification never starts a shell or command wrapper. A declared
+/// shell command would otherwise wait for input and could execute arbitrary
+/// content after a turn completes.
+pub fn automatic_verification_allows(command: &str, args: &[String]) -> bool {
+    let programs = std::iter::once(command).chain(args.iter().map(String::as_str));
+    !programs
+        .map(program_name)
+        .any(|program| is_shell_program(&program) || is_automatic_command_wrapper(&program))
+}
+
+fn is_shell_program(program: &str) -> bool {
+    matches!(
+        program,
+        "sh" | "bash"
+            | "zsh"
+            | "fish"
+            | "dash"
+            | "ksh"
+            | "csh"
+            | "tcsh"
+            | "ash"
+            | "cmd"
+            | "cmd.exe"
+            | "pwsh"
+            | "powershell"
+    )
+}
+
+fn is_automatic_command_wrapper(program: &str) -> bool {
+    matches!(
+        program,
+        "env"
+            | "command"
+            | "busybox"
+            | "toybox"
+            | "sudo"
+            | "doas"
+            | "xargs"
+            | "nohup"
+            | "nice"
+            | "timeout"
+            | "setsid"
+            | "stdbuf"
+    )
 }
 
 pub fn evaluate(action: &ActionRequest) -> PolicyDecision {
@@ -103,12 +156,20 @@ pub fn evaluate(action: &ActionRequest) -> PolicyDecision {
 }
 
 fn is_shell_wrapper(program: &str, args: &[String]) -> bool {
-    matches!(
-        program,
-        "sh" | "bash" | "zsh" | "fish" | "cmd" | "cmd.exe" | "pwsh" | "powershell"
-    ) && args
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "-c" | "/c" | "-Command"))
+    if !is_shell_program(program) {
+        return false;
+    }
+    match program {
+        "sh" | "bash" | "zsh" | "fish" => args.iter().any(|arg| {
+            arg.strip_prefix('-')
+                .is_some_and(|flags| flags.contains('c'))
+        }),
+        "cmd" | "cmd.exe" => args.iter().any(|arg| arg.eq_ignore_ascii_case("/c")),
+        "pwsh" | "powershell" => args
+            .iter()
+            .any(|arg| arg.eq_ignore_ascii_case("-command") || arg.eq_ignore_ascii_case("-c")),
+        _ => false,
+    }
 }
 
 fn is_inline_interpreter(program: &str, args: &[String]) -> bool {
@@ -125,6 +186,30 @@ fn is_network_program(program: &str) -> bool {
         program,
         "curl" | "wget" | "ssh" | "scp" | "sftp" | "rsync" | "nc" | "netcat"
     )
+}
+
+fn is_git_network_operation(program: &str, args: &[String]) -> bool {
+    program == "git"
+        && matches!(
+            args.first().map(String::as_str),
+            Some("clone" | "fetch" | "pull" | "ls-remote" | "submodule")
+        )
+}
+
+fn is_package_install(program: &str, args: &[String]) -> bool {
+    let subcommand = args.first().map(String::as_str);
+    match program {
+        "npm" | "pnpm" | "yarn" | "bun" => matches!(
+            subcommand,
+            Some("install" | "i" | "ci" | "add" | "update" | "upgrade" | "exec" | "dlx")
+        ),
+        "pip" | "pip3" | "poetry" | "uv" | "gem" | "bundle" | "composer" => {
+            matches!(subcommand, Some("install" | "add" | "update" | "upgrade"))
+        }
+        "cargo" => matches!(subcommand, Some("install" | "add" | "update")),
+        "go" => matches!(subcommand, Some("get" | "install")),
+        _ => false,
+    }
 }
 
 fn is_external_side_effect(program: &str, args: &[String]) -> bool {
@@ -144,6 +229,13 @@ fn is_destructive_git(program: &str, args: &[String]) -> bool {
         Some("checkout" | "restore") => args.iter().any(|arg| arg == "--"),
         _ => false,
     }
+}
+
+fn is_destructive_filesystem_command(program: &str) -> bool {
+    matches!(
+        program,
+        "rm" | "rmdir" | "unlink" | "dd" | "truncate" | "shred"
+    ) || program.starts_with("mkfs")
 }
 
 fn is_sensitive_path(path: &Path) -> bool {
@@ -189,11 +281,30 @@ mod tests {
     }
 
     #[test]
+    fn automatic_verification_never_starts_a_shell() {
+        assert!(!automatic_verification_allows("/bin/zsh", &["-l".into()]));
+        assert!(!automatic_verification_allows(
+            "env",
+            &["bash".into(), "-c".into()]
+        ));
+        assert!(!automatic_verification_allows(
+            "busybox",
+            &["sh".into(), "-c".into()]
+        ));
+        assert!(automatic_verification_allows("cargo", &["test".into()]));
+    }
+
+    #[test]
     fn shell_inline_network_and_destructive_git_require_confirmation() {
         for request in [
             action("sh", &["-c", "echo hi"]),
+            action("zsh", &["-lc", "echo hi"]),
             action("curl", &["https://example.com"]),
             action("git", &["reset", "--hard"]),
+            action("git", &["clone", "https://example.com/repo.git"]),
+            action("npm", &["install"]),
+            action("rm", &["-rf", "build-output"]),
+            action("truncate", &["-s", "0", "database.sqlite"]),
         ] {
             assert_eq!(
                 evaluate(&request).decision,

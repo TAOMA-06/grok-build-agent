@@ -50,6 +50,8 @@ export type WorktreeCreateRequest = {
   ref?: string | null;
   path?: string | null;
   branch?: string | null;
+  /** Keep Host audit/idempotency metadata out of durable storage for a private task. */
+  privateChat?: boolean;
   /**
    * When source has uncommitted changes:
    * - clean_head: worktree at clean HEAD
@@ -62,12 +64,16 @@ export type WorktreeCreateRequest = {
 export type WorktreeDeleteRequest = {
   path: string;
   force: boolean;
+  /** The removed worktree belongs to a private task. */
+  privateChat?: boolean;
 };
 
 export type WorktreeApplyRequest = {
   mainWorkspace: string;
   worktreePath: string;
   baseCommit: string;
+  /** Keep the private task's apply request out of durable Host audit storage. */
+  privateChat?: boolean;
 };
 
 export type WorktreeApplyPreview = {

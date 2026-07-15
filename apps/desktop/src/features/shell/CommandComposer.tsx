@@ -301,7 +301,9 @@ export function CommandComposer({
       return;
     }
     try {
-      acceptAttachments(await bridge.stageAttachments(paths));
+      acceptAttachments(
+        await bridge.stageAttachments(paths, currentSession?.privateChat ?? settings.privateChat),
+      );
     } catch (error) {
       setAttachmentError(String(error));
     }

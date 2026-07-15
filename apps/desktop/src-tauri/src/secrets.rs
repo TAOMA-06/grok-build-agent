@@ -147,7 +147,7 @@ pub fn redact_secrets(text: &str) -> String {
 /// mode when a key container is deliberately part of their task.
 pub fn is_sensitive_attachment_name(name: &str) -> bool {
     let base = name
-        .rsplit(|character| character == '/' || character == '\\')
+        .rsplit(['/', '\\'])
         .next()
         .unwrap_or(name)
         .to_ascii_lowercase();

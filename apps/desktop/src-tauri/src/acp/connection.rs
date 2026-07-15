@@ -292,6 +292,7 @@ pub fn connection_key_from_config(config: &StartConfig, workspace: PathBuf) -> C
             crate::platform::PrivacyMode::Strict => "strict".into(),
             crate::platform::PrivacyMode::Standard => "standard".into(),
         },
+        private_chat: config.private_chat,
     }
 }
 

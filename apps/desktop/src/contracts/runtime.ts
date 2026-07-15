@@ -37,6 +37,8 @@ export type ConnectionKey = {
   reasoningEffort?: string | null;
   /** Process-level Grok privacy policy; prevents reuse across different CLI controls. */
   privacyMode?: import("./settings").PrivacyMode;
+  /** Private sessions must not share a process or event bus with durable sessions. */
+  privateChat?: boolean;
 };
 
 export type ConnectionId = string;
@@ -112,6 +114,8 @@ export type StartConfig = {
   privacyMode?: import("./settings").PrivacyMode;
   powerProfile?: PowerProfile;
   resumeSessionId?: string | null;
+  /** Keep this desktop session out of durable Host persistence. */
+  privateChat?: boolean;
 };
 
 /** Process-level status (legacy single-runtime + pool-compatible). */
@@ -165,7 +169,7 @@ export function connectionKeyString(key: ConnectionKey): string {
   const model = key.modelId?.trim() || "default";
   const effort = key.reasoningEffort?.trim() || "default";
   const privacy = key.privacyMode === "standard" ? "standard" : "strict";
-  return `${key.workspaceRoot}::${key.sandbox}::${profile}::${privacy}::${key.alwaysApprove ? "approve" : "ask"}::${model}::${effort}`;
+  return `${key.workspaceRoot}::${key.sandbox}::${profile}::${privacy}::${key.alwaysApprove ? "approve" : "ask"}::${model}::${effort}::${key.privateChat ? "private" : "durable"}`;
 }
 
 export function emptyRuntimeSnapshot(now = new Date().toISOString()): RuntimeSnapshot {

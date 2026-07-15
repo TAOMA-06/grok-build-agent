@@ -68,7 +68,7 @@ describe("ConnectionKey model segment", () => {
         powerProfile: null,
         modelId: "grok-4.5",
       }),
-    ).toBe("/repo::workspace::off::strict::ask::grok-4.5::default");
+    ).toBe("/repo::workspace::off::strict::ask::grok-4.5::default::durable");
     expect(
       connectionKeyString({
         workspaceRoot: "/repo",
@@ -76,7 +76,7 @@ describe("ConnectionKey model segment", () => {
         alwaysApprove: true,
         powerProfile: null,
       }),
-    ).toBe("/repo::workspace::off::strict::approve::default::default");
+    ).toBe("/repo::workspace::off::strict::approve::default::default::durable");
     expect(
       connectionKeyString({
         workspaceRoot: "/repo",
@@ -86,6 +86,16 @@ describe("ConnectionKey model segment", () => {
         modelId: "grok-4.5",
         reasoningEffort: "high",
       }),
-    ).toBe("/repo::workspace::off::strict::ask::grok-4.5::high");
+    ).toBe("/repo::workspace::off::strict::ask::grok-4.5::high::durable");
+    expect(
+      connectionKeyString({
+        workspaceRoot: "/repo",
+        sandbox: "workspace",
+        alwaysApprove: false,
+        powerProfile: null,
+        modelId: "grok-4.5",
+        privateChat: true,
+      }),
+    ).toBe("/repo::workspace::off::strict::ask::grok-4.5::default::private");
   });
 });

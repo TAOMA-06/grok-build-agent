@@ -24,13 +24,13 @@ New installations enable three complementary privacy controls by default:
 /privacy opt-in    # share coding data for product improvement
 ```
 
-This is the same control as Grok Build settings “Coding data sharing”. It requires authentication. Enterprise **Zero Data Retention (ZDR)** may force privacy on and lock the control; the desktop app will not claim success if the agent reports that the setting cannot change.
+This is the same control as Grok Build settings “Coding data sharing”. It requires authentication. Enterprise **Zero Data Retention (ZDR)** may force privacy on and lock the control; the desktop app treats the sync as successful only when the agent affirmatively confirms the matching opt-out state.
 
-The desktop stores your desired Privacy Mode flag locally and re-applies it when an agent becomes ready. If no agent is running, the preference is kept and synced on the next successful connection.
+The desktop stores your desired Privacy Mode flag locally and re-applies it when an agent becomes ready. If no agent is running, the preference is kept and synced on the next successful connection. An installation that predates this preference does not change the account setting until the user explicitly chooses a value in Settings.
 
 ### Local Private Chat
 
-**Private Chat** is **off by default** so coding tasks keep durable history, task contracts, and verification. When you turn it on, the desktop app keeps the task only in memory and does not write its session row, draft, cached transcript events, task contract, context manifests, verification records, or transcript export to this application's local history. A private task is therefore not restored when the desktop app restarts.
+**Private Chat** is **off by default** so coding tasks keep durable history, task contracts, and verification. When you turn it on, the desktop app and Agent Host isolate the session in a private runtime connection. They do not write its session row, draft, cached transcript or runtime events, permission or audit records, task contract, context manifests, verification records, terminal records, or runtime snapshot to this application's local history. A private task is therefore not restored when the desktop app restarts.
 
 This is a desktop-local retention control. It does not replace account-level Privacy Mode above.
 

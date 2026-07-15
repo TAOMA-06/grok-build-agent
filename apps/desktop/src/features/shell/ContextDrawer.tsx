@@ -84,13 +84,13 @@ export function ContextDrawer({
   const taskId = session.summary.sessionId;
   const privateChat = session.privateChat;
   const reviewQuery = useQuery({
-    queryKey: ["git-review", root],
-    queryFn: () => bridge.gitReview(root),
+    queryKey: ["git-review", root, privateChat],
+    queryFn: () => bridge.gitReview(root, privateChat),
   });
   const selectedFile = reviewQuery.data?.files.find((file) => file.path === selectedPath);
   const patchQuery = useQuery({
-    queryKey: ["git-patch", root, selectedPath, selectedFile?.staged],
-    queryFn: () => bridge.gitFilePatch(root, selectedPath!, Boolean(selectedFile?.staged)),
+    queryKey: ["git-patch", root, selectedPath, selectedFile?.staged, privateChat],
+    queryFn: () => bridge.gitFilePatch(root, selectedPath!, Boolean(selectedFile?.staged), privateChat),
     enabled: Boolean(selectedPath),
   });
   const taskQuery = useQuery({ queryKey: ["task-definition", taskId], queryFn: () => bridge.getTask(taskId), enabled: !privateChat });
@@ -101,9 +101,9 @@ export function ContextDrawer({
     queryFn: () => bridge.taskCompletionGate(taskId),
     enabled: !privateChat && Boolean(taskQuery.data),
   });
-  const treeQuery = useQuery({ queryKey: ["workspace-tree", root, explorerPath], queryFn: () => bridge.workspaceTree(root, explorerPath) });
-  const searchQuery = useQuery({ queryKey: ["workspace-search", root, explorerSearch], queryFn: () => bridge.workspaceSearch(root, explorerSearch), enabled: explorerSearch.trim().length > 1 });
-  const previewQuery = useQuery({ queryKey: ["workspace-preview", root, previewPath], queryFn: () => bridge.workspaceRead(root, previewPath!), enabled: Boolean(previewPath) });
+  const treeQuery = useQuery({ queryKey: ["workspace-tree", root, explorerPath, privateChat], queryFn: () => bridge.workspaceTree(root, explorerPath, privateChat) });
+  const searchQuery = useQuery({ queryKey: ["workspace-search", root, explorerSearch, privateChat], queryFn: () => bridge.workspaceSearch(root, explorerSearch, privateChat), enabled: explorerSearch.trim().length > 1 });
+  const previewQuery = useQuery({ queryKey: ["workspace-preview", root, previewPath, privateChat], queryFn: () => bridge.workspaceRead(root, previewPath!, privateChat), enabled: Boolean(previewPath) });
   const latestContext = contextQuery.data?.[0];
   const latestTaskFocus = latestContext?.entries.find((entry) => entry.kind === "task_contract");
   const latestFocusStrategy = focusStrategyLabel(latestTaskFocus?.metadata.strategy);
@@ -247,7 +247,7 @@ export function ContextDrawer({
     setGitBusy(true);
     setGitError(null);
     try {
-      const mutation = await bridge.gitFileAction(root, selectedPath, action);
+      const mutation = await bridge.gitFileAction(root, selectedPath, action, privateChat);
       if (mutation.checkpoint) setLastCheckpoint(mutation.checkpoint);
       await reviewQuery.refetch();
       await patchQuery.refetch();
@@ -264,7 +264,7 @@ export function ContextDrawer({
     setGitBusy(true);
     setGitError(null);
     try {
-      const mutation = await bridge.gitHunkAction(root, selectedPath, patch, action);
+      const mutation = await bridge.gitHunkAction(root, selectedPath, patch, action, privateChat);
       if (mutation.checkpoint) setLastCheckpoint(mutation.checkpoint);
       await reviewQuery.refetch();
       await patchQuery.refetch();
@@ -280,7 +280,7 @@ export function ContextDrawer({
     setGitBusy(true);
     setGitError(null);
     try {
-      await bridge.gitCommit(root, commitMessage);
+      await bridge.gitCommit(root, commitMessage, privateChat);
       setCommitMessage("");
       setSelectedPath(null);
       await reviewQuery.refetch();
@@ -296,6 +296,7 @@ export function ContextDrawer({
         mainWorkspace: session.summary.workspaceRoot,
         worktreePath: session.summary.worktreePath,
         baseCommit: session.summary.baseCommit,
+        privateChat,
       }
     : null;
 
@@ -381,10 +382,10 @@ export function ContextDrawer({
             </div>
           )}
           {gitError && <div className="gb-apply-status blocked"><span>{gitError}</span></div>}
-          {lastCheckpoint && <div className="gb-apply-status ready"><strong>Checkpoint available</strong><span>{lastCheckpoint.checkpointId}</span><button type="button" className="gb-review-button" onClick={() => void bridge.gitCheckpointRestorePreview(root, lastCheckpoint.checkpointId).then(async (preview) => {
+          {lastCheckpoint && <div className="gb-apply-status ready"><strong>Checkpoint available</strong><span>{lastCheckpoint.checkpointId}</span><button type="button" className="gb-review-button" onClick={() => void bridge.gitCheckpointRestorePreview(root, lastCheckpoint.checkpointId, privateChat).then(async (preview) => {
             if (!preview.ready) throw new Error(preview.reason || "Checkpoint cannot be restored");
             if (!window.confirm(`Restore checkpoint ${lastCheckpoint.checkpointId}?`)) return;
-            await bridge.gitRestoreCheckpoint(root, lastCheckpoint.checkpointId);
+            await bridge.gitRestoreCheckpoint(root, lastCheckpoint.checkpointId, privateChat);
             setLastCheckpoint(null);
             await reviewQuery.refetch();
           }).catch((error) => setGitError(String(error)))}>Preview and restore</button></div>}

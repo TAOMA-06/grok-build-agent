@@ -135,6 +135,8 @@ export type PromptDispatchContext = {
   focusMode?: FocusMode;
   /** Optional for compatibility with older desktop renderers. */
   privacyMode?: PrivacyMode;
+  /** Private sessions skip durable Host dispatch and task records. */
+  privateChat?: boolean;
 };
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";

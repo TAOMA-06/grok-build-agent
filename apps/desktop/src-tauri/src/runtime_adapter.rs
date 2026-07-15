@@ -46,6 +46,7 @@ impl GrokAcpAdapter {
             privacy_mode: config.privacy_mode,
             power_profile: None,
             resume_session_id: resume,
+            private_chat: false,
         }
     }
 

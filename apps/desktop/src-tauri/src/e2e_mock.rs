@@ -47,6 +47,7 @@ mod tests {
             privacy_mode: crate::platform::PrivacyMode::Strict,
             power_profile: None,
             resume_session_id: None,
+            private_chat: false,
         }
     }
 
@@ -214,6 +215,7 @@ mod tests {
             r#ref: Some("HEAD".into()),
             path: Some(wt.to_string_lossy().into()),
             branch: Some("e2e-wt".into()),
+            private_chat: false,
             dirty_policy: "clean_head".into(),
         })
         .unwrap();

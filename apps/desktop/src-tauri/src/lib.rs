@@ -311,6 +311,7 @@ async fn send_prompt(
         idempotency_key: uuid::Uuid::new_v4().to_string(),
         focus_mode: crate::platform::FocusMode::default(),
         privacy_mode: crate::platform::PrivacyMode::default(),
+        private_chat: false,
     });
     let blocks = content.unwrap_or_default();
     if !blocks.is_empty() {
@@ -327,6 +328,7 @@ async fn send_prompt(
             "idempotencyKey": context.idempotency_key,
             "focusMode": context.focus_mode,
             "privacyMode": context.privacy_mode,
+            "privateChat": context.private_chat,
             "text": text.unwrap_or_default(),
             "content": blocks,
         }),
@@ -382,11 +384,12 @@ async fn list_platform_events(
 async fn inspect_attachments(
     state: State<'_, AppState>,
     paths: Vec<String>,
+    private_chat: Option<bool>,
 ) -> Result<Vec<crate::contracts::LocalAttachmentRef>, acp::AcpError> {
     host_request(
         &state,
         "attachment.inspect",
-        serde_json::json!({ "paths": paths }),
+        serde_json::json!({ "paths": paths, "privateChat": private_chat.unwrap_or(false) }),
         None,
     )
     .await
@@ -396,11 +399,12 @@ async fn inspect_attachments(
 async fn prepare_attachments(
     state: State<'_, AppState>,
     files: Vec<crate::contracts::LocalAttachmentRef>,
+    private_chat: Option<bool>,
 ) -> Result<Vec<crate::contracts::PromptContent>, acp::AcpError> {
     host_request(
         &state,
         "attachment.prepare",
-        serde_json::json!({ "files": files }),
+        serde_json::json!({ "files": files, "privateChat": private_chat.unwrap_or(false) }),
         Some(rpc_meta("attachment", None)),
     )
     .await
@@ -807,12 +811,13 @@ async fn workspace_tree(
     state: State<'_, AppState>,
     workspace_root: String,
     path: Option<String>,
+    private_chat: Option<bool>,
 ) -> Result<Vec<workspace_ops::WorkspaceEntry>, acp::AcpError> {
     host_request(
         &state,
         "workspace.tree",
         serde_json::json!({
-            "workspaceRoot": workspace_root, "path": path
+            "workspaceRoot": workspace_root, "path": path, "privateChat": private_chat.unwrap_or(false)
         }),
         None,
     )
@@ -824,12 +829,13 @@ async fn workspace_search(
     state: State<'_, AppState>,
     workspace_root: String,
     query: String,
+    private_chat: Option<bool>,
 ) -> Result<Vec<workspace_ops::WorkspaceEntry>, acp::AcpError> {
     host_request(
         &state,
         "workspace.search",
         serde_json::json!({
-            "workspaceRoot": workspace_root, "query": query
+            "workspaceRoot": workspace_root, "query": query, "privateChat": private_chat.unwrap_or(false)
         }),
         None,
     )
@@ -841,12 +847,13 @@ async fn workspace_read(
     state: State<'_, AppState>,
     workspace_root: String,
     path: String,
+    private_chat: Option<bool>,
 ) -> Result<workspace_ops::WorkspacePreview, acp::AcpError> {
     host_request(
         &state,
         "workspace.read",
         serde_json::json!({
-            "workspaceRoot": workspace_root, "path": path
+            "workspaceRoot": workspace_root, "path": path, "privateChat": private_chat.unwrap_or(false)
         }),
         None,
     )
@@ -1136,11 +1143,12 @@ async fn export_transcript(
 async fn git_review(
     state: State<'_, AppState>,
     workspace_root: String,
+    private_chat: Option<bool>,
 ) -> Result<crate::contracts::ReviewSnapshot, acp::AcpError> {
     host_request(
         &state,
         "git.review",
-        serde_json::json!({ "workspaceRoot": workspace_root }),
+        serde_json::json!({ "workspaceRoot": workspace_root, "privateChat": private_chat.unwrap_or(false) }),
         None,
     )
     .await
@@ -1152,12 +1160,14 @@ async fn git_file_patch(
     workspace_root: String,
     path: String,
     staged: bool,
+    private_chat: Option<bool>,
 ) -> Result<String, acp::AcpError> {
     host_request(
         &state,
         "git.filePatch",
         serde_json::json!({
-            "workspaceRoot": workspace_root, "path": path, "staged": staged
+            "workspaceRoot": workspace_root, "path": path, "staged": staged,
+            "privateChat": private_chat.unwrap_or(false)
         }),
         None,
     )
@@ -1210,11 +1220,12 @@ async fn git_commit(
 async fn git_create_checkpoint(
     state: State<'_, AppState>,
     workspace_root: String,
+    private_chat: Option<bool>,
 ) -> Result<git_ops::GitCheckpoint, acp::AcpError> {
     host_request(
         &state,
         "git.checkpoint.create",
-        serde_json::json!({ "workspaceRoot": workspace_root }),
+        serde_json::json!({ "workspaceRoot": workspace_root, "privateChat": private_chat.unwrap_or(false) }),
         Some(rpc_meta("git", None)),
     )
     .await
@@ -1225,12 +1236,14 @@ async fn git_checkpoint_restore_preview(
     state: State<'_, AppState>,
     workspace_root: String,
     checkpoint_id: String,
+    private_chat: Option<bool>,
 ) -> Result<git_ops::GitCheckpointRestorePreview, acp::AcpError> {
     host_request(
         &state,
         "git.checkpoint.preview",
         serde_json::json!({
-            "workspaceRoot": workspace_root, "checkpointId": checkpoint_id
+            "workspaceRoot": workspace_root, "checkpointId": checkpoint_id,
+            "privateChat": private_chat.unwrap_or(false)
         }),
         None,
     )
@@ -1242,12 +1255,14 @@ async fn git_restore_checkpoint(
     state: State<'_, AppState>,
     workspace_root: String,
     checkpoint_id: String,
+    private_chat: Option<bool>,
 ) -> Result<git_ops::GitCheckpoint, acp::AcpError> {
     host_request(
         &state,
         "git.checkpoint.restore",
         serde_json::json!({
-            "workspaceRoot": workspace_root, "checkpointId": checkpoint_id
+            "workspaceRoot": workspace_root, "checkpointId": checkpoint_id,
+            "privateChat": private_chat.unwrap_or(false)
         }),
         Some(rpc_meta("git-checkpoint", None)),
     )

@@ -38,7 +38,7 @@ The UI says task/thread, while the ACP and SQLite contracts retain session ident
 
 ## ACP host
 
-`src-tauri/src/acp/` manages `grok agent [--model …] [--always-approve] stdio`. `RuntimePool` keys processes by workspace, sandbox, approval policy, power profile and model. A connection may host multiple remote sessions.
+`src-tauri/src/acp/` manages `grok agent [--model …] [--always-approve] stdio`. `RuntimePool` keys processes by workspace, sandbox, approval policy, power profile, model and private-chat retention state, so a private session never shares a process or event bus with durable sessions. A connection may host multiple remote sessions of the same retention class.
 
 Protocol order:
 
@@ -55,11 +55,13 @@ Provider cache policy keeps the model and tool schema stable for the lifetime of
 
 ## Persistence
 
-Settings schema v3 stores user-facing defaults, compact/multiline/timestamp preferences and the system/English/Simplified Chinese locale, while migrating legacy `alwaysApprove`, `useHarness`, model and cwd fields. SQLite schema v4 keeps the v3 session projection for UI compatibility and adds the immutable control-plane event store, task/turn records, prompt dispatch journal, projection checkpoints, tool/permission/artifact/runtime/worktree/job/audit records, context manifests, memory candidates and blob references.
+Settings schema v8 stores user-facing defaults, compact/multiline/timestamp preferences, the system/English/Simplified Chinese locale, and an explicit account-privacy-preference marker so upgraded installs do not silently change an existing account setting. It migrates legacy `alwaysApprove`, `useHarness`, model and cwd fields. SQLite schema v4 keeps the v3 session projection for UI compatibility and adds the immutable control-plane event store, task/turn records, prompt dispatch journal, projection checkpoints, tool/permission/artifact/runtime/worktree/job/audit records, context manifests, memory candidates and blob references.
 
 Before a v1–v3 catalog is upgraded, WAL is checkpointed and a versioned backup is created next to the database. The former 200-row event cache is imported with `legacy_partial_history=1`; it is never presented as a complete transcript. New compatibility events are written to `platform_events` without trimming, with a deterministic dedupe key. Large structured event payloads are moved to the SHA-256 content-addressed blob store.
 
 Prompt delivery uses a persistent state machine: `prepared → sending → acknowledged`. A Host restart changes any remaining `sending` record to `delivery_unknown`. Because current Grok ACP does not advertise prompt idempotency, the desktop refuses automatic redelivery until the user explicitly resolves the uncertain attempt. UI retry keeps the same idempotency key by deriving it from the local task and message block.
+
+Private Chat uses a separate in-memory Host path: it bypasses the catalog, dispatch journal, event/audit/permission persistence, terminal records and runtime snapshots. It still uses the same workspace and high-risk-action policy boundary, but it is not restorable after a Host restart.
 
 The settings model is only the default for new tasks. A disconnected task persists its own model immediately; a live task persists only after ACP confirms the switch. When the CLI cannot live-switch, the renderer offers a new task with the current draft and runtime options while leaving the original task untouched.
 
@@ -82,7 +84,7 @@ Rust is the canonical source for the versioned `PlatformEvent`, `PromptDispatch`
 
 `GrokAcpAdapter` implements the runtime-neutral lifecycle over the existing pool and is covered by a mock-ACP conformance test for spawn, initialize, prompt, cancel and shutdown. Grok currently reports `promptIdempotency=false`, so duplicate suppression remains a platform responsibility.
 
-ACP terminal creation is classified before process launch. Shell/interpreter inline code, network programs, publishing and destructive Git are fail-closed with `POLICY_CONFIRMATION_REQUIRED`; argv-only local commands are allowed once. Policy decisions are emitted as normalized events, redacted and copied into the append-only audit table. Native ACP permission requests are persisted, survive renderer restarts, expire fail-closed, and are marked interrupted after a Host restart when the reverse request can no longer be resumed safely.
+ACP terminal creation is classified before process launch. Shell/interpreter inline code, network programs, publishing and destructive Git are fail-closed with `POLICY_CONFIRMATION_REQUIRED`; argv-only local commands are allowed once. Automatic verifications use argv directly and stop rather than bypassing a required confirmation. Durable-session policy decisions are emitted as normalized events, redacted and copied into the append-only audit table. Native durable-session ACP permission requests are persisted, survive renderer restarts, expire fail-closed, and are marked interrupted after a Host restart when the reverse request can no longer be resumed safely.
 
 ## Production upgrade boundary
 

@@ -6,7 +6,7 @@ use crate::db::Database;
 use crate::host_rpc::{self, HostRequest, HostResponse, HostRpcErrorBody};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
@@ -35,6 +35,10 @@ struct HostState {
     blobs: Arc<crate::blob_store::BlobStore>,
     pending_actions: Arc<parking_lot::Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
     task_roots: Arc<parking_lot::Mutex<HashMap<String, PathBuf>>>,
+    private_task_roots: Arc<parking_lot::Mutex<HashMap<String, PathBuf>>>,
+    private_sessions: Arc<parking_lot::Mutex<HashMap<String, String>>>,
+    private_connections: Arc<parking_lot::Mutex<HashSet<String>>>,
+    private_terminals: Arc<parking_lot::Mutex<HashSet<String>>>,
 }
 
 /// A workspace write lease exists only while a task turn is actively running.
@@ -72,6 +76,66 @@ fn claim_task_root(
     })
 }
 
+fn is_private_task(state: &HostState, task_or_session_id: &str) -> bool {
+    state
+        .private_task_roots
+        .lock()
+        .contains_key(task_or_session_id)
+        || state
+            .private_sessions
+            .lock()
+            .contains_key(task_or_session_id)
+}
+
+fn private_task_for_session(state: &HostState, session_id: &str) -> Option<String> {
+    state.private_sessions.lock().get(session_id).cloned()
+}
+
+fn request_targets_private_session(state: &HostState, params: &Value) -> bool {
+    if params
+        .get("privateChat")
+        .or_else(|| params.pointer("/request/privateChat"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    let candidates = [
+        params.get("taskId"),
+        params.get("sessionId"),
+        params.get("connectionId"),
+        params.get("terminalId"),
+        params.pointer("/task/taskId"),
+        params.pointer("/task/task_id"),
+        params.pointer("/manifest/taskId"),
+        params.pointer("/manifest/task_id"),
+        params.pointer("/summary/sessionId"),
+        params.pointer("/summary/session_id"),
+        params.pointer("/ui/sessionId"),
+        params.pointer("/ui/session_id"),
+        params.pointer("/result/taskId"),
+        params.pointer("/result/task_id"),
+        params.pointer("/event/taskId"),
+        params.pointer("/event/task_id"),
+        params.pointer("/event/sessionId"),
+        params.pointer("/event/session_id"),
+        params.pointer("/event/payload/taskId"),
+        params.pointer("/event/payload/task_id"),
+        params.pointer("/event/payload/sessionId"),
+        params.pointer("/event/payload/session_id"),
+    ];
+    candidates.into_iter().flatten().any(|value| {
+        let Some(id) = value.as_str() else {
+            return false;
+        };
+        state.private_task_roots.lock().contains_key(id)
+            || state.private_sessions.lock().contains_key(id)
+            || state.private_connections.lock().contains(id)
+            || state.private_terminals.lock().contains(id)
+    })
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct HostNotification {
     jsonrpc: &'static str,
@@ -85,37 +149,40 @@ struct HostEventBus {
     db: Arc<Database>,
     events: broadcast::Sender<HostNotification>,
     pending_actions: Arc<parking_lot::Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
+    private_chat: bool,
 }
 
 #[async_trait::async_trait]
 impl EventBus for HostEventBus {
     fn emit_value(&self, event_name: &str, payload: Value) {
         let mut cursor = None;
-        if let Ok(envelope) = serde_json::from_value::<SessionEventEnvelope>(payload.clone()) {
-            if self.db.append_runtime_envelope(&envelope).unwrap_or(false) {
-                let dedupe_key = format!(
-                    "runtime:{}:{}:{}:{}",
-                    envelope.connection_id,
-                    envelope.session_id.as_deref().unwrap_or_default(),
-                    envelope.sequence,
-                    envelope.kind
-                );
-                cursor = self
-                    .db
-                    .platform_event_rowid_by_dedupe_key(&dedupe_key)
-                    .ok()
-                    .flatten();
-            }
-            if envelope.kind == "policy_decision" {
-                persist_policy_audit(&self.db, &envelope.payload);
-            }
-            if envelope.kind == "permission" {
-                if let Some(session_id) = envelope.session_id.as_deref() {
-                    let _ = self.db.persist_permission_request(
-                        &envelope.connection_id,
-                        session_id,
-                        &envelope.payload,
+        if !self.private_chat {
+            if let Ok(envelope) = serde_json::from_value::<SessionEventEnvelope>(payload.clone()) {
+                if self.db.append_runtime_envelope(&envelope).unwrap_or(false) {
+                    let dedupe_key = format!(
+                        "runtime:{}:{}:{}:{}",
+                        envelope.connection_id,
+                        envelope.session_id.as_deref().unwrap_or_default(),
+                        envelope.sequence,
+                        envelope.kind
                     );
+                    cursor = self
+                        .db
+                        .platform_event_rowid_by_dedupe_key(&dedupe_key)
+                        .ok()
+                        .flatten();
+                }
+                if envelope.kind == "policy_decision" {
+                    persist_policy_audit(&self.db, &envelope.payload);
+                }
+                if envelope.kind == "permission" {
+                    if let Some(session_id) = envelope.session_id.as_deref() {
+                        let _ = self.db.persist_permission_request(
+                            &envelope.connection_id,
+                            session_id,
+                            &envelope.payload,
+                        );
+                    }
                 }
             }
         }
@@ -133,10 +200,11 @@ impl EventBus for HostEventBus {
         action: crate::platform::ActionRequest,
         decision: crate::platform::PolicyDecision,
     ) -> Result<bool, crate::acp::AcpError> {
-        if self
-            .db
-            .policy_rule_allows(&action)
-            .map_err(|error| crate::acp::AcpError::Message(error.to_string()))?
+        if !self.private_chat
+            && self
+                .db
+                .policy_rule_allows(&action)
+                .map_err(|error| crate::acp::AcpError::Message(error.to_string()))?
         {
             return Ok(true);
         }
@@ -149,7 +217,7 @@ impl EventBus for HostEventBus {
             json!({ "optionId": "platform:allow-once", "name": "Allow once", "kind": "allow_once" }),
             json!({ "optionId": "platform:deny", "name": "Deny", "kind": "reject_once" }),
         ];
-        if !matches!(action.risk, crate::platform::RiskLevel::Critical) {
+        if !self.private_chat && !matches!(action.risk, crate::platform::RiskLevel::Critical) {
             options.insert(1, json!({ "optionId": "platform:allow-session", "name": "Allow for this task", "kind": "allow_always" }));
             options.insert(2, json!({ "optionId": "platform:allow-project", "name": "Allow for this project", "kind": "allow_always" }));
         }
@@ -197,6 +265,9 @@ impl EventBus for HostEventBus {
         session_id: &str,
         path: &str,
     ) -> Result<(), crate::acp::AcpError> {
+        if self.private_chat {
+            return Ok(());
+        }
         let task_id = self
             .db
             .local_session_id(session_id)
@@ -277,6 +348,8 @@ struct PromptParams {
     focus_mode: crate::platform::FocusMode,
     #[serde(default)]
     privacy_mode: crate::platform::PrivacyMode,
+    #[serde(default)]
+    private_chat: bool,
     #[serde(default)]
     text: String,
     #[serde(default)]
@@ -384,6 +457,10 @@ async fn run() -> Result<(), AgentHostError> {
         ),
         pending_actions: Arc::new(parking_lot::Mutex::new(HashMap::new())),
         task_roots: Arc::new(parking_lot::Mutex::new(HashMap::new())),
+        private_task_roots: Arc::new(parking_lot::Mutex::new(HashMap::new())),
+        private_sessions: Arc::new(parking_lot::Mutex::new(HashMap::new())),
+        private_connections: Arc::new(parking_lot::Mutex::new(HashSet::new())),
+        private_terminals: Arc::new(parking_lot::Mutex::new(HashSet::new())),
     };
     let path = socket_path()?;
     {
@@ -430,7 +507,9 @@ async fn run() -> Result<(), AgentHostError> {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                let _ = state.db.record_runtime_snapshot(&state.runtime.snapshot());
+                let _ = state
+                    .db
+                    .record_runtime_snapshot(&state.runtime.persistent_snapshot());
             }
         });
     }
@@ -555,19 +634,39 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
     let method = request.method.clone();
     let meta = request.meta.clone();
     let audit_params = request.params.clone();
+    let private_request = request_targets_private_session(state, &request.params)
+        || (method == "runtime.stop" && state.runtime.active_connection_is_private());
+    if private_request
+        && matches!(
+            method.as_str(),
+            "catalog.sessions.upsert"
+                | "catalog.sessions.delete"
+                | "catalog.sessions.saveDraft"
+                | "catalog.sessions.saveUi"
+                | "task.upsert"
+                | "context.save"
+                | "verification.save"
+                | "events.appendCompat"
+                | "events.platform.append"
+        )
+    {
+        return success(request.id, json!({}));
+    }
     let _idempotency_guard = if host_rpc::is_write_method(&method) {
         Some(state.idempotency_lock.lock().await)
     } else {
         None
     };
-    if let Some(meta) = meta.as_ref() {
-        match state.db.load_rpc_result(&meta.idempotency_key, &method) {
-            Ok(Some(value)) => match serde_json::from_value(value) {
-                Ok(response) => return response,
+    if !private_request {
+        if let Some(meta) = meta.as_ref() {
+            match state.db.load_rpc_result(&meta.idempotency_key, &method) {
+                Ok(Some(value)) => match serde_json::from_value(value) {
+                    Ok(response) => return response,
+                    Err(error) => return error_response(request.id, -32000, &error.to_string()),
+                },
+                Ok(None) => {}
                 Err(error) => return error_response(request.id, -32000, &error.to_string()),
-            },
-            Ok(None) => {}
-            Err(error) => return error_response(request.id, -32000, &error.to_string()),
+            }
         }
     }
     let id = request.id;
@@ -752,7 +851,7 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
               state.db.save_verification_result(&result).map_err(|error| error.to_string())
           })
           .map(|_| json!({})),
-        "verification.run" => run_verification(state, &request.params).await,
+        "verification.run" => run_verification(state, &request.params, false).await,
         "verification.list" => state.db.list_verification_results(
             request.params.get("taskId").and_then(Value::as_str).unwrap_or_default(),
         ).map_err(|error| error.to_string())
@@ -1044,10 +1143,16 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                 };
                 {
                     let roots = state.task_roots.lock();
+                    let private_roots = state.private_task_roots.lock();
                     if let Some((owner, _)) = roots
                         .iter()
                         .find(|(owner, root)| {
                             owner.as_str() != task_id.as_str() && **root == execution_root
+                        })
+                        .or_else(|| {
+                            private_roots.iter().find(|(owner, root)| {
+                                owner.as_str() != task_id.as_str() && **root == execution_root
+                            })
                         })
                     {
                         return error_response(
@@ -1059,7 +1164,8 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                         );
                     }
                 }
-                if !config.cwd.trim().is_empty() {
+                let private_chat = config.private_chat;
+                if !private_chat && !config.cwd.trim().is_empty() {
                     if let Err(error) = state.db.upsert_workspace(&config.cwd, None) {
                         return error_response(id, -32000, &error.to_string());
                     }
@@ -1068,32 +1174,59 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                     db: state.db.clone(),
                     events: state.events.clone(),
                     pending_actions: state.pending_actions.clone(),
+                    private_chat,
                 });
-                let started = state
-                    .runtime
-                    .start_with_bus(bus, config)
-                    .await
-                    .map_err(|e| e.to_string())
-                    .and_then(|value| serde_json::to_value(value).map_err(|e| e.to_string()));
-                if started.is_ok() {
-                    state.task_roots.lock().insert(task_id, execution_root);
-                    let _ = state.db.record_runtime_snapshot(&state.runtime.snapshot());
+                match state.runtime.start_with_bus(bus, config).await {
+                    Ok(status) => {
+                        state
+                            .task_roots
+                            .lock()
+                            .insert(task_id.clone(), execution_root.clone());
+                        if private_chat {
+                            state
+                                .private_task_roots
+                                .lock()
+                                .insert(task_id.clone(), execution_root);
+                            if let Some(connection_id) = status.connection_id.as_deref() {
+                                state
+                                    .private_connections
+                                    .lock()
+                                    .insert(connection_id.to_string());
+                            }
+                            if let Some(session_id) = status.session_id.as_deref() {
+                                state
+                                    .private_sessions
+                                    .lock()
+                                    .insert(session_id.to_string(), task_id.clone());
+                            }
+                        } else {
+                            let _ = state
+                                .db
+                                .record_runtime_snapshot(&state.runtime.persistent_snapshot());
+                        }
+                        serde_json::to_value(status).map_err(|error| error.to_string())
+                    }
+                    Err(error) => Err(error.to_string()),
                 }
-                started
             }
             Err(error) => Err(error.to_string()),
         },
-        "runtime.stop" => state
-            .runtime
-            .stop()
-            .await
-            .map(|_| {
-                let _ = state.db.clear_session_policy_rules();
-                let _ = state.db.mark_runtime_processes_stopped();
+        "runtime.stop" => {
+            let private_runtime = state.runtime.active_connection_is_private();
+            state.runtime.stop().await.map(|_| {
+                if !private_runtime {
+                    let _ = state.db.clear_session_policy_rules();
+                    let _ = state.db.mark_runtime_processes_stopped();
+                }
                 state.task_roots.lock().clear();
+                state.private_task_roots.lock().clear();
+                state.private_sessions.lock().clear();
+                state.private_connections.lock().clear();
+                state.private_terminals.lock().clear();
                 json!({})
             })
-            .map_err(|e| e.to_string()),
+            .map_err(|e| e.to_string())
+        }
         "session.prompt" => prompt(state, request.params).await,
         "session.cancel" => match serde_json::from_value::<SessionRoute>(request.params) {
             Ok(route) => {
@@ -1102,7 +1235,12 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                     .cancel_session(&route.connection_id, &route.session_id)
                     .map_err(|e| e.to_string());
                 if result.is_ok() {
-                    if let Ok(Some(task_id)) = state.db.local_session_id(&route.session_id) {
+                    if let Some(task_id) = private_task_for_session(state, &route.session_id) {
+                        state.terminals.cancel_task(&task_id);
+                        state.task_roots.lock().remove(&task_id);
+                        state.private_task_roots.lock().remove(&task_id);
+                        state.private_sessions.lock().remove(&route.session_id);
+                    } else if let Ok(Some(task_id)) = state.db.local_session_id(&route.session_id) {
                         state.terminals.cancel_task(&task_id);
                         let _ = state.db.mark_task_terminals_stopped(&task_id);
                         state.task_roots.lock().remove(&task_id);
@@ -1216,33 +1354,35 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                         )
                     )
                         && decision.get("error").is_none_or(Value::is_null);
-                    if let Some(scope) = match selected {
-                        Some("platform:allow-session") => Some("session"),
-                        Some("platform:allow-project") => Some("project"),
-                        _ => None,
-                    } {
-                        let stored = state
-                            .db
-                            .get_permission_request(&route.connection_id, &request_id)
-                            .map_err(|error| error.to_string());
-                        let action = stored.and_then(|stored| {
-                            let raw = stored.ok_or_else(|| "permission request not found".to_string())?;
-                            serde_json::from_value::<crate::platform::ActionRequest>(
-                                raw.action
-                                    .pointer("/params/action")
-                                    .cloned()
-                                    .unwrap_or(Value::Null),
-                            )
-                            .map_err(|error| error.to_string())
-                        });
-                        if let Err(error) = action.and_then(|action| {
-                            state
+                    if !private_request {
+                        if let Some(scope) = match selected {
+                            Some("platform:allow-session") => Some("session"),
+                            Some("platform:allow-project") => Some("project"),
+                            _ => None,
+                        } {
+                            let stored = state
                                 .db
-                                .save_policy_rule(&action, scope)
-                                .map(|_| ())
+                                .get_permission_request(&route.connection_id, &request_id)
+                                .map_err(|error| error.to_string());
+                            let action = stored.and_then(|stored| {
+                                let raw = stored.ok_or_else(|| "permission request not found".to_string())?;
+                                serde_json::from_value::<crate::platform::ActionRequest>(
+                                    raw.action
+                                        .pointer("/params/action")
+                                        .cloned()
+                                        .unwrap_or(Value::Null),
+                                )
                                 .map_err(|error| error.to_string())
-                        }) {
-                            return error_response(id, -32000, &error);
+                            });
+                            if let Err(error) = action.and_then(|action| {
+                                state
+                                    .db
+                                    .save_policy_rule(&action, scope)
+                                    .map(|_| ())
+                                    .map_err(|error| error.to_string())
+                            }) {
+                                return error_response(id, -32000, &error);
+                            }
                         }
                     }
                     let sender = state.pending_actions.lock().remove(platform_id);
@@ -1255,17 +1395,19 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                             "permission request is no longer pending",
                         );
                     }
-                    let _ = state.db.decide_permission_request(
-                        &route.connection_id,
-                        &request_id,
-                        match selected {
-                            Some("platform:allow-session") => "allowed_session",
-                            Some("platform:allow-project") => "allowed_project",
-                            _ if allowed => "allowed_once",
-                            _ => "denied",
-                        },
-                        &decision,
-                    );
+                    if !private_request {
+                        let _ = state.db.decide_permission_request(
+                            &route.connection_id,
+                            &request_id,
+                            match selected {
+                                Some("platform:allow-session") => "allowed_session",
+                                Some("platform:allow-project") => "allowed_project",
+                                _ if allowed => "allowed_once",
+                                _ => "denied",
+                            },
+                            &decision,
+                        );
+                    }
                     return success(id, json!({}));
                 }
                 state
@@ -1278,12 +1420,22 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                     )
                     .await
                     .map_err(|error| error.to_string())
-                    .and_then(|_| state.db.decide_permission_request(
-                        &route.connection_id,
-                        &request_id,
-                        decision_state,
-                        &decision,
-                    ).map_err(|error| error.to_string()))
+                    .and_then(|_| {
+                        if private_request {
+                            Ok(())
+                        } else {
+                            state
+                                .db
+                                .decide_permission_request(
+                                    &route.connection_id,
+                                    &request_id,
+                                    decision_state,
+                                    &decision,
+                                )
+                                .map(|_| ())
+                                .map_err(|error| error.to_string())
+                        }
+                    })
                     .map(|_| json!({}))
             }
             Err(error) => Err(error.to_string()),
@@ -1313,7 +1465,7 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
         Ok(value) => success(id, value),
         Err(error) => error_response(id, -32000, &crate::secrets::redact_secrets(&error)),
     };
-    if host_rpc::is_write_method(&method) {
+    if !private_request && host_rpc::is_write_method(&method) {
         let workspace_id = audit_params
             .get("workspaceId")
             .or_else(|| audit_params.get("workspaceRoot"))
@@ -1351,11 +1503,13 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
             event_id: None,
         });
     }
-    if let Some(meta) = meta {
-        if let Ok(value) = serde_json::to_value(&response) {
-            let _ = state
-                .db
-                .store_rpc_result(&meta.idempotency_key, &method, &value);
+    if !private_request {
+        if let Some(meta) = meta {
+            if let Ok(value) = serde_json::to_value(&response) {
+                let _ = state
+                    .db
+                    .store_rpc_result(&meta.idempotency_key, &method, &value);
+            }
         }
     }
     response
@@ -1366,13 +1520,21 @@ fn terminal_execution_root(
     task_id: &str,
     requested: &str,
 ) -> Result<PathBuf, String> {
+    let requested = std::fs::canonicalize(requested)
+        .map_err(|error| format!("terminal cwd is unavailable: {error}"))?;
+    if let Some(allowed) = state.private_task_roots.lock().get(task_id).cloned() {
+        let allowed = std::fs::canonicalize(allowed)
+            .map_err(|error| format!("task execution root is unavailable: {error}"))?;
+        if requested != allowed {
+            return Err("terminal cwd must exactly match the task execution root".into());
+        }
+        return Ok(requested);
+    }
     let session = state
         .db
         .get_session(task_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("terminal task {task_id} has no persisted session"))?;
-    let requested = std::fs::canonicalize(requested)
-        .map_err(|error| format!("terminal cwd is unavailable: {error}"))?;
     let allowed = session
         .execution_root
         .as_deref()
@@ -1392,7 +1554,11 @@ async fn authorize_platform_terminal(
     workspace: &std::path::Path,
     command: &str,
     args: &[String],
+    automatic: bool,
 ) -> Result<(), String> {
+    if automatic && !crate::policy::automatic_verification_allows(command, args) {
+        return Err("automatic verification cannot start a shell".into());
+    }
     let mut action = crate::policy::classify_terminal_action(
         uuid::Uuid::new_v4().to_string(),
         workspace.to_string_lossy().into_owned(),
@@ -1408,10 +1574,14 @@ async fn authorize_platform_terminal(
     match decision.decision {
         crate::platform::PolicyDecisionKind::Deny => Err(decision.reason),
         crate::platform::PolicyDecisionKind::RequireConfirmation => {
+            if automatic {
+                return Err("automatic verification requires user confirmation".into());
+            }
             let bus = HostEventBus {
                 db: state.db.clone(),
                 events: state.events.clone(),
                 pending_actions: state.pending_actions.clone(),
+                private_chat: is_private_task(state, task_id),
             };
             if bus
                 .request_action("desktop-terminal", action, decision)
@@ -1431,12 +1601,12 @@ async fn create_platform_terminal(state: &HostState, params: &Value) -> Result<V
     create_platform_terminal_inner(state, params, false).await
 }
 
-/// Trusted path for declared task verification commands only — skips interactive
-/// policy prompts so auto-verify after a turn cannot hang on shell confirmation.
+/// Declared task verification path. Automatic runs still pass through policy;
+/// anything that needs a prompt is blocked instead of hanging after a turn.
 async fn create_platform_terminal_inner(
     state: &HostState,
     params: &Value,
-    trusted_verification: bool,
+    automatic_verification: bool,
 ) -> Result<Value, String> {
     let task_id = params
         .get("taskId")
@@ -1458,9 +1628,15 @@ async fn create_platform_terminal_inner(
         params.get("args").cloned().unwrap_or_else(|| json!([])),
     )
     .map_err(|error| error.to_string())?;
-    if !trusted_verification {
-        authorize_platform_terminal(state, task_id, &workspace, command, &args).await?;
-    }
+    authorize_platform_terminal(
+        state,
+        task_id,
+        &workspace,
+        command,
+        &args,
+        automatic_verification,
+    )
+    .await?;
     let created = state
         .terminals
         .create(&workspace, Some(task_id), command, &args, &[])
@@ -1470,7 +1646,12 @@ async fn create_platform_terminal_inner(
         .get("terminalId")
         .and_then(Value::as_str)
         .ok_or_else(|| "terminal did not return an id".to_string())?;
-    if let Err(error) = state.db.record_terminal_process(
+    if is_private_task(state, task_id) {
+        state
+            .private_terminals
+            .lock()
+            .insert(terminal_id.to_string());
+    } else if let Err(error) = state.db.record_terminal_process(
         terminal_id,
         task_id,
         created.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32,
@@ -1497,10 +1678,12 @@ async fn stop_platform_terminal(
         state.terminals.kill(terminal_id).await
     }
     .map_err(|error| error.to_string())?;
-    state
-        .db
-        .mark_terminal_stopped(terminal_id)
-        .map_err(|error| error.to_string())?;
+    if !state.private_terminals.lock().remove(terminal_id) {
+        state
+            .db
+            .mark_terminal_stopped(terminal_id)
+            .map_err(|error| error.to_string())?;
+    }
     Ok(result)
 }
 
@@ -1524,6 +1707,7 @@ async fn input_platform_terminal(state: &HostState, params: &Value) -> Result<Va
             &workspace,
             "/bin/zsh",
             &["-lc".into(), data.trim_end_matches(['\r', '\n']).into()],
+            false,
         )
         .await?;
     }
@@ -1576,6 +1760,7 @@ async fn auto_run_task_verifications(
                 "command": command,
                 "workspaceRoot": workspace_root,
             }),
+            true,
         )
         .await
         {
@@ -1618,7 +1803,11 @@ async fn auto_run_task_verifications(
     }
 }
 
-async fn run_verification(state: &HostState, params: &Value) -> Result<Value, String> {
+async fn run_verification(
+    state: &HostState,
+    params: &Value,
+    automatic: bool,
+) -> Result<Value, String> {
     let task_id = params
         .get("taskId")
         .and_then(Value::as_str)
@@ -1639,15 +1828,19 @@ async fn run_verification(state: &HostState, params: &Value) -> Result<Value, St
     {
         return Err("verification command is not declared by the task".into());
     }
+    let (program, args) = crate::acp::terminal_host::parse_create_params(&json!({
+        "command": command,
+    }))
+    .map_err(|error| error.to_string())?;
     let terminal = create_platform_terminal_inner(
         state,
         &json!({
             "taskId": task_id,
             "workspaceRoot": params.get("workspaceRoot").and_then(Value::as_str),
-            "command": "/bin/zsh",
-            "args": ["-lc", command],
+            "command": program,
+            "args": args,
         }),
-        true,
+        automatic,
     )
     .await?;
     let terminal_id = terminal
@@ -1664,7 +1857,9 @@ async fn run_verification(state: &HostState, params: &Value) -> Result<Value, St
         .output_page(terminal_id, 0, 16 * 1024)
         .map_err(|error| error.to_string())?;
     let _ = state.terminals.release(terminal_id).await;
-    let _ = state.db.mark_terminal_stopped(terminal_id);
+    if !state.private_terminals.lock().remove(terminal_id) {
+        let _ = state.db.mark_terminal_stopped(terminal_id);
+    }
     let exit_code = exit
         .get("exitCode")
         .and_then(Value::as_i64)
@@ -1686,10 +1881,12 @@ async fn run_verification(state: &HostState, params: &Value) -> Result<Value, St
         exit_code,
         created_at: crate::acp::iso_now(),
     };
-    state
-        .db
-        .save_verification_result(&result)
-        .map_err(|error| error.to_string())?;
+    if !is_private_task(state, task_id) {
+        state
+            .db
+            .save_verification_result(&result)
+            .map_err(|error| error.to_string())?;
+    }
     serde_json::to_value(result).map_err(|error| error.to_string())
 }
 
@@ -1931,6 +2128,31 @@ fn gc_blobs(state: &HostState) -> Result<Value, String> {
 async fn prompt(state: &HostState, params: Value) -> Result<Value, String> {
     let mut params: PromptParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
     apply_privacy_guardrails(&mut params)?;
+    if params.private_chat {
+        if !is_private_task(state, &params.task_id) {
+            return Err(format!("private task {} is unavailable", params.task_id));
+        }
+        let execution_root = state
+            .private_task_roots
+            .lock()
+            .get(&params.task_id)
+            .cloned()
+            .ok_or_else(|| format!("private task {} has no execution root", params.task_id))?;
+        let _task_root_lease = claim_task_root(&state.task_roots, &params.task_id, execution_root)?;
+        return if params.content.is_empty() {
+            state
+                .runtime
+                .prompt_session(&params.connection_id, &params.session_id, &params.text)
+                .await
+                .map_err(|error| crate::secrets::redact_secrets(&error.to_string()))
+        } else {
+            state
+                .runtime
+                .prompt_session_content(&params.connection_id, &params.session_id, params.content)
+                .await
+                .map_err(|error| crate::secrets::redact_secrets(&error.to_string()))
+        };
+    }
     let dispatch = state
         .db
         .prepare_prompt_dispatch(
@@ -2023,12 +2245,8 @@ async fn prompt(state: &HostState, params: Value) -> Result<Value, String> {
                 .transition_task_state(&dispatch.task_id, crate::platform::TaskState::Verifying)
                 .map_err(|error| error.to_string())?;
             // Close the agent loop: run declared verification commands when present.
-            let auto = auto_run_task_verifications(
-                state,
-                &dispatch.task_id,
-                &execution_root_path,
-            )
-            .await;
+            let auto =
+                auto_run_task_verifications(state, &dispatch.task_id, &execution_root_path).await;
             let mut response = value;
             if let Some(obj) = response.as_object_mut() {
                 obj.insert(
@@ -2573,6 +2791,41 @@ mod tests {
     }
 
     #[test]
+    fn private_event_bus_keeps_runtime_envelopes_out_of_the_database() {
+        let path = std::env::temp_dir().join(format!(
+            "gbd-private-event-bus-{}-{}.sqlite",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let db = Arc::new(Database::open_path(&path).unwrap());
+        let (events, _) = broadcast::channel(1);
+        let bus = HostEventBus {
+            db: db.clone(),
+            events,
+            pending_actions: Arc::new(parking_lot::Mutex::new(HashMap::new())),
+            private_chat: true,
+        };
+        let envelope = SessionEventEnvelope {
+            connection_id: "private-connection".into(),
+            session_id: Some("private-session".into()),
+            sequence: 1,
+            timestamp: crate::acp::iso_now(),
+            source: crate::contracts::EventSource::Runtime,
+            kind: "message".into(),
+            payload: json!({ "text": "do not persist" }),
+        };
+        EventBus::emit_value(
+            &bus,
+            "acp:notification",
+            serde_json::to_value(envelope).unwrap(),
+        );
+        assert!(db.replay_platform_events(0, 10).unwrap().is_empty());
+        drop(bus);
+        drop(db);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn task_root_lease_blocks_parallel_turns_and_releases_when_idle() {
         let roots = Arc::new(parking_lot::Mutex::new(HashMap::new()));
         let root = PathBuf::from("/tmp/non-git-workspace");
@@ -2629,6 +2882,7 @@ mod tests {
             idempotency_key: format!("prompt:{turn_id}"),
             focus_mode: crate::platform::FocusMode::Balanced,
             privacy_mode: crate::platform::PrivacyMode::Strict,
+            private_chat: false,
             text: text.into(),
             content: vec![],
         }
@@ -2703,6 +2957,7 @@ mod tests {
             idempotency_key: "key1".into(),
             focus_mode: crate::platform::FocusMode::Balanced,
             privacy_mode: crate::platform::PrivacyMode::Strict,
+            private_chat: false,
             text: format!("use {xai_token}"),
             content: vec![crate::contracts::PromptContent::Text {
                 text: format!("and {github_token}"),

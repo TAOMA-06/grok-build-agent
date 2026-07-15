@@ -110,24 +110,27 @@ export async function inspectCapabilities(
 
 export async function gitReview(
   workspaceRoot: string,
+  privateChat = false,
 ): Promise<ReviewSnapshot> {
-  return invoke("git_review", { workspaceRoot });
+  return invoke("git_review", { workspaceRoot, privateChat });
 }
 
 export async function gitFilePatch(
   workspaceRoot: string,
   path: string,
   staged: boolean,
+  privateChat = false,
 ): Promise<string> {
-  return invoke("git_file_patch", { workspaceRoot, path, staged });
+  return invoke("git_file_patch", { workspaceRoot, path, staged, privateChat });
 }
 
 export async function gitFileAction(
   workspaceRoot: string,
   path: string,
   action: import("../types").GitFileAction,
+  privateChat = false,
 ): Promise<import("../types").GitMutationResult> {
-  return invoke("git_file_action", { req: { workspaceRoot, path, action } });
+  return invoke("git_file_action", { req: { workspaceRoot, path, action, privateChat } });
 }
 
 export async function gitHunkAction(
@@ -135,56 +138,64 @@ export async function gitHunkAction(
   path: string,
   patch: string,
   action: import("../types").GitFileAction,
+  privateChat = false,
 ): Promise<import("../types").GitMutationResult> {
-  return invoke("git_hunk_action", { req: { workspaceRoot, path, patch, action } });
+  return invoke("git_hunk_action", { req: { workspaceRoot, path, patch, action, privateChat } });
 }
 
 export async function gitCommit(
   workspaceRoot: string,
   message: string,
+  privateChat = false,
 ): Promise<import("../types").GitCommitResult> {
-  return invoke("git_commit", { req: { workspaceRoot, message } });
+  return invoke("git_commit", { req: { workspaceRoot, message, privateChat } });
 }
 
 export async function gitCreateCheckpoint(
   workspaceRoot: string,
+  privateChat = false,
 ): Promise<import("../types").GitCheckpoint> {
-  return invoke("git_create_checkpoint", { workspaceRoot });
+  return invoke("git_create_checkpoint", { workspaceRoot, privateChat });
 }
 
 export async function gitCheckpointRestorePreview(
   workspaceRoot: string,
   checkpointId: string,
+  privateChat = false,
 ): Promise<import("../types").GitCheckpointRestorePreview> {
-  return invoke("git_checkpoint_restore_preview", { workspaceRoot, checkpointId });
+  return invoke("git_checkpoint_restore_preview", { workspaceRoot, checkpointId, privateChat });
 }
 
 export async function gitRestoreCheckpoint(
   workspaceRoot: string,
   checkpointId: string,
+  privateChat = false,
 ): Promise<import("../types").GitCheckpoint> {
-  return invoke("git_restore_checkpoint", { workspaceRoot, checkpointId });
+  return invoke("git_restore_checkpoint", { workspaceRoot, checkpointId, privateChat });
 }
 
 export async function workspaceTree(
   workspaceRoot: string,
   path?: string | null,
+  privateChat = false,
 ): Promise<import("../types").WorkspaceEntry[]> {
-  return invoke("workspace_tree", { workspaceRoot, path: path ?? null });
+  return invoke("workspace_tree", { workspaceRoot, path: path ?? null, privateChat });
 }
 
 export async function workspaceSearch(
   workspaceRoot: string,
   query: string,
+  privateChat = false,
 ): Promise<import("../types").WorkspaceEntry[]> {
-  return invoke("workspace_search", { workspaceRoot, query });
+  return invoke("workspace_search", { workspaceRoot, query, privateChat });
 }
 
 export async function workspaceRead(
   workspaceRoot: string,
   path: string,
+  privateChat = false,
 ): Promise<import("../types").WorkspacePreview> {
-  return invoke("workspace_read", { workspaceRoot, path });
+  return invoke("workspace_read", { workspaceRoot, path, privateChat });
 }
 
 export async function listPolicyRules(
@@ -338,6 +349,7 @@ export async function createWorktree(req: {
   ref?: string | null;
   path?: string | null;
   branch?: string | null;
+  privateChat?: boolean;
   dirtyPolicy: "clean_head" | "copy_dirty";
 }): Promise<WorktreeSummary> {
   return invoke("create_worktree", {
@@ -346,6 +358,7 @@ export async function createWorktree(req: {
       ref: req.ref ?? null,
       path: req.path ?? null,
       branch: req.branch ?? null,
+      privateChat: req.privateChat ?? false,
       dirtyPolicy: req.dirtyPolicy,
     },
   });
@@ -355,9 +368,10 @@ export async function deleteWorktree(
   path: string,
   mainWorkspace: string,
   force: boolean,
+  privateChat = false,
 ): Promise<void> {
   return invoke("delete_worktree", {
-    req: { path, force },
+    req: { path, force, privateChat },
     mainWorkspace,
   });
 }

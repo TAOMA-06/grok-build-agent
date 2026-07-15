@@ -16,7 +16,7 @@ export type PrivacyMode = "strict" | "standard";
 
 export type Settings = {
   /** Versioned renderer/host settings contract. */
-  schemaVersion: 7;
+  schemaVersion: 8;
   grokPath: string;
   /** Optional advanced override. Empty means use CLI discovery. */
   cliPathOverride: string;
@@ -37,6 +37,8 @@ export type Settings = {
    * matching CLI `/privacy opt-out`. Requires login; ZDR/admin policies may lock it.
    */
   codingDataPrivacy: boolean;
+  /** Whether this installation explicitly chose an account-level retention preference. */
+  codingDataPrivacyConfigured: boolean;
   /**
    * Local-only private sessions skip durable history (drafts, transcript cache,
    * task contracts, verification). Default off so coding tasks stay durable and
@@ -87,7 +89,7 @@ export type OnboardingStep =
 
 export function defaultSettings(): Settings {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     grokPath: "",
     cliPathOverride: "",
     model: "grok-build",
@@ -95,6 +97,7 @@ export function defaultSettings(): Settings {
     focusMode: "balanced",
     privacyMode: "strict",
     codingDataPrivacy: true,
+    codingDataPrivacyConfigured: true,
     privateChat: false,
     defaultMode: "agent",
     permissionPolicy: "workspace_edit",
@@ -120,27 +123,44 @@ export function normalizeSettings(settings: Settings): Settings {
   );
   const focusMode: FocusMode = settings.focusMode === "economy" ? "economy" : "balanced";
   const privacyMode: PrivacyMode = settings.privacyMode === "standard" ? "standard" : "strict";
-  // Missing / legacy fields default to Privacy Mode ON (coding data not used for training).
-  const codingDataPrivacy = (settings as { codingDataPrivacy?: boolean }).codingDataPrivacy !== false;
+  // New installations opt out by default. Existing installs keep their account
+  // setting untouched until they explicitly choose a value in Settings.
+  const hasCodingDataPrivacy = Object.prototype.hasOwnProperty.call(
+    settings,
+    "codingDataPrivacy",
+  );
+  const codingDataPrivacy =
+    (settings as { codingDataPrivacy?: boolean }).codingDataPrivacy === true;
+  const hasCodingDataPrivacyConfigured = Object.prototype.hasOwnProperty.call(
+    settings,
+    "codingDataPrivacyConfigured",
+  );
+  const codingDataPrivacyConfigured = hasCodingDataPrivacyConfigured
+    ? (settings as { codingDataPrivacyConfigured?: boolean }).codingDataPrivacyConfigured === true
+    : hasCodingDataPrivacy;
   // Durable coding default: only true when explicitly enabled.
   const privateChat = settings.privateChat === true;
-  const useHarness = settings.useHarness !== false;
+  // Keep legacy installs on their existing behavior; new installs use the default
+  // supplied by defaultSettings above.
+  const useHarness = (settings as { useHarness?: boolean }).useHarness === true;
   if (
-    settings.schemaVersion === 7 &&
+    settings.schemaVersion === 8 &&
     defaultReasoningEffort === settings.defaultReasoningEffort &&
     focusMode === settings.focusMode &&
     privacyMode === settings.privacyMode &&
     codingDataPrivacy === settings.codingDataPrivacy &&
+    codingDataPrivacyConfigured === settings.codingDataPrivacyConfigured &&
     privateChat === settings.privateChat &&
     useHarness === settings.useHarness
   ) return settings;
   return {
     ...settings,
-    schemaVersion: 7,
+    schemaVersion: 8,
     defaultReasoningEffort,
     focusMode,
     privacyMode,
     codingDataPrivacy,
+    codingDataPrivacyConfigured,
     privateChat,
     useHarness,
   };

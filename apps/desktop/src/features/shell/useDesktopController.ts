@@ -170,18 +170,20 @@ export function useDesktopController(
       const current = state.sessions[sessionId]?.summary;
       if (!current) throw new Error(t.taskUnavailable);
       if (current.worktreePath || current.remoteSessionId) return current;
+      const privateChat = isPrivateChatSession(state, sessionId);
 
       let executionRoot = current.workspaceRoot;
       let worktreePath: string | null = null;
       let baseCommit: string | null = null;
       try {
-        const review = await bridge.gitReview(current.workspaceRoot);
+        const review = await bridge.gitReview(current.workspaceRoot, privateChat);
         if (review.state === "clean" || review.state === "dirty") {
           const dirtyPolicy =
             review.state === "dirty" ? await chooseDirtyPolicy() : "clean_head";
           const worktree = await bridge.createWorktree({
             workspaceRoot: current.workspaceRoot,
-            branch: branchSlug(prompt, sessionId),
+            branch: privateChat ? `private-${sessionId.slice(0, 8)}` : branchSlug(prompt, sessionId),
+            privateChat,
             dirtyPolicy,
           });
           executionRoot = worktree.path;
@@ -228,6 +230,7 @@ export function useDesktopController(
           useHarness: state.settings.useHarness,
           sandbox: summary.sandbox ?? state.settings.sandbox,
           privacyMode: state.settings.privacyMode,
+          privateChat: isPrivateChatSession(state, sessionId),
           resumeSessionId: summary.remoteSessionId ?? null,
           grokPath:
             state.settings.cliPathOverride || state.settings.grokPath || null,
@@ -243,7 +246,9 @@ export function useDesktopController(
         }
         // Best-effort: apply desktop Privacy Mode preference to the account-level
         // Grok `/privacy` control once an agent connection is live.
-        void bridge.setCodingDataPrivacy(state.settings.codingDataPrivacy).catch(() => undefined);
+        if (state.settings.codingDataPrivacyConfigured && !isPrivateChatSession(state, sessionId)) {
+          void bridge.setCodingDataPrivacy(state.settings.codingDataPrivacy).catch(() => undefined);
+        }
         summary = {
           ...summary,
           connectionId: status.connectionId ?? null,
@@ -395,6 +400,7 @@ export function useDesktopController(
         );
         const localContent = await bridge.prepareAttachments(
           attachments.filter((attachment) => attachment.source === "path"),
+          privateChat,
         );
         if (wasCancelled()) return;
         // The active turn was already handed to Grok, while follow-ups remain
@@ -432,6 +438,7 @@ export function useDesktopController(
               idempotencyKey: `prompt:${sessionId}:${messageBlockId}`,
               focusMode: state.settings.focusMode,
               privacyMode: state.settings.privacyMode,
+              privateChat,
             },
           );
           const finalUsage = extractContextUsage(promptResponse);
@@ -619,6 +626,7 @@ export function useDesktopController(
         useHarness: state.settings.useHarness,
         sandbox: summary.sandbox ?? state.settings.sandbox,
         privacyMode: state.settings.privacyMode,
+        privateChat: isPrivateChatSession(state, sessionId),
         resumeSessionId: summary.remoteSessionId ?? null,
         grokPath: state.settings.cliPathOverride || state.settings.grokPath || null,
       });
@@ -632,7 +640,9 @@ export function useDesktopController(
       state.updateSummary(sessionId, next);
       state.setAgentReloadRequired(false);
       if (!isPrivateChatSession(state, sessionId)) await bridge.upsertSession(next);
-      void bridge.setCodingDataPrivacy(state.settings.codingDataPrivacy).catch(() => undefined);
+      if (state.settings.codingDataPrivacyConfigured && !isPrivateChatSession(state, sessionId)) {
+        void bridge.setCodingDataPrivacy(state.settings.codingDataPrivacy).catch(() => undefined);
+      }
     } finally {
       setConnectingSessionId(null);
     }

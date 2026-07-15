@@ -296,6 +296,8 @@ pub struct WorktreeCreateRequest {
     pub r#ref: Option<String>,
     pub path: Option<String>,
     pub branch: Option<String>,
+    #[serde(default)]
+    pub private_chat: bool,
     pub dirty_policy: String, // clean_head | copy_dirty
 }
 
@@ -304,6 +306,8 @@ pub struct WorktreeCreateRequest {
 pub struct WorktreeDeleteRequest {
     pub path: String,
     pub force: bool,
+    #[serde(default)]
+    pub private_chat: bool,
 }
 
 pub fn list_git_worktrees(workspace_root: &str) -> Result<Vec<WorktreeSummary>, GitError> {
@@ -531,6 +535,8 @@ pub struct WorktreeApplyRequest {
     pub main_workspace: String,
     pub worktree_path: String,
     pub base_commit: String,
+    #[serde(default)]
+    pub private_chat: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -780,6 +786,8 @@ pub struct GitFileActionRequest {
     pub workspace_root: String,
     pub path: String,
     pub action: GitFileAction,
+    #[serde(default)]
+    pub private_chat: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -789,6 +797,8 @@ pub struct GitHunkActionRequest {
     pub path: String,
     pub patch: String,
     pub action: GitFileAction,
+    #[serde(default)]
+    pub private_chat: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -796,6 +806,8 @@ pub struct GitHunkActionRequest {
 pub struct GitCommitRequest {
     pub workspace_root: String,
     pub message: String,
+    #[serde(default)]
+    pub private_chat: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1179,6 +1191,7 @@ mod tests {
             r#ref: Some("HEAD".into()),
             path: Some(wt_path.to_string_lossy().into()),
             branch: Some("feat-wt".into()),
+            private_chat: false,
             dirty_policy: "clean_head".into(),
         })
         .unwrap();
@@ -1199,6 +1212,7 @@ mod tests {
             &WorktreeDeleteRequest {
                 path: created.path.clone(),
                 force: true,
+                private_chat: false,
             },
             repo.to_str().unwrap(),
         )
@@ -1214,6 +1228,7 @@ mod tests {
             r#ref: None,
             path: Some(repo.join("wt-d").to_string_lossy().into()),
             branch: Some("d".into()),
+            private_chat: false,
             dirty_policy: "".into(),
         })
         .unwrap_err();
@@ -1233,6 +1248,7 @@ mod tests {
             r#ref: Some("HEAD".into()),
             path: Some(worktree.to_string_lossy().into()),
             branch: Some(format!("apply-{}", &uuid::Uuid::new_v4().to_string()[..8])),
+            private_chat: false,
             dirty_policy: "clean_head".into(),
         })
         .unwrap();
@@ -1243,6 +1259,7 @@ mod tests {
             main_workspace: repo.to_string_lossy().into(),
             worktree_path: worktree.to_string_lossy().into(),
             base_commit: base,
+            private_chat: false,
         };
         let preview = worktree_apply_preview(&req).unwrap();
         assert!(preview.ready, "preview was blocked: {:?}", preview.reason);
@@ -1272,6 +1289,7 @@ mod tests {
             main_workspace: repo.to_string_lossy().into(),
             worktree_path: repo.to_string_lossy().into(),
             base_commit: base,
+            private_chat: false,
         })
         .unwrap();
         assert!(!preview.ready);
@@ -1291,6 +1309,7 @@ mod tests {
             workspace_root: repo.to_string_lossy().into(),
             path: "a.txt".into(),
             action: GitFileAction::Stage,
+            private_chat: false,
         })
         .unwrap();
         assert!(!git(&repo, &["diff", "--cached", "--name-only"])
@@ -1301,12 +1320,14 @@ mod tests {
             workspace_root: repo.to_string_lossy().into(),
             path: "a.txt".into(),
             action: GitFileAction::Unstage,
+            private_chat: false,
         })
         .unwrap();
         apply_file_action(&GitFileActionRequest {
             workspace_root: repo.to_string_lossy().into(),
             path: "a.txt".into(),
             action: GitFileAction::Revert,
+            private_chat: false,
         })
         .unwrap();
         assert_eq!(

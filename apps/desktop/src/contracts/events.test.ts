@@ -88,7 +88,7 @@ describe("RuntimeSnapshot / SessionSummary / ReviewSnapshot shapes", () => {
       powerProfile: null,
     };
     expect(connectionKeyString(key)).toBe(
-      "/Users/me/proj::workspace::off::strict::ask::default::default",
+      "/Users/me/proj::workspace::off::strict::ask::default::default::durable",
     );
   });
 

@@ -15,7 +15,7 @@ Wire format: **camelCase** JSON for all IPC / events.
 | Type | Purpose |
 |------|---------|
 | `RuntimeSnapshot` | Pool of ACP connections + active selection |
-| `ConnectionKey` | `workspaceRoot + sandbox + powerProfile` |
+| `ConnectionKey` | `workspaceRoot + sandbox + powerProfile + privacyMode + approval + model + reasoningEffort + privateChat` |
 | `SessionSummary` | Sidebar / SQLite session index row |
 | `SessionEventEnvelope` | `connectionId`, `sessionId`, `sequence`, `timestamp`, `source`, `kind`, `payload` |
 | `PermissionPrompt` | UI modal; options come from Agent only |

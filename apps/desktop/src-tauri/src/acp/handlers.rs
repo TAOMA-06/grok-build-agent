@@ -109,10 +109,16 @@ fn is_plan_mode_read_only_tool(program: &str, args: &[String]) -> bool {
             )
         }),
         "cargo" => args.first().is_some_and(|arg| {
-            matches!(arg.as_str(), "check" | "test" | "clippy" | "tree" | "metadata")
+            matches!(
+                arg.as_str(),
+                "check" | "test" | "clippy" | "tree" | "metadata"
+            )
         }),
         "npm" | "pnpm" | "yarn" => args.first().is_some_and(|arg| {
-            matches!(arg.as_str(), "test" | "run" | "ls" | "list" | "view" | "pack")
+            matches!(
+                arg.as_str(),
+                "test" | "run" | "ls" | "list" | "view" | "pack"
+            )
         }),
         _ => false,
     }
@@ -539,10 +545,7 @@ mod tests {
             "/bin/zsh",
             &["-lc".into(), "echo hi > /tmp/x".into()]
         ));
-        assert!(!plan_mode_blocks_terminal_write(
-            "git",
-            &["status".into()]
-        ));
+        assert!(!plan_mode_blocks_terminal_write("git", &["status".into()]));
         assert!(plan_mode_blocks_terminal_write(
             "git",
             &["commit".into(), "-am".into(), "x".into()]

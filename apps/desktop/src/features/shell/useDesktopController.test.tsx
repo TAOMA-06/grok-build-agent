@@ -82,8 +82,18 @@ describe("useDesktopController", () => {
     const getTask = vi.fn().mockResolvedValue(null);
     const upsertTask = vi.fn().mockResolvedValue(undefined);
     const sendPrompt = vi.fn().mockResolvedValue(null);
+    const startAgent = vi.fn(mockDesktopBridge.startAgent);
+    const createWorktree = vi.fn(mockDesktopBridge.createWorktree);
+    const gitReview = vi.fn(mockDesktopBridge.gitReview);
+    const prepareAttachments = vi.fn(mockDesktopBridge.prepareAttachments);
+    const setCodingDataPrivacy = vi.fn(mockDesktopBridge.setCodingDataPrivacy);
     const bridge: DesktopBridge = {
       ...mockDesktopBridge,
+      startAgent,
+      createWorktree,
+      gitReview,
+      prepareAttachments,
+      setCodingDataPrivacy,
       upsertSession,
       saveDraft,
       appendCachedEvent,
@@ -103,12 +113,27 @@ describe("useDesktopController", () => {
     const sessionId = useAppStore.getState().activeSessionId;
     expect(sessionId).toBeTruthy();
     expect(useAppStore.getState().sessions[sessionId!]?.privateChat).toBe(true);
+    expect(startAgent).toHaveBeenCalledWith(expect.objectContaining({ privateChat: true }));
+    expect(gitReview).toHaveBeenCalledWith("/Users/demo/Projects/orbit", true);
+    expect(createWorktree).toHaveBeenCalledWith(expect.objectContaining({
+      privateChat: true,
+      branch: `private-${sessionId!.slice(0, 8)}`,
+    }));
+    expect(prepareAttachments).toHaveBeenCalledWith([], true);
     expect(sendPrompt).toHaveBeenCalled();
+    expect(sendPrompt).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      "keep this out of local history",
+      expect.any(Array),
+      expect.objectContaining({ privateChat: true }),
+    );
     expect(upsertSession).not.toHaveBeenCalled();
     expect(saveDraft).not.toHaveBeenCalled();
     expect(appendCachedEvent).not.toHaveBeenCalled();
     expect(getTask).not.toHaveBeenCalled();
     expect(upsertTask).not.toHaveBeenCalled();
+    expect(setCodingDataPrivacy).not.toHaveBeenCalled();
   });
 
   it("reconnects a persisted task before sending when its process is no longer live", async () => {

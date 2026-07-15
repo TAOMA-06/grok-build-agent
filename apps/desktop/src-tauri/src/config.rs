@@ -41,8 +41,11 @@ pub struct AppSettings {
     #[serde(default = "default_privacy_mode")]
     pub privacy_mode: String,
     /// Grok Privacy Mode: coding data retention opt-out (account-level). Default on.
-    #[serde(default = "default_coding_data_privacy")]
+    #[serde(default = "default_legacy_coding_data_privacy")]
     pub coding_data_privacy: bool,
+    /// Legacy installs do not sync the account setting until the user chooses it.
+    #[serde(default)]
+    pub coding_data_privacy_configured: bool,
     #[serde(default = "default_private_chat")]
     pub private_chat: bool,
     #[serde(default = "default_mode")]
@@ -52,7 +55,7 @@ pub struct AppSettings {
     #[serde(default = "default_true")]
     pub auto_update_cli: bool,
     pub always_approve: bool,
-    #[serde(default = "default_use_harness")]
+    #[serde(default = "default_legacy_use_harness")]
     pub use_harness: bool,
     #[serde(default)]
     pub sandbox: SandboxMode,
@@ -89,8 +92,10 @@ struct AppSettingsFile {
     pub focus_mode: String,
     #[serde(default = "default_privacy_mode")]
     pub privacy_mode: String,
-    #[serde(default = "default_coding_data_privacy")]
+    #[serde(default = "default_legacy_coding_data_privacy")]
     pub coding_data_privacy: bool,
+    #[serde(default)]
+    pub coding_data_privacy_configured: bool,
     #[serde(default = "default_private_chat")]
     pub private_chat: bool,
     #[serde(default = "default_mode")]
@@ -100,7 +105,7 @@ struct AppSettingsFile {
     #[serde(default = "default_true")]
     pub auto_update_cli: bool,
     pub always_approve: bool,
-    #[serde(default = "default_use_harness")]
+    #[serde(default = "default_legacy_use_harness")]
     pub use_harness: bool,
     #[serde(default)]
     pub sandbox: SandboxMode,
@@ -131,6 +136,7 @@ impl Default for AppSettings {
             focus_mode: default_focus_mode(),
             privacy_mode: default_privacy_mode(),
             coding_data_privacy: default_coding_data_privacy(),
+            coding_data_privacy_configured: true,
             private_chat: default_private_chat(),
             default_mode: default_mode(),
             permission_policy: default_permission_policy(),
@@ -155,7 +161,7 @@ fn default_locale() -> String {
 }
 
 fn settings_schema_version() -> u32 {
-    7
+    8
 }
 
 fn default_mode() -> String {
@@ -178,6 +184,16 @@ fn default_coding_data_privacy() -> bool {
     true
 }
 
+fn default_legacy_coding_data_privacy() -> bool {
+    false
+}
+
+fn coding_data_privacy_configured_from_raw(raw: &serde_json::Value) -> bool {
+    raw.get("codingDataPrivacyConfigured")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or_else(|| raw.get("codingDataPrivacy").is_some())
+}
+
 fn default_private_chat() -> bool {
     // Durable coding tasks by default (history, contracts, verification).
     false
@@ -185,6 +201,10 @@ fn default_private_chat() -> bool {
 
 fn default_use_harness() -> bool {
     true
+}
+
+fn default_legacy_use_harness() -> bool {
+    false
 }
 
 fn default_permission_policy() -> String {
@@ -240,6 +260,8 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
         return Ok(s);
     }
     let raw = fs::read_to_string(&path)?;
+    let raw_value: serde_json::Value = serde_json::from_str(&raw)?;
+    let coding_data_privacy_configured = coding_data_privacy_configured_from_raw(&raw_value);
     let file: AppSettingsFile = serde_json::from_str(&raw)?;
 
     // One-time migration: move plaintext api_key into Keychain and rewrite file.
@@ -264,6 +286,7 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
         focus_mode: file.focus_mode,
         privacy_mode: file.privacy_mode,
         coding_data_privacy: file.coding_data_privacy,
+        coding_data_privacy_configured,
         private_chat: file.private_chat,
         default_mode: file.default_mode,
         permission_policy: file.permission_policy,
@@ -299,6 +322,7 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), ConfigError> {
         focus_mode: settings.focus_mode.clone(),
         privacy_mode: settings.privacy_mode.clone(),
         coding_data_privacy: settings.coding_data_privacy,
+        coding_data_privacy_configured: settings.coding_data_privacy_configured,
         private_chat: settings.private_chat,
         default_mode: settings.default_mode.clone(),
         permission_policy: settings.permission_policy.clone(),
@@ -341,7 +365,7 @@ mod tests {
             "theme": "dark"
         }))
         .unwrap();
-        assert_eq!(file.schema_version, 7);
+        assert_eq!(file.schema_version, 8);
         assert!(!file.compact_mode);
         assert!(!file.multiline_mode);
         assert!(!file.show_timestamps);
@@ -349,12 +373,37 @@ mod tests {
         assert_eq!(file.default_reasoning_effort, "medium");
         assert_eq!(file.focus_mode, "balanced");
         assert_eq!(file.privacy_mode, "strict");
-        assert!(file.coding_data_privacy);
+        assert!(!file.coding_data_privacy);
+        assert!(!file.coding_data_privacy_configured);
         assert!(!file.private_chat);
         assert_eq!(file.permission_policy, "workspace_edit");
         assert!(file.auto_update_cli);
         assert!(file.always_approve);
         assert!(file.use_harness);
         assert_eq!(file.cwd, "/project");
+    }
+
+    #[test]
+    fn account_privacy_sync_is_enabled_only_for_an_explicit_preference() {
+        assert!(!coding_data_privacy_configured_from_raw(
+            &serde_json::json!({})
+        ));
+        assert!(coding_data_privacy_configured_from_raw(
+            &serde_json::json!({
+                "codingDataPrivacy": true,
+            })
+        ));
+        assert!(!coding_data_privacy_configured_from_raw(
+            &serde_json::json!({
+                "codingDataPrivacy": true,
+                "codingDataPrivacyConfigured": false,
+            })
+        ));
+        assert!(coding_data_privacy_configured_from_raw(
+            &serde_json::json!({
+                "codingDataPrivacy": false,
+                "codingDataPrivacyConfigured": true,
+            })
+        ));
     }
 }

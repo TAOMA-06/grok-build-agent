@@ -370,7 +370,7 @@ export const mockDesktopBridge: DesktopBridge = {
       source: "acp_command",
     };
   },
-  async stageAttachments(paths) {
+  async stageAttachments(paths, _privateChat = false) {
     return paths.map((path) => {
       const name = path.split(/[\\/]/).pop() ?? path;
       const mimeType = inferAttachmentMime(name) ?? "application/octet-stream";
@@ -385,7 +385,7 @@ export const mockDesktopBridge: DesktopBridge = {
       };
     });
   },
-  async prepareAttachments(files) {
+  async prepareAttachments(files, _privateChat = false) {
     return buildPromptContent(
       "",
       files.map((file) =>
@@ -418,22 +418,22 @@ export const mockDesktopBridge: DesktopBridge = {
       checkedAt: new Date().toISOString(),
     }];
   },
-  async gitReview(root) {
+  async gitReview(root, _privateChat = false) {
     return mockReview(root);
   },
-  async gitFilePatch(_root, path) {
+  async gitFilePatch(_root, path, _staged, _privateChat = false) {
     return `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,3 +1,4 @@\n export default function App() {\n+  // Grok desktop shell\n }`;
   },
-  async gitFileAction() {
+  async gitFileAction(_root, _path, _action, _privateChat = false) {
     return {};
   },
-  async gitHunkAction() {
+  async gitHunkAction(_root, _path, _patch, _action, _privateChat = false) {
     return {};
   },
-  async gitCommit() {
+  async gitCommit(_root, _message, _privateChat = false) {
     return { commit: "d34db33", summary: "mock commit" };
   },
-  async gitCreateCheckpoint() {
+  async gitCreateCheckpoint(_root, _privateChat = false) {
     return {
       checkpointId: crypto.randomUUID(),
       head: "d34db33",
@@ -442,7 +442,7 @@ export const mockDesktopBridge: DesktopBridge = {
       bytes: 0,
     };
   },
-  async gitCheckpointRestorePreview(_workspaceRoot, checkpointId) {
+  async gitCheckpointRestorePreview(_workspaceRoot, checkpointId, _privateChat = false) {
     return {
       checkpoint: {
         checkpointId,
@@ -456,7 +456,7 @@ export const mockDesktopBridge: DesktopBridge = {
       reason: null,
     };
   },
-  async gitRestoreCheckpoint(_workspaceRoot, checkpointId) {
+  async gitRestoreCheckpoint(_workspaceRoot, checkpointId, _privateChat = false) {
     return {
       checkpointId,
       head: "d34db33",
@@ -465,13 +465,13 @@ export const mockDesktopBridge: DesktopBridge = {
       bytes: 0,
     };
   },
-  async workspaceTree() {
+  async workspaceTree(_workspaceRoot, _path = null, _privateChat = false) {
     return [{ path: "src", name: "src", directory: true, size: null }];
   },
-  async workspaceSearch(_workspaceRoot, query) {
+  async workspaceSearch(_workspaceRoot, query, _privateChat = false) {
     return [{ path: `src/${query}.ts`, name: `${query}.ts`, directory: false, size: 128 }];
   },
-  async workspaceRead(_workspaceRoot, path) {
+  async workspaceRead(_workspaceRoot, path, _privateChat = false) {
     return { path, content: "mock preview", binary: false, truncated: false, size: 12 };
   },
   async listPolicyRules() {
@@ -548,7 +548,7 @@ export const mockDesktopBridge: DesktopBridge = {
       mainWorkspace: req.workspaceRoot,
     };
   },
-  async deleteWorktree() {},
+  async deleteWorktree(_path, _mainWorkspace, _force, _privateChat = false) {},
   async previewWorktreeApply(req) {
     const review = mockReview(req.worktreePath);
     return {

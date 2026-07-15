@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyComposerDraft } from "../../contracts";
-import { DesktopBridgeContext } from "../../platform/DesktopBridge";
+import { DesktopBridgeContext, type DesktopBridge } from "../../platform/DesktopBridge";
 import { mockDesktopBridge } from "../../platform/mockBridge";
 import { defaultSettings, useAppStore } from "../../store";
 import { CommandComposer, browserAttachment, STOP_ARM_MS } from "./CommandComposer";
@@ -15,13 +15,14 @@ function renderComposer(overrides?: {
   onCancel?: ReturnType<typeof vi.fn>;
   busy?: boolean;
   connecting?: boolean;
+  bridge?: DesktopBridge;
 }) {
   const onSend = overrides?.onSend ?? vi.fn().mockResolvedValue(undefined);
   const onLocalCommand = overrides?.onLocalCommand ?? vi.fn();
   const onCancel = overrides?.onCancel ?? vi.fn().mockResolvedValue(undefined);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
-    <DesktopBridgeContext.Provider value={mockDesktopBridge}>
+    <DesktopBridgeContext.Provider value={overrides?.bridge ?? mockDesktopBridge}>
       <QueryClientProvider client={queryClient}>
         <CommandComposer
           models={[{ id: "grok-build", name: "Grok Build", isDefault: true }]}
@@ -63,6 +64,31 @@ describe("CommandComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.keyDown(textarea, { key: "Enter", isComposing: false });
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("中文", [], "agent"));
+  });
+
+  it("marks path attachments as private before the Host inspects them", async () => {
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, privateChat: true },
+    }));
+    const chooseFiles = vi.fn().mockResolvedValue(["/repo/private-notes.txt"]);
+    const stageAttachments = vi.fn().mockResolvedValue([
+      {
+        id: "attachment-1",
+        source: "path" as const,
+        kind: "file" as const,
+        name: "private-notes.txt",
+        path: "/repo/private-notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 12,
+      },
+    ]);
+    renderComposer({ bridge: { ...mockDesktopBridge, chooseFiles, stageAttachments } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Attach" }));
+
+    await waitFor(() => {
+      expect(stageAttachments).toHaveBeenCalledWith(["/repo/private-notes.txt"], true);
+    });
   });
 
   it("does not submit on the Enter that confirms IME composition", async () => {

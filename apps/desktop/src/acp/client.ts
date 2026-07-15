@@ -189,6 +189,7 @@ export async function setCodingDataPrivacy(privacyModeOn: boolean): Promise<{
 
 export async function inspectAttachments(
   paths: string[],
+  privateChat = false,
 ): Promise<import("../contracts").ComposerAttachment[]> {
   const files = await invoke<
     Array<{
@@ -198,7 +199,7 @@ export async function inspectAttachments(
       mimeType: string;
       sizeBytes?: number | null;
     }>
-  >("inspect_attachments", { paths });
+  >("inspect_attachments", { paths, privateChat });
   return files.map((file) => ({
     ...file,
     source: "path" as const,
@@ -208,8 +209,10 @@ export async function inspectAttachments(
 
 export async function prepareAttachments(
   files: import("../contracts").ComposerAttachment[],
+  privateChat = false,
 ): Promise<import("../contracts").PromptContent[]> {
   return invoke("prepare_attachments", {
+    privateChat,
     files: files
       .filter((file) => file.source === "path" && file.path)
       .map((file) => ({

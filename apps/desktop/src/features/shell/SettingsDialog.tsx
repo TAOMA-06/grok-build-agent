@@ -120,7 +120,11 @@ export function SettingsDialog({
   }
 
   async function applyCodingDataPrivacy(enabled: boolean) {
-    const updated = normalizeSettings({ ...draft, codingDataPrivacy: enabled });
+    const updated = normalizeSettings({
+      ...draft,
+      codingDataPrivacy: enabled,
+      codingDataPrivacyConfigured: true,
+    });
     setDraft(updated);
     await persist(updated);
     // Best-effort account sync when an agent is already running.

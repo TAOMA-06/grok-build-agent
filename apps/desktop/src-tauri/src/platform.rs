@@ -193,31 +193,21 @@ pub struct PromptDispatch {
 }
 
 /// Controls how often the host re-sends the complete task contract to the runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FocusMode {
     Economy,
+    #[default]
     Balanced,
 }
 
-impl Default for FocusMode {
-    fn default() -> Self {
-        Self::Balanced
-    }
-}
-
 /// Local handling before prompt content crosses into the configured runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PrivacyMode {
+    #[default]
     Strict,
     Standard,
-}
-
-impl Default for PrivacyMode {
-    fn default() -> Self {
-        Self::Strict
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -230,6 +220,9 @@ pub struct PromptDispatchContext {
     pub focus_mode: FocusMode,
     #[serde(default)]
     pub privacy_mode: PrivacyMode,
+    /// Private sessions skip durable dispatch, task, and verification records.
+    #[serde(default)]
+    pub private_chat: bool,
 }
 
 #[derive(

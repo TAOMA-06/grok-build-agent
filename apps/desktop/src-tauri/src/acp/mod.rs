@@ -74,6 +74,9 @@ pub struct StartConfig {
     /// Existing Grok session to restore instead of creating a new one.
     #[serde(default)]
     pub resume_session_id: Option<String>,
+    /// Keep desktop-local task data out of the durable Host catalog.
+    #[serde(default)]
+    pub private_chat: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,6 +205,7 @@ mod tests {
             privacy_mode: crate::platform::PrivacyMode::Strict,
             power_profile: None,
             resume_session_id: None,
+            private_chat: false,
         }
     }
 

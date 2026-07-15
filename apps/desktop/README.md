@@ -15,7 +15,7 @@ Each first user instruction seeds the task focus shown in the Context drawer. Ec
 
 **Privacy Mode** is on by default and maps to Grok Build `/privacy opt-out` (coding data retention opt-out). When an agent is connected and signed in, the desktop app syncs this preference via `x.ai/privacy/setCodingDataRetention`.
 
-New tasks are **durable by default** (Private Chat off) with the **Orchestrator harness** on. First turns seed a task contract (goal, acceptance, inferred verification). Declared verification commands auto-run after successful turns. Private Chat remains available as an explicit local-ephemeral opt-in.
+New tasks are **durable by default** (Private Chat off) with the **Orchestrator harness** on. First turns seed a task contract (goal, acceptance, inferred verification). Declared argv-only verification commands auto-run after successful turns when policy allows; shell, network, and destructive commands require confirmation instead. Private Chat remains available as an explicit local-ephemeral opt-in.
 
 Prompt-cache changes must pass a weighted A/B gate against a same-turn CLI trace. Export provider usage responses as JSON or JSONL, then run `npm run benchmark:cache -- --baseline cli.jsonl --candidate desktop.jsonl`. The gate requires the desktop run to have the same turn count, a strictly higher weighted cache-hit rate, fewer uncached prompt tokens, and no higher cost when both traces include cost.
 
