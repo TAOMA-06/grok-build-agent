@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use thiserror::Error;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::broadcast;
@@ -31,7 +31,7 @@ struct HostState {
     db: Arc<Database>,
     token: Arc<String>,
     events: broadcast::Sender<HostNotification>,
-    idempotency_lock: Arc<Mutex<()>>,
+    idempotency_locks: Arc<Mutex<IdempotencyLocks>>,
     blobs: Arc<crate::blob_store::BlobStore>,
     pending_actions: Arc<parking_lot::Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
     task_roots: Arc<parking_lot::Mutex<HashMap<String, PathBuf>>>,
@@ -40,6 +40,11 @@ struct HostState {
     private_connections: Arc<parking_lot::Mutex<HashSet<String>>>,
     private_terminals: Arc<parking_lot::Mutex<HashSet<String>>>,
 }
+
+/// One async mutex per idempotency key. A long-running request must only block
+/// a retry of that exact request, never unrelated permission, cancellation, or
+/// terminal RPCs.
+type IdempotencyLocks = HashMap<String, Weak<Mutex<()>>>;
 
 /// A workspace write lease exists only while a task turn is actively running.
 /// Keeping it for the lifetime of a resumable session prevents every later
@@ -450,7 +455,7 @@ async fn run() -> Result<(), AgentHostError> {
         db,
         token,
         events,
-        idempotency_lock: Arc::new(Mutex::new(())),
+        idempotency_locks: Arc::new(Mutex::new(HashMap::new())),
         blobs: Arc::new(
             crate::blob_store::BlobStore::new(blob_root)
                 .map_err(|error| AgentHostError::Message(error.to_string()))?,
@@ -630,6 +635,26 @@ async fn serve_connection(mut stream: UnixStream, state: HostState) -> Result<()
     }
 }
 
+async fn acquire_idempotency_guard(
+    locks: &Mutex<IdempotencyLocks>,
+    idempotency_key: &str,
+) -> tokio::sync::OwnedMutexGuard<()> {
+    let lock = {
+        let mut locks = locks.lock().await;
+        // The map only keeps weak references, so prune entries left behind by
+        // completed requests before looking up or adding this key.
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        if let Some(lock) = locks.get(idempotency_key).and_then(|lock| lock.upgrade()) {
+            lock
+        } else {
+            let lock = Arc::new(Mutex::new(()));
+            locks.insert(idempotency_key.to_string(), Arc::downgrade(&lock));
+            lock
+        }
+    };
+    lock.lock_owned().await
+}
+
 async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
     let method = request.method.clone();
     let meta = request.meta.clone();
@@ -653,7 +678,12 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
         return success(request.id, json!({}));
     }
     let _idempotency_guard = if host_rpc::is_write_method(&method) {
-        Some(state.idempotency_lock.lock().await)
+        match meta.as_ref() {
+            Some(meta) => Some(
+                acquire_idempotency_guard(&state.idempotency_locks, &meta.idempotency_key).await,
+            ),
+            None => None,
+        }
     } else {
         None
     };
@@ -1569,7 +1599,6 @@ async fn authorize_platform_terminal(
         vec![],
     );
     action.actor = "user:desktop-terminal".into();
-    action.paths = vec![workspace.to_string_lossy().into_owned()];
     let decision = crate::policy::evaluate(&action);
     match decision.decision {
         crate::platform::PolicyDecisionKind::Deny => Err(decision.reason),
@@ -2788,6 +2817,37 @@ mod tests {
         );
         assert_eq!(host_event_name_for_kind("permission"), "acp:server_request");
         assert_eq!(host_event_name_for_kind("error"), "acp:error");
+    }
+
+    #[tokio::test]
+    async fn idempotency_guards_are_scoped_to_the_request_key() {
+        let locks = Arc::new(Mutex::new(HashMap::new()));
+        let first = acquire_idempotency_guard(&locks, "prompt-1").await;
+
+        let unrelated = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            acquire_idempotency_guard(&locks, "permission-1"),
+        )
+        .await
+        .expect("an unrelated permission decision must not wait for a prompt");
+        drop(unrelated);
+
+        let waiting_locks = locks.clone();
+        let mut same_key_waiter = tokio::spawn(async move {
+            let _guard = acquire_idempotency_guard(&waiting_locks, "prompt-1").await;
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut same_key_waiter,)
+                .await
+                .is_err(),
+            "a retry with the same idempotency key must remain single-flight"
+        );
+
+        drop(first);
+        tokio::time::timeout(std::time::Duration::from_secs(1), same_key_waiter)
+            .await
+            .expect("same-key waiter must proceed after the original request finishes")
+            .expect("same-key waiter task must not panic");
     }
 
     #[test]

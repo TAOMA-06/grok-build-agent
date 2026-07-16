@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 const MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_COMMAND_DURATION: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+const PROTECTED_TERMINAL_ENV: &[&str] = &["XAI_API_KEY"];
 
 pub struct TerminalSession {
     pub id: String,
@@ -78,6 +79,7 @@ impl TerminalHost {
                 "terminal command must be a program path, not a shell expression".into(),
             ));
         }
+        validate_terminal_environment(env)?;
         let task_id = task_id.unwrap_or("unattributed").to_string();
         if self
             .sessions
@@ -96,6 +98,11 @@ impl TerminalHost {
         let (master, slave) = open_pty(80, 24)?;
         let mut cmd = Command::new(command);
         cmd.args(args).current_dir(workspace).kill_on_drop(true);
+        // The Agent Host can hold the xAI credential needed to launch Grok.
+        // Terminal commands are model-controlled, so never inherit that token.
+        for name in PROTECTED_TERMINAL_ENV {
+            cmd.env_remove(name);
+        }
         #[cfg(unix)]
         {
             use std::os::fd::{AsRawFd, FromRawFd};
@@ -445,6 +452,19 @@ impl TerminalHost {
     }
 }
 
+fn validate_terminal_environment(env: &[(String, String)]) -> Result<(), AcpError> {
+    if let Some((name, _)) = env.iter().find(|(name, _)| {
+        PROTECTED_TERMINAL_ENV
+            .iter()
+            .any(|protected| name.eq_ignore_ascii_case(protected))
+    }) {
+        return Err(AcpError::Message(format!(
+            "terminal environment cannot override protected credential {name}"
+        )));
+    }
+    Ok(())
+}
+
 fn append_output(session: &TerminalSession, bytes: &[u8]) {
     let chunk = String::from_utf8_lossy(bytes);
     let appended_chars = chunk.chars().count();
@@ -742,5 +762,13 @@ mod tests {
             parse_create_params(&json!({"command": ["printf", "%s", "a b"]})).unwrap();
         assert_eq!(cmd, "printf");
         assert_eq!(args, vec!["%s", "a b"]);
+    }
+
+    #[test]
+    fn protected_agent_credentials_cannot_be_forwarded_to_a_terminal() {
+        assert!(
+            validate_terminal_environment(&[("XAI_API_KEY".into(), "xai-secret".into(),)]).is_err()
+        );
+        assert!(validate_terminal_environment(&[("RUST_LOG".into(), "info".into())]).is_ok());
     }
 }

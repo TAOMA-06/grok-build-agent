@@ -1,7 +1,7 @@
 //! Fail-closed policy classification shared by terminal and future Tool Gateway calls.
 
 use crate::platform::{ActionEffect, ActionRequest, PolicyDecision, PolicyDecisionKind, RiskLevel};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 pub fn classify_terminal_action(
     request_id: String,
@@ -13,6 +13,7 @@ pub fn classify_terminal_action(
     secret_refs: Vec<String>,
 ) -> ActionRequest {
     let program = program_name(command);
+    let paths = classify_terminal_paths(Path::new(&workspace_id), args);
     let mut effect = ActionEffect::Execute;
     let mut risk = RiskLevel::Low;
 
@@ -46,7 +47,7 @@ pub fn classify_terminal_action(
         argv: std::iter::once(command.to_string())
             .chain(args.iter().cloned())
             .collect(),
-        paths: vec![],
+        paths,
         network_targets: vec![],
         secret_refs,
         risk,
@@ -61,6 +62,81 @@ fn program_name(command: &str) -> String {
         .and_then(|value| value.to_str())
         .unwrap_or(command)
         .to_ascii_lowercase()
+}
+
+/// Extract argv entries that can address the filesystem, resolving relative
+/// paths against the terminal workspace. This makes the policy evaluate what a
+/// child process can actually read, rather than assuming its cwd is a sandbox.
+fn classify_terminal_paths(workspace_root: &Path, args: &[String]) -> Vec<String> {
+    let mut paths = Vec::new();
+    for argument in args {
+        let Some(path) = terminal_path_argument(argument) else {
+            continue;
+        };
+        let resolved = resolve_terminal_path(workspace_root, path);
+        let resolved = resolved.to_string_lossy().into_owned();
+        if !paths.contains(&resolved) {
+            paths.push(resolved);
+        }
+    }
+    paths
+}
+
+fn terminal_path_argument(argument: &str) -> Option<&str> {
+    let argument = argument.trim();
+    let candidate = argument
+        .split_once('=')
+        .filter(|(flag, _)| flag.starts_with('-'))
+        .map(|(_, value)| value)
+        .unwrap_or(argument)
+        .trim();
+    if candidate.is_empty() || candidate.contains("://") {
+        return None;
+    }
+    let path = Path::new(candidate);
+    let path_like = path.is_absolute()
+        || matches!(candidate, "." | ".." | "~")
+        || candidate.starts_with("./")
+        || candidate.starts_with("../")
+        || candidate.starts_with("~/")
+        || candidate.contains('/')
+        || candidate.contains('\\');
+    path_like.then_some(candidate)
+}
+
+fn resolve_terminal_path(workspace_root: &Path, candidate: &str) -> PathBuf {
+    let expanded = crate::acp::shellexpand_home(candidate);
+    let candidate = PathBuf::from(expanded);
+    let candidate = if candidate.is_absolute() {
+        candidate
+    } else {
+        workspace_root.join(candidate)
+    };
+    let lexical = normalize_lexical(&candidate);
+    std::fs::canonicalize(&lexical).unwrap_or(lexical)
+}
+
+fn normalize_lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => out.push(prefix.as_os_str()),
+            Component::RootDir => out.push(Component::RootDir.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(component) => out.push(component),
+        }
+    }
+    out
+}
+
+fn path_is_outside_workspace(path: &Path, workspace_root: &Path) -> bool {
+    let root =
+        std::fs::canonicalize(workspace_root).unwrap_or_else(|_| normalize_lexical(workspace_root));
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| normalize_lexical(path));
+    !path.starts_with(root)
 }
 
 /// Automatic verification never starts a shell or command wrapper. A declared
@@ -110,14 +186,24 @@ fn is_automatic_command_wrapper(program: &str) -> bool {
 }
 
 pub fn evaluate(action: &ActionRequest) -> PolicyDecision {
-    let (decision, reason, second) = if action
-        .paths
-        .iter()
-        .any(|path| is_sensitive_path(Path::new(path)))
-    {
+    let workspace_root = Path::new(&action.workspace_id);
+    let (decision, reason, second) = if action.paths.iter().any(|path| {
+        let path = Path::new(path);
+        is_sensitive_path(path) && path_is_outside_workspace(path, workspace_root)
+    }) {
         (
             PolicyDecisionKind::Deny,
             "Sensitive paths are outside the workspace capability".to_string(),
+            false,
+        )
+    } else if action
+        .paths
+        .iter()
+        .any(|path| path_is_outside_workspace(Path::new(path), workspace_root))
+    {
+        (
+            PolicyDecisionKind::RequireConfirmation,
+            "Terminal path is outside the workspace and requires confirmation".into(),
             false,
         )
     } else if matches!(action.risk, RiskLevel::Critical) {
@@ -243,16 +329,18 @@ fn is_sensitive_path(path: &Path) -> bool {
         .to_string_lossy()
         .replace('\\', "/")
         .to_ascii_lowercase();
-    [
-        "/.ssh/",
-        "/.aws/",
-        "/.gnupg/",
-        "/library/keychains/",
-        "/library/application support/google/chrome/",
-        "/library/application support/firefox/",
-    ]
-    .iter()
-    .any(|needle| normalized.contains(needle))
+    normalized
+        .split('/')
+        .any(|segment| matches!(segment, ".ssh" | ".aws" | ".gnupg" | ".azure" | ".kube"))
+        || [
+            "/.grok/auth",
+            "/.config/gcloud/",
+            "/library/keychains/",
+            "/library/application support/google/chrome/",
+            "/library/application support/firefox/",
+        ]
+        .iter()
+        .any(|needle| normalized.contains(needle))
 }
 
 #[cfg(test)]
@@ -262,7 +350,7 @@ mod tests {
     fn action(command: &str, args: &[&str]) -> ActionRequest {
         classify_terminal_action(
             "r1".into(),
-            "w1".into(),
+            "/workspace".into(),
             "t1".into(),
             "s1".into(),
             command,
@@ -311,5 +399,25 @@ mod tests {
                 PolicyDecisionKind::RequireConfirmation
             );
         }
+    }
+
+    #[test]
+    fn terminal_paths_are_checked_before_an_argv_only_command_is_allowed() {
+        for request in [
+            action("cat", &["/Users/example/.ssh/id_rsa"]),
+            action("cat", &["--credentials=/Users/example/.aws/credentials"]),
+            action("cat", &["/Users/example/.grok/auth/token.json"]),
+        ] {
+            assert_eq!(evaluate(&request).decision, PolicyDecisionKind::Deny);
+        }
+
+        assert_eq!(
+            evaluate(&action("cat", &["../outside.txt"])).decision,
+            PolicyDecisionKind::RequireConfirmation
+        );
+        assert_eq!(
+            evaluate(&action("cat", &["src/main.rs"])).decision,
+            PolicyDecisionKind::AllowOnce
+        );
     }
 }

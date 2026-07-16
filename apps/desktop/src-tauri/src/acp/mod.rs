@@ -9,6 +9,7 @@ mod handlers;
 mod pool;
 pub(crate) mod terminal_host;
 
+pub(crate) use connection::shellexpand_home;
 pub use connection::{iso_now, resolve_grok_path};
 #[cfg(test)]
 pub use events::NoopEventBus;

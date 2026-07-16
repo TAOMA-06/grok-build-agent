@@ -124,7 +124,7 @@ fn is_plan_mode_read_only_tool(program: &str, args: &[String]) -> bool {
     }
 }
 
-fn safe_plan_file_path(session_id: &str, params: &Value) -> Option<std::path::PathBuf> {
+fn safe_plan_directory(session_id: &str, params: &Value) -> Option<std::path::PathBuf> {
     let requested = std::path::PathBuf::from(params.get("path")?.as_str()?);
     if requested.file_name()?.to_str()? != "plan.md" || !requested.is_absolute() {
         return None;
@@ -135,18 +135,17 @@ fn safe_plan_file_path(session_id: &str, params: &Value) -> Option<std::path::Pa
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from)?;
     let sessions_root = std::fs::canonicalize(home.join(".grok").join("sessions")).ok()?;
     let parent = std::fs::canonicalize(requested.parent()?).ok()?;
-    parent.starts_with(&sessions_root).then_some(requested)
+    parent.starts_with(&sessions_root).then_some(parent)
 }
 
 fn handle_plan_file(
     method: &str,
-    path: &std::path::Path,
+    directory: &std::path::Path,
     params: &Value,
 ) -> Result<Value, AcpError> {
     match method {
         "fs/read_text_file" | "fs/readTextFile" | "fs/read_text" => {
-            let content = std::fs::read_to_string(path)
-                .map_err(|error| AcpError::Message(format!("plan file read failed: {error}")))?;
+            let content = fs_guard::read_text_file(directory, "plan.md", None)?;
             Ok(json!({ "content": content }))
         }
         "fs/write_text_file" | "fs/writeTextFile" | "fs/write_text" => {
@@ -154,8 +153,7 @@ fn handle_plan_file(
                 .get("content")
                 .and_then(Value::as_str)
                 .ok_or_else(|| AcpError::Message("plan file write missing content".into()))?;
-            std::fs::write(path, content)
-                .map_err(|error| AcpError::Message(format!("plan file write failed: {error}")))?;
+            fs_guard::write_text_file(directory, "plan.md", content)?;
             Ok(json!({}))
         }
         _ => Err(AcpError::Message(format!(
@@ -190,11 +188,11 @@ pub async fn handle_server_request(
         .or_else(|| conn.active_session_id.lock().clone());
 
     if is_fs_method(&method) {
-        if let Some(safe_plan_path) = session_id
+        if let Some(safe_plan_directory) = session_id
             .as_deref()
-            .and_then(|session_id| safe_plan_file_path(session_id, &params))
+            .and_then(|session_id| safe_plan_directory(session_id, &params))
         {
-            let result = handle_plan_file(&method, &safe_plan_path, &params);
+            let result = handle_plan_file(&method, &safe_plan_directory, &params);
             respond(conn, id, result).await?;
             return Ok(());
         }
@@ -556,5 +554,31 @@ mod tests {
     fn recognizes_grok_plan_approval_reverse_request() {
         assert!(is_plan_approval_method("_x.ai/exit_plan_mode"));
         assert!(!is_plan_approval_method("_x.ai/session_notification"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plan_file_symlink_cannot_escape_its_session_directory() {
+        let nonce = uuid::Uuid::new_v4();
+        let directory = std::env::temp_dir().join(format!("gbd-plan-session-{nonce}"));
+        let outside = std::env::temp_dir().join(format!("gbd-plan-secret-{nonce}"));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(&outside, "protected").unwrap();
+        std::os::unix::fs::symlink(&outside, directory.join("plan.md")).unwrap();
+
+        let read_error = handle_plan_file("fs/read_text_file", &directory, &json!({}))
+            .expect_err("plan symlink must not be followed");
+        assert!(read_error.to_string().contains("symlink"));
+        let write_error = handle_plan_file(
+            "fs/write_text_file",
+            &directory,
+            &json!({ "content": "overwrite" }),
+        )
+        .expect_err("plan symlink must not be replaced outside its directory");
+        assert!(write_error.to_string().contains("symlink"));
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "protected");
+
+        let _ = std::fs::remove_dir_all(&directory);
+        let _ = std::fs::remove_file(&outside);
     }
 }

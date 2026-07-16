@@ -1208,20 +1208,14 @@ async fn maybe_authenticate(
     if caps.auth_methods.is_empty() {
         return Ok(());
     }
-    // Prefer env/API key method when present; otherwise first method id.
-    let method_id = caps
-        .auth_methods
-        .iter()
-        .find(|m| {
-            let id = m.id.to_lowercase();
-            id.contains("api") || id.contains("key") || id.contains("env")
-        })
-        .or_else(|| caps.auth_methods.first())
-        .map(|m| m.id.clone());
-
-    let Some(method_id) = method_id else {
-        return Ok(());
-    };
+    let child_has_api_key =
+        std::env::var_os("XAI_API_KEY").is_some_and(|key| !key.to_string_lossy().trim().is_empty());
+    let method_id = select_auth_method(&caps.auth_methods, child_has_api_key).ok_or_else(|| {
+        AcpError::Message(
+            "Grok authentication requires a cached CLI login or XAI_API_KEY; run `grok login` or configure a key"
+                .into(),
+        )
+    })?;
 
     // If already authenticated via env/keychain, call authenticate; agents that
     // do not need it typically return quickly.
@@ -1252,6 +1246,27 @@ async fn maybe_authenticate(
             }
         }
     }
+}
+
+/// Follow Grok's ACP authentication contract exactly: use the API-key method
+/// only when that key was inherited by the child, otherwise reuse the cached
+/// CLI login. Never guess an interactive/OIDC method from a capability name.
+fn select_auth_method(
+    methods: &[crate::contracts::AuthMethodSummary],
+    child_has_api_key: bool,
+) -> Option<String> {
+    if child_has_api_key {
+        if let Some(method) = methods
+            .iter()
+            .find(|method| method.id.eq_ignore_ascii_case("xai.api_key"))
+        {
+            return Some(method.id.clone());
+        }
+    }
+    methods
+        .iter()
+        .find(|method| method.id.eq_ignore_ascii_case("cached_token"))
+        .map(|method| method.id.clone())
 }
 
 impl Drop for RuntimePool {
@@ -1354,6 +1369,40 @@ mod capability_tests {
         ]));
         assert_eq!(modes.len(), 3);
         assert_eq!(modes[1].id, "plan");
+    }
+
+    #[test]
+    fn authentication_selection_never_guesses_an_interactive_method() {
+        let methods = vec![
+            crate::contracts::AuthMethodSummary {
+                id: "xai.api_key".into(),
+                name: "API key".into(),
+                description: None,
+            },
+            crate::contracts::AuthMethodSummary {
+                id: "cached_token".into(),
+                name: "Cached login".into(),
+                description: None,
+            },
+            crate::contracts::AuthMethodSummary {
+                id: "grok.com".into(),
+                name: "Browser login".into(),
+                description: None,
+            },
+        ];
+        assert_eq!(
+            select_auth_method(&methods, true).as_deref(),
+            Some("xai.api_key")
+        );
+        assert_eq!(
+            select_auth_method(&methods, false).as_deref(),
+            Some("cached_token")
+        );
+        assert_eq!(
+            select_auth_method(&methods[2..], false),
+            None,
+            "interactive authentication must be explicitly user initiated"
+        );
     }
 
     #[cfg(unix)]
