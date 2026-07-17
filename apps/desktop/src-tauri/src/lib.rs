@@ -127,7 +127,9 @@ async fn ensure_agent_host(
                 let event_app = app.clone();
                 let _ = host
                     .subscribe(move |event_name, payload| {
-                        let _ = event_app.emit(&event_name, payload);
+                        event_app
+                            .emit(&event_name, payload)
+                            .map_err(|error| format!("emit host event {event_name}: {error}"))
                     })
                     .await;
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -870,6 +872,54 @@ async fn get_task(
         "task.get",
         serde_json::json!({ "taskId": task_id }),
         None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn get_execution(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<Option<platform::ExecutionRun>, acp::AcpError> {
+    host_request(
+        &state,
+        "execution.get",
+        serde_json::json!({ "taskId": task_id }),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn list_execution_events(
+    state: State<'_, AppState>,
+    execution_id: String,
+) -> Result<Vec<platform::ExecutionEvent>, acp::AcpError> {
+    host_request(
+        &state,
+        "execution.events",
+        serde_json::json!({ "executionId": execution_id }),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn resume_execution(
+    state: State<'_, AppState>,
+    task_id: String,
+    connection_id: String,
+    session_id: String,
+) -> Result<Value, acp::AcpError> {
+    host_request(
+        &state,
+        "execution.resume",
+        serde_json::json!({
+            "taskId": task_id,
+            "connectionId": connection_id,
+            "sessionId": session_id,
+        }),
+        Some(rpc_meta("execution-resume", None)),
     )
     .await
 }
@@ -1665,6 +1715,9 @@ pub fn run() {
             workspace_search,
             workspace_read,
             get_task,
+            get_execution,
+            list_execution_events,
+            resume_execution,
             upsert_task,
             list_context_manifests,
             save_context_manifest,

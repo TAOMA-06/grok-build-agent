@@ -142,8 +142,8 @@ pub struct CapabilityItem {
 }
 
 /// A safe, path-free view of the compatibility matrix returned by
-/// `grok inspect --json`. Keep the raw inspect response available for
-/// diagnostics, but expose only the vendor/surface state to the UI.
+/// `grok inspect --json`. Only the vendor/surface state crosses the Host
+/// boundary; source paths and raw inspection data do not.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalCompatibilityCell {
@@ -164,6 +164,8 @@ pub struct ExternalCompatibilitySnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct CapabilitySnapshot {
     pub skills: Vec<CapabilityItem>,
+    #[serde(default)]
+    pub agents: Vec<CapabilityItem>,
     pub plugins: Vec<CapabilityItem>,
     pub hooks: Vec<CapabilityItem>,
     pub mcp_servers: Vec<CapabilityItem>,
@@ -171,7 +173,17 @@ pub struct CapabilitySnapshot {
     pub rules: Vec<CapabilityItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_compat: Option<ExternalCompatibilitySnapshot>,
-    pub raw: serde_json::Value,
+}
+
+fn capability_source(item: &serde_json::Value) -> Option<String> {
+    item.get("source")
+        .and_then(|source| {
+            source
+                .as_str()
+                .or_else(|| source.get("type").and_then(serde_json::Value::as_str))
+        })
+        .or_else(|| item.get("scope").and_then(serde_json::Value::as_str))
+        .map(str::to_string)
 }
 
 fn capability_items(value: &serde_json::Value, keys: &[&str]) -> Vec<CapabilityItem> {
@@ -204,11 +216,7 @@ fn capability_items(value: &serde_json::Value, keys: &[&str]) -> Vec<CapabilityI
                         .or_else(|| item.get("summary"))
                         .and_then(|value| value.as_str())
                         .map(str::to_string),
-                    source: item
-                        .get("source")
-                        .or_else(|| item.get("scope"))
-                        .and_then(|value| value.as_str())
-                        .map(str::to_string),
+                    source: capability_source(item),
                     enabled: item.get("enabled").and_then(|value| value.as_bool()),
                 });
             }
@@ -226,10 +234,7 @@ fn capability_items(value: &serde_json::Value, keys: &[&str]) -> Vec<CapabilityI
                         .get("description")
                         .and_then(|value| value.as_str())
                         .map(str::to_string),
-                    source: item
-                        .get("source")
-                        .and_then(|value| value.as_str())
-                        .map(str::to_string),
+                    source: capability_source(item),
                     enabled: item.get("enabled").and_then(|value| value.as_bool()),
                 });
             }
@@ -279,16 +284,8 @@ fn external_compatibility_from_snapshot(
     })
 }
 
-pub fn inspect_capabilities(
-    configured: Option<&str>,
-    workspace_root: Option<&str>,
-) -> Result<CapabilitySnapshot, CliBridgeError> {
-    let cwd = workspace_root.filter(|value| !value.trim().is_empty());
-    let raw = match run_grok_in(configured, &["inspect", "--json"], cwd) {
-        Ok(output) => serde_json::from_str(output.trim()).unwrap_or(serde_json::Value::Null),
-        Err(error) => serde_json::json!({ "unavailable": error.to_string() }),
-    };
-    let mut commands = capability_items(&raw, &["commands", "slashCommands", "slash_commands"]);
+fn capability_snapshot_from_inspect(raw: &serde_json::Value) -> CapabilitySnapshot {
+    let mut commands = capability_items(raw, &["commands", "slashCommands", "slash_commands"]);
     for (id, name, description) in [
         ("/goal", "/goal", "Delegate a long-running objective"),
         ("/code-review", "/code-review", "Review the current changes"),
@@ -306,16 +303,28 @@ pub fn inspect_capabilities(
             });
         }
     }
-    Ok(CapabilitySnapshot {
-        skills: capability_items(&raw, &["skills"]),
-        plugins: capability_items(&raw, &["plugins"]),
-        hooks: capability_items(&raw, &["hooks"]),
-        mcp_servers: capability_items(&raw, &["mcpServers", "mcp_servers", "mcp"]),
+    CapabilitySnapshot {
+        skills: capability_items(raw, &["skills"]),
+        agents: capability_items(raw, &["agents"]),
+        plugins: capability_items(raw, &["plugins"]),
+        hooks: capability_items(raw, &["hooks"]),
+        mcp_servers: capability_items(raw, &["mcpServers", "mcp_servers", "mcp"]),
         commands,
-        rules: capability_items(&raw, &["rules", "instructions"]),
-        external_compat: external_compatibility_from_snapshot(&raw),
-        raw,
-    })
+        rules: capability_items(raw, &["rules", "instructions"]),
+        external_compat: external_compatibility_from_snapshot(raw),
+    }
+}
+
+pub fn inspect_capabilities(
+    configured: Option<&str>,
+    workspace_root: Option<&str>,
+) -> Result<CapabilitySnapshot, CliBridgeError> {
+    let cwd = workspace_root.filter(|value| !value.trim().is_empty());
+    let raw = match run_grok_in(configured, &["inspect", "--json"], cwd) {
+        Ok(output) => serde_json::from_str(output.trim()).unwrap_or(serde_json::Value::Null),
+        Err(error) => serde_json::json!({ "unavailable": error.to_string() }),
+    };
+    Ok(capability_snapshot_from_inspect(&raw))
 }
 
 // --- Models ----------------------------------------------------------------
@@ -1896,6 +1905,28 @@ mod tests {
         assert_eq!(compatibility.cells[0].surface, "sessions");
         assert_eq!(compatibility.cells[0].enabled, Some(true));
         assert_eq!(compatibility.cells[1].enabled, None);
+    }
+
+    #[test]
+    fn capability_snapshot_does_not_serialize_raw_inspection_data() {
+        let inspect = serde_json::json!({
+            "configSources": { "layers": [{ "path": "/private/operator/config.toml" }] },
+            "skills": [{
+                "name": "review",
+                "source": { "type": "user", "path": "/private/operator/SKILL.md" }
+            }],
+            "agents": [{
+                "name": "explore",
+                "source": { "type": "builtin", "path": "/private/operator/agents/explore.md" }
+            }]
+        });
+        let snapshot = capability_snapshot_from_inspect(&inspect);
+
+        let serialized = serde_json::to_string(&snapshot).unwrap();
+        assert!(!serialized.contains("raw"));
+        assert!(!serialized.contains("/private/operator"));
+        assert_eq!(snapshot.skills[0].source.as_deref(), Some("user"));
+        assert_eq!(snapshot.agents[0].source.as_deref(), Some("builtin"));
     }
 
     #[cfg(unix)]

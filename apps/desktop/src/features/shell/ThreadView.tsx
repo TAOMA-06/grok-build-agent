@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ComposerAttachment, ModeSwitchResult, SelectableModel, ServerRequest, TaskMode } from "../../types";
 import type { SessionRuntime } from "../../store";
 import { CommandComposer } from "./CommandComposer";
+import { ExecutionFlightDeck } from "./ExecutionFlightDeck";
 import { Timeline } from "./Timeline";
 import { t } from "../../i18n";
 import { useAppStore } from "../../store";
@@ -201,6 +202,7 @@ export function ThreadView({
             <button type="button" aria-label={t.cancel} onClick={() => setFindOpen(false)}><X size={14} /></button>
           </div>
         )}
+        {session && !session.privateChat && <ExecutionFlightDeck session={session} />}
         {session?.blocks.length ? (
           <div className="gb-thread-column">
             <Timeline

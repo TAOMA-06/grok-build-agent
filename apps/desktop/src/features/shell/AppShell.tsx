@@ -8,6 +8,7 @@ import type { Settings } from "../../types";
 import { t } from "../../i18n";
 import { ContextDrawer } from "./ContextDrawer";
 import { DirtyWorktreeDialog } from "./DirtyWorktreeDialog";
+import { MissionControlDialog } from "./MissionControlDialog";
 import { ProjectSidebar } from "./ProjectSidebar";
 import { SettingsDialog, type SettingsTab } from "./SettingsDialog";
 import { ThreadView } from "./ThreadView";
@@ -43,6 +44,7 @@ export function AppShell() {
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [transcriptExportStatus, setTranscriptExportStatus] = useState<string | null>(null);
   const [dirtyDialogOpen, setDirtyDialogOpen] = useState(false);
+  const [missionControlOpen, setMissionControlOpen] = useState(false);
   const dirtyResolver = useRef<((policy: DirtyPolicy) => void) | null>(null);
   const hydratedSessions = useRef(new Set<string>());
 
@@ -128,6 +130,9 @@ export function AppShell() {
         event.preventDefault();
         setSettingsTab("general");
         setSettingsOpen(true);
+      } else if (event.key === "\\") {
+        event.preventDefault();
+        setMissionControlOpen(true);
       }
     }
     window.addEventListener("keydown", onShortcut);
@@ -138,12 +143,13 @@ export function AppShell() {
     function onEscape(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       if (commandOpen) setCommandOpen(false);
+      else if (missionControlOpen) setMissionControlOpen(false);
       else if (settingsOpen) setSettingsOpen(false);
       else if (drawerOpen) setDrawerOpen(false);
     }
     window.addEventListener("keydown", onEscape);
     return () => window.removeEventListener("keydown", onEscape);
-  }, [commandOpen, drawerOpen, settingsOpen]);
+  }, [commandOpen, drawerOpen, missionControlOpen, settingsOpen]);
 
   const orderedSessions = useMemo(
     () => sessionOrder.map((id) => sessions[id]).filter((item): item is SessionRuntime => Boolean(item)),
@@ -256,6 +262,7 @@ export function AppShell() {
       "/exit": "/quit",
       "/clear": "/new",
       "/sessions": "/resume",
+      "/agents-dashboard": "/dashboard",
       "/title": "/rename",
       "/m": "/model",
       "/config": "/settings",
@@ -273,6 +280,9 @@ export function AppShell() {
         break;
       case "/resume":
         window.dispatchEvent(new Event("grok:focus-task-search"));
+        break;
+      case "/dashboard":
+        setMissionControlOpen(true);
         break;
       case "/model":
         if (args) await controller.chooseModel(args);
@@ -404,6 +414,7 @@ export function AppShell() {
         onOpenWorkspace={() => void openWorkspace()}
         onSelectWorkspace={(path) => void selectWorkspace(path)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenDashboard={() => setMissionControlOpen(true)}
       />
       <ThreadView
         session={activeSession}
@@ -436,6 +447,16 @@ export function AppShell() {
         onRename={renameActiveThread}
         onArchive={archiveActiveThread}
         onDelete={deleteActiveThread}
+      />
+      <MissionControlDialog
+        open={missionControlOpen}
+        onOpenChange={setMissionControlOpen}
+        sessions={orderedSessions}
+        onOpenSession={(sessionId) => {
+          setActiveSession(sessionId);
+          setDrawerOpen(false);
+        }}
+        onNewTask={newTask}
       />
       {drawerOpen && activeSession && <ContextDrawer session={activeSession} onClose={() => setDrawerOpen(false)} />}
       <SettingsDialog

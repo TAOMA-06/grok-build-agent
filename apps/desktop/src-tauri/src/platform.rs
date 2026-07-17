@@ -192,6 +192,122 @@ pub struct PromptDispatch {
     pub error_summary: Option<String>,
 }
 
+/// Lifecycle of one durable task execution. The execution is the aggregate
+/// that owns intents, cancellation epochs, and resource leases; individual
+/// prompt delivery is represented by `ExecutionIntentState` below.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionState {
+    Queued,
+    Running,
+    AwaitingPermission,
+    Cancelling,
+    DeliveryUnknown,
+    Recovering,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionIntentState {
+    Queued,
+    Dispatching,
+    Acknowledged,
+    DeliveryUnknown,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionRun {
+    pub execution_id: String,
+    pub task_id: String,
+    pub workspace_id: String,
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_session_id: Option<String>,
+    pub runtime_id: String,
+    pub state: ExecutionState,
+    /// Monotonic aggregate version used for optimistic, auditable transitions.
+    pub version: u64,
+    /// Incremented whenever cancellation fences older permissions or leases.
+    pub cancel_epoch: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_intent_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionIntent {
+    pub intent_id: String,
+    pub execution_id: String,
+    pub task_id: String,
+    pub session_id: String,
+    pub runtime_id: String,
+    pub idempotency_key: String,
+    /// Stable FIFO position within its execution.
+    pub ordinal: u64,
+    pub state: ExecutionIntentState,
+    pub attempt: u32,
+    pub cancel_epoch: u64,
+    /// Sanitized prompt content held for recovery/re-dispatch.
+    pub payload: Value,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionEvent {
+    pub event_id: String,
+    pub execution_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent_id: Option<String>,
+    pub aggregate_version: u64,
+    pub kind: String,
+    pub payload: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionLease {
+    pub lease_id: String,
+    pub execution_id: String,
+    pub resource_kind: String,
+    pub resource_key: String,
+    pub owner_epoch: u64,
+    pub acquired_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released_at: Option<String>,
+}
+
+/// Startup reconciliation result for the durable execution ledger. A queued
+/// intent is safe to resume because it never crossed the ACP boundary; a
+/// dispatching intent is deliberately surfaced as `delivery_unknown` instead
+/// of being replayed and risking a duplicate side effect.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionRecoverySummary {
+    pub dispatches_marked_unknown: u64,
+    pub executions_marked_recovering: u64,
+    pub recoverable_queued_intents: u64,
+}
+
 /// Controls how often the host re-sends the complete task contract to the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
@@ -423,6 +539,11 @@ pub fn contract_schema_bundle() -> Value {
         "protocolVersion": HOST_PROTOCOL_VERSION,
         "platformEvent": schema_for!(PlatformEvent),
         "promptDispatch": schema_for!(PromptDispatch),
+        "executionRun": schema_for!(ExecutionRun),
+        "executionIntent": schema_for!(ExecutionIntent),
+        "executionEvent": schema_for!(ExecutionEvent),
+        "executionLease": schema_for!(ExecutionLease),
+        "executionRecoverySummary": schema_for!(ExecutionRecoverySummary),
         "actionRequest": schema_for!(ActionRequest),
         "policyDecision": schema_for!(PolicyDecision),
         "runtimeLaunchConfig": schema_for!(RuntimeLaunchConfig),
@@ -466,6 +587,8 @@ mod tests {
         let schema = contract_schema_bundle();
         assert_eq!(schema["protocolVersion"], HOST_PROTOCOL_VERSION);
         assert!(schema["platformEvent"].is_object());
+        assert!(schema["executionRun"].is_object());
+        assert!(schema["executionRecoverySummary"].is_object());
     }
 
     #[test]
@@ -501,6 +624,9 @@ mod tests {
             "schemaVersion",
             "correlationId",
             "idempotencyKey",
+            "executionId",
+            "intentId",
+            "cancelEpoch",
         ] {
             assert!(
                 typescript.contains(&format!("{field}:")),

@@ -3,6 +3,7 @@ import {
   ChevronDown,
   Folder,
   FolderOpen,
+  LayoutDashboard,
   MessageSquarePlus,
   Search,
   Settings,
@@ -13,9 +14,13 @@ import type { WorkspaceRecord } from "../../types";
 import { t } from "../../i18n";
 import missionRocketUrl from "../../assets/mission-rocket.jpg";
 
+function requiresAttention(session: SessionRuntime): boolean {
+  return session.summary.runState === "awaiting_permission" || session.summary.attentionRequired === true;
+}
+
 function sessionStatus(session: SessionRuntime): string {
   if (session.busy || session.summary.runState === "streaming") return "running";
-  if (session.summary.runState === "awaiting_permission" || session.summary.attentionRequired) return "attention";
+  if (requiresAttention(session)) return "attention";
   if (session.summary.runState === "error") return "error";
   return "idle";
 }
@@ -30,6 +35,7 @@ export function ProjectSidebar({
   onOpenWorkspace,
   onSelectWorkspace,
   onOpenSettings,
+  onOpenDashboard,
 }: {
   workspaces: WorkspaceRecord[];
   sessions: SessionRuntime[];
@@ -40,6 +46,7 @@ export function ProjectSidebar({
   onOpenWorkspace: () => void;
   onSelectWorkspace: (path: string) => void;
   onOpenSettings: () => void;
+  onOpenDashboard: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [projectsOpen, setProjectsOpen] = useState(true);
@@ -52,14 +59,18 @@ export function ProjectSidebar({
   }, []);
   const visibleSessions = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return sessions.filter((session) => {
-      if (Boolean(session.summary.archived) !== showArchived) return false;
-      if (session.summary.workspaceRoot !== activeWorkspace) return false;
-      if (!query) return true;
-      return `${session.summary.title} ${session.summary.lastMessagePreview ?? ""}`
-        .toLowerCase()
-        .includes(query);
-    });
+    return sessions
+      .filter((session) => {
+        if (Boolean(session.summary.archived) !== showArchived) return false;
+        if (session.summary.workspaceRoot !== activeWorkspace) return false;
+        if (!query) return true;
+        return `${session.summary.title} ${session.summary.lastMessagePreview ?? ""}`
+          .toLowerCase()
+          .includes(query);
+      })
+      // A Host recovery or approval state should be actionable without requiring
+      // the operator to remember which task was affected.
+      .sort((left, right) => Number(requiresAttention(right)) - Number(requiresAttention(left)));
   }, [activeWorkspace, search, sessions, showArchived]);
 
   return (
@@ -79,6 +90,10 @@ export function ProjectSidebar({
           <MessageSquarePlus size={16} />
           {t.newTask}
           <kbd>⌘N</kbd>
+        </button>
+        <button type="button" className="gb-dashboard-link" onClick={onOpenDashboard}>
+          <LayoutDashboard size={14} />
+          {t.missionControl}
         </button>
         <label className="gb-search">
           <Search size={14} />
@@ -113,16 +128,21 @@ export function ProjectSidebar({
         <div className="gb-thread-list" aria-label={t.tasks}>
           {visibleSessions.map((session) => {
             const status = sessionStatus(session);
+            const needsAttention = status === "attention";
             return (
               <button
                 type="button"
                 key={session.summary.sessionId}
                 className={session.summary.sessionId === activeSessionId ? "gb-thread-row active" : "gb-thread-row"}
                 onClick={() => onSelectSession(session.summary.sessionId)}
+                aria-label={needsAttention ? `${t.taskNeedsAttention}: ${session.summary.title}` : session.summary.title}
               >
-                <span className={`gb-status-dot ${status}`} />
+                <span className={`gb-status-dot ${status}`} aria-hidden />
                 <span className="gb-thread-copy">
-                  <strong>{session.summary.title}</strong>
+                  <span className="gb-thread-title">
+                    <strong>{session.summary.title}</strong>
+                    {needsAttention && <em className="gb-thread-attention">{t.taskNeedsAttention}</em>}
+                  </span>
                   <small>{session.summary.lastMessagePreview || (status === "running" ? t.grokWorking : t.ready)}</small>
                 </span>
               </button>

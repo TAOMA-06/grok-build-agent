@@ -5,9 +5,10 @@ use crate::contracts::{
     SessionUiState, TaskMode, WorkspaceRecord,
 };
 use crate::platform::{
-    AuditRecordInput, CompletionGate, ContextManifest, DispatchState, PlatformEvent,
-    ProjectionRebuildReport, PromptDispatch, TaskDefinition, TaskState, VerificationResult,
-    VerificationStatus,
+    AuditRecordInput, CompletionGate, ContextManifest, DispatchState, ExecutionEvent,
+    ExecutionIntent, ExecutionIntentState, ExecutionRecoverySummary, ExecutionRun, ExecutionState,
+    PlatformEvent, ProjectionRebuildReport, PromptDispatch, TaskDefinition, TaskState,
+    VerificationResult, VerificationStatus,
 };
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -71,6 +72,53 @@ pub struct StoredPolicyRule {
     pub created_at: String,
 }
 
+/// Sanitized prompt intent persisted before it enters the Host execution lane.
+/// `remote_session_id` remains optional at the type level because recovery may
+/// create an intent before an ACP session has been rebound, but normal desktop
+/// submissions always provide it.
+#[derive(Debug, Clone)]
+pub struct ExecutionIntentInput {
+    pub task_id: String,
+    pub remote_session_id: Option<String>,
+    pub runtime_id: String,
+    pub idempotency_key: String,
+    pub payload: serde_json::Value,
+}
+
+type ExecutionRunRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    String,
+    i64,
+    i64,
+    Option<String>,
+    String,
+    String,
+    Option<String>,
+);
+
+type ExecutionIntentRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    i64,
+    i64,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
 impl Database {
     pub fn open_default() -> Result<Self, DbError> {
         let path = default_db_path()?;
@@ -82,7 +130,7 @@ impl Database {
             std::fs::create_dir_all(parent)?;
         }
         backup_legacy_database(path)?;
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
         conn.execute_batch(
             "
             PRAGMA foreign_keys = ON;
@@ -393,7 +441,12 @@ impl Database {
         ensure_session_column(&conn, "attention_required", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_session_column(&conn, "applied_at", "TEXT")?;
         migrate_legacy_event_cache(&conn)?;
-        conn.pragma_update(None, "user_version", 4)?;
+        let schema_version: i64 =
+            conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if schema_version < 4 {
+            conn.pragma_update(None, "user_version", 4)?;
+        }
+        migrate_execution_ledger(&mut conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             path: path.to_path_buf(),
@@ -2028,6 +2081,26 @@ impl Database {
             .ok_or_else(|| DbError::Message("prompt dispatch disappeared".into()))
     }
 
+    pub fn get_prompt_dispatch(
+        &self,
+        idempotency_key: &str,
+    ) -> Result<Option<PromptDispatch>, DbError> {
+        get_dispatch_by_key(&self.conn.lock(), idempotency_key)
+    }
+
+    /// A task cancellation must fence intents that were durably recorded but
+    /// have not yet crossed the runtime boundary. Sending turns are cancelled
+    /// by the runtime first and complete their own transition when they return.
+    pub fn cancel_prepared_prompt_dispatches(&self, task_id: &str) -> Result<usize, DbError> {
+        Ok(self.conn.lock().execute(
+            "UPDATE prompt_dispatches
+             SET state = 'cancelled', updated_at = ?1,
+                 error_summary = COALESCE(error_summary, 'Task cancelled before dispatch')
+             WHERE task_id = ?2 AND state = 'prepared'",
+            params![iso_now(), task_id],
+        )?)
+    }
+
     pub fn mark_inflight_dispatches_unknown(&self) -> Result<usize, DbError> {
         let now = iso_now();
         let changed = self.conn.lock().execute(
@@ -2037,6 +2110,768 @@ impl Database {
             params![now],
         )?;
         Ok(changed)
+    }
+
+    /// Persist a prompt intent and its aggregate event in one transaction. A
+    /// duplicate idempotency key returns the original record without consuming
+    /// another FIFO ordinal or aggregate version.
+    pub fn enqueue_execution_intent(
+        &self,
+        input: &ExecutionIntentInput,
+    ) -> Result<ExecutionIntent, DbError> {
+        for (name, value) in [
+            ("taskId", input.task_id.as_str()),
+            ("runtimeId", input.runtime_id.as_str()),
+            ("idempotencyKey", input.idempotency_key.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(DbError::Message(format!("{name} must not be empty")));
+            }
+        }
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        if let Some(existing) = get_execution_intent_by_key(&tx, &input.idempotency_key)? {
+            tx.commit()?;
+            return Ok(existing);
+        }
+        let (workspace_id, session_id, remote_session_id) =
+            execution_attribution(&tx, &input.task_id, input.remote_session_id.as_deref())?
+                .ok_or_else(|| {
+                    DbError::Message(format!(
+                        "cannot enqueue execution intent for unknown task {}",
+                        input.task_id
+                    ))
+                })?;
+        let now = iso_now();
+        let mut run = match get_active_execution_for_task(&tx, &input.task_id)? {
+            Some(run) => run,
+            None => {
+                let execution_id = Uuid::new_v4().to_string();
+                let run = ExecutionRun {
+                    execution_id: execution_id.clone(),
+                    task_id: input.task_id.clone(),
+                    workspace_id: workspace_id.clone(),
+                    session_id: session_id.clone(),
+                    remote_session_id: remote_session_id.clone(),
+                    runtime_id: input.runtime_id.clone(),
+                    state: ExecutionState::Queued,
+                    version: 0,
+                    cancel_epoch: 0,
+                    current_intent_id: None,
+                    created_at: now.clone(),
+                    updated_at: now.clone(),
+                    completed_at: None,
+                };
+                tx.execute(
+                    "INSERT INTO execution_runs (
+                        execution_id, task_id, workspace_id, session_id, remote_session_id,
+                        runtime_id, state, version, cancel_epoch, current_intent_id,
+                        created_at, updated_at, completed_at
+                     ) VALUES (?1,?2,?3,?4,?5,?6,?7,0,0,NULL,?8,?8,NULL)",
+                    params![
+                        run.execution_id,
+                        run.task_id,
+                        run.workspace_id,
+                        run.session_id,
+                        run.remote_session_id,
+                        run.runtime_id,
+                        execution_state_str(run.state),
+                        now,
+                    ],
+                )?;
+                run
+            }
+        };
+        if matches!(
+            run.state,
+            ExecutionState::Cancelling
+                | ExecutionState::DeliveryUnknown
+                | ExecutionState::Completed
+                | ExecutionState::Failed
+                | ExecutionState::Cancelled
+        ) {
+            return Err(DbError::InvalidTransition(format!(
+                "cannot enqueue intent while execution {} is {}",
+                run.execution_id,
+                execution_state_str(run.state)
+            )));
+        }
+        let ordinal: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(ordinal), 0) + 1 FROM execution_intents WHERE execution_id = ?1",
+            params![run.execution_id],
+            |row| row.get(0),
+        )?;
+        let intent = ExecutionIntent {
+            intent_id: Uuid::new_v4().to_string(),
+            execution_id: run.execution_id.clone(),
+            task_id: input.task_id.clone(),
+            session_id: session_id.clone(),
+            runtime_id: input.runtime_id.clone(),
+            idempotency_key: input.idempotency_key.clone(),
+            ordinal: nonnegative_u64("execution intent ordinal", ordinal)?,
+            state: ExecutionIntentState::Queued,
+            attempt: 0,
+            cancel_epoch: run.cancel_epoch,
+            payload: input.payload.clone(),
+            created_at: now.clone(),
+            started_at: None,
+            completed_at: None,
+            error_summary: None,
+        };
+        tx.execute(
+            "INSERT INTO execution_intents (
+                intent_id, execution_id, task_id, session_id, runtime_id, idempotency_key,
+                ordinal, state, attempt, cancel_epoch, payload_json, created_at, started_at,
+                completed_at, error_summary
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,0,?9,?10,?11,NULL,NULL,NULL)",
+            params![
+                intent.intent_id,
+                intent.execution_id,
+                intent.task_id,
+                intent.session_id,
+                intent.runtime_id,
+                intent.idempotency_key,
+                ordinal,
+                execution_intent_state_str(intent.state),
+                i64::try_from(intent.cancel_epoch).map_err(|_| {
+                    DbError::Message("execution cancellation epoch exceeds SQLite range".into())
+                })?,
+                serde_json::to_string(&intent.payload)?,
+                intent.created_at,
+            ],
+        )?;
+        run.version = run.version.saturating_add(1);
+        run.state = ExecutionState::Queued;
+        run.remote_session_id = remote_session_id;
+        run.runtime_id = input.runtime_id.clone();
+        run.updated_at = now.clone();
+        tx.execute(
+            "UPDATE execution_runs
+             SET remote_session_id = ?1, runtime_id = ?2, state = ?3, version = ?4,
+                 updated_at = ?5
+             WHERE execution_id = ?6",
+            params![
+                run.remote_session_id,
+                run.runtime_id,
+                execution_state_str(run.state),
+                i64::try_from(run.version).map_err(|_| {
+                    DbError::Message("execution version exceeds SQLite range".into())
+                })?,
+                run.updated_at,
+                run.execution_id,
+            ],
+        )?;
+        insert_execution_event(
+            &tx,
+            &run.execution_id,
+            Some(&intent.intent_id),
+            run.version,
+            "intent.queued",
+            &serde_json::json!({
+                "intentId": intent.intent_id,
+                "ordinal": intent.ordinal,
+                "cancelEpoch": intent.cancel_epoch,
+            }),
+            &now,
+        )?;
+        tx.commit()?;
+        Ok(intent)
+    }
+
+    pub fn get_execution_intent(
+        &self,
+        idempotency_key: &str,
+    ) -> Result<Option<ExecutionIntent>, DbError> {
+        get_execution_intent_by_key(&self.conn.lock(), idempotency_key)
+    }
+
+    pub fn get_active_execution(&self, task_id: &str) -> Result<Option<ExecutionRun>, DbError> {
+        get_active_execution_for_task(&self.conn.lock(), task_id)
+    }
+
+    pub fn list_execution_events(
+        &self,
+        execution_id: &str,
+    ) -> Result<Vec<ExecutionEvent>, DbError> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT event_id, execution_id, intent_id, aggregate_version, kind, payload_json,
+                    created_at
+             FROM execution_events WHERE execution_id = ?1
+             ORDER BY aggregate_version ASC",
+        )?;
+        let rows = statement.query_map(params![execution_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+            ))
+        })?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(execution_event_from_raw(row?)?);
+        }
+        Ok(events)
+    }
+
+    /// Claim one persisted intent immediately before it crosses into ACP. The
+    /// caller must already own the task's in-memory lane; this CAS transition
+    /// makes stale/cancelled work harmless if a lane wakes after cancellation.
+    pub fn claim_execution_intent(
+        &self,
+        idempotency_key: &str,
+    ) -> Result<ExecutionIntent, DbError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let mut intent = get_execution_intent_by_key(&tx, idempotency_key)?
+            .ok_or_else(|| DbError::Message("execution intent not found".into()))?;
+        let mut run = get_execution_run_by_id(&tx, &intent.execution_id)?
+            .ok_or_else(|| DbError::Message("execution run not found".into()))?;
+        if intent.state != ExecutionIntentState::Queued {
+            return Err(DbError::InvalidTransition(format!(
+                "cannot claim execution intent in {} state",
+                execution_intent_state_str(intent.state)
+            )));
+        }
+        let earlier_queued: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM execution_intents
+             WHERE execution_id = ?1 AND state = 'queued' AND ordinal < ?2",
+            params![
+                intent.execution_id,
+                i64::try_from(intent.ordinal).map_err(|_| {
+                    DbError::Message("execution intent ordinal exceeds SQLite range".into())
+                })?
+            ],
+            |row| row.get(0),
+        )?;
+        if earlier_queued > 0 {
+            return Err(DbError::InvalidTransition(format!(
+                "execution intent {} is waiting behind an earlier queued intent",
+                intent.intent_id
+            )));
+        }
+        let now = iso_now();
+        if intent.cancel_epoch != run.cancel_epoch
+            || matches!(
+                run.state,
+                ExecutionState::Cancelling | ExecutionState::Cancelled
+            )
+        {
+            intent.state = ExecutionIntentState::Cancelled;
+            intent.completed_at = Some(now.clone());
+            intent.error_summary = Some("Task cancellation fenced this queued intent".into());
+            tx.execute(
+                "UPDATE execution_intents
+                 SET state = 'cancelled', completed_at = ?1, error_summary = ?2
+                 WHERE intent_id = ?3 AND state = 'queued'",
+                params![intent.completed_at, intent.error_summary, intent.intent_id],
+            )?;
+            tx.commit()?;
+            return Ok(intent);
+        }
+        if !matches!(
+            run.state,
+            ExecutionState::Queued
+                | ExecutionState::Running
+                | ExecutionState::AwaitingPermission
+                | ExecutionState::Recovering
+        ) {
+            return Err(DbError::InvalidTransition(format!(
+                "cannot claim an intent while execution {} is {}",
+                run.execution_id,
+                execution_state_str(run.state)
+            )));
+        }
+        intent.state = ExecutionIntentState::Dispatching;
+        intent.attempt = intent.attempt.saturating_add(1);
+        intent.started_at = Some(now.clone());
+        tx.execute(
+            "UPDATE execution_intents
+             SET state = 'dispatching', attempt = ?1, started_at = ?2,
+                 error_summary = NULL
+             WHERE intent_id = ?3 AND state = 'queued'",
+            params![
+                i64::from(intent.attempt),
+                intent.started_at,
+                intent.intent_id
+            ],
+        )?;
+        run.state = ExecutionState::Running;
+        run.version = run.version.saturating_add(1);
+        run.current_intent_id = Some(intent.intent_id.clone());
+        run.updated_at = now.clone();
+        tx.execute(
+            "UPDATE execution_runs
+             SET state = 'running', version = ?1, current_intent_id = ?2, updated_at = ?3
+             WHERE execution_id = ?4 AND version = ?5",
+            params![
+                i64::try_from(run.version).map_err(|_| {
+                    DbError::Message("execution version exceeds SQLite range".into())
+                })?,
+                run.current_intent_id,
+                run.updated_at,
+                run.execution_id,
+                i64::try_from(run.version.saturating_sub(1)).map_err(|_| {
+                    DbError::Message("execution version exceeds SQLite range".into())
+                })?,
+            ],
+        )?;
+        insert_execution_event(
+            &tx,
+            &run.execution_id,
+            Some(&intent.intent_id),
+            run.version,
+            "intent.dispatching",
+            &serde_json::json!({
+                "intentId": intent.intent_id,
+                "attempt": intent.attempt,
+                "cancelEpoch": intent.cancel_epoch,
+            }),
+            &now,
+        )?;
+        tx.commit()?;
+        Ok(intent)
+    }
+
+    /// Finish the current prompt delivery and append the corresponding aggregate
+    /// event. `Acknowledged` leaves the execution open for later follow-ups;
+    /// cancellation and hard failure close the execution so a new user task
+    /// receives a fresh aggregate.
+    pub fn finish_execution_intent(
+        &self,
+        idempotency_key: &str,
+        next: ExecutionIntentState,
+        error_summary: Option<&str>,
+    ) -> Result<ExecutionIntent, DbError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let mut intent = get_execution_intent_by_key(&tx, idempotency_key)?
+            .ok_or_else(|| DbError::Message("execution intent not found".into()))?;
+        let mut run = get_execution_run_by_id(&tx, &intent.execution_id)?
+            .ok_or_else(|| DbError::Message("execution run not found".into()))?;
+        let previous_intent_state = intent.state;
+        if !valid_execution_intent_transition(previous_intent_state, next) {
+            return Err(DbError::InvalidTransition(format!(
+                "{} -> {}",
+                execution_intent_state_str(previous_intent_state),
+                execution_intent_state_str(next)
+            )));
+        }
+        let now = iso_now();
+        intent.state = next;
+        intent.completed_at = Some(now.clone());
+        intent.error_summary = error_summary.map(ToOwned::to_owned);
+        tx.execute(
+            "UPDATE execution_intents
+             SET state = ?1, completed_at = ?2, error_summary = ?3
+             WHERE intent_id = ?4 AND state = ?5",
+            params![
+                execution_intent_state_str(next),
+                intent.completed_at,
+                intent.error_summary,
+                intent.intent_id,
+                execution_intent_state_str(previous_intent_state),
+            ],
+        )?;
+        if tx.changes() == 0 {
+            return Err(DbError::InvalidTransition(
+                "execution intent changed while finishing".into(),
+            ));
+        }
+        let queued_follow_up: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM execution_intents
+             WHERE execution_id = ?1 AND state = 'queued'",
+            params![run.execution_id],
+            |row| row.get(0),
+        )?;
+        let previous_version = run.version;
+        run.version = run.version.saturating_add(1);
+        run.current_intent_id = None;
+        run.updated_at = now.clone();
+        match next {
+            ExecutionIntentState::Acknowledged => {
+                run.state = if queued_follow_up > 0 {
+                    ExecutionState::Queued
+                } else {
+                    ExecutionState::Running
+                };
+            }
+            ExecutionIntentState::DeliveryUnknown => run.state = ExecutionState::DeliveryUnknown,
+            ExecutionIntentState::Failed => {
+                run.state = ExecutionState::Failed;
+                run.completed_at = Some(now.clone());
+            }
+            ExecutionIntentState::Cancelled => {
+                run.state = ExecutionState::Cancelled;
+                run.completed_at = Some(now.clone());
+            }
+            ExecutionIntentState::Queued | ExecutionIntentState::Dispatching => unreachable!(),
+        }
+        tx.execute(
+            "UPDATE execution_runs
+             SET state = ?1, version = ?2, current_intent_id = NULL, updated_at = ?3,
+                 completed_at = ?4
+             WHERE execution_id = ?5 AND version = ?6",
+            params![
+                execution_state_str(run.state),
+                i64::try_from(run.version).map_err(|_| {
+                    DbError::Message("execution version exceeds SQLite range".into())
+                })?,
+                run.updated_at,
+                run.completed_at,
+                run.execution_id,
+                i64::try_from(previous_version).map_err(|_| {
+                    DbError::Message("execution version exceeds SQLite range".into())
+                })?,
+            ],
+        )?;
+        if tx.changes() == 0 {
+            return Err(DbError::InvalidTransition(
+                "execution run changed while finishing".into(),
+            ));
+        }
+        insert_execution_event(
+            &tx,
+            &run.execution_id,
+            Some(&intent.intent_id),
+            run.version,
+            &format!("intent.{}", execution_intent_state_str(next)),
+            &serde_json::json!({
+                "intentId": intent.intent_id,
+                "state": execution_intent_state_str(next),
+                "errorSummary": intent.error_summary,
+            }),
+            &now,
+        )?;
+        tx.commit()?;
+        Ok(intent)
+    }
+
+    /// Fence all queued work for a task. A running intent remains dispatching
+    /// until its ACP cancellation result returns, at which point it must finish
+    /// with the newer cancellation epoch.
+    pub fn cancel_execution_for_task(
+        &self,
+        task_id: &str,
+    ) -> Result<Option<ExecutionRun>, DbError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let Some(mut run) = get_active_execution_for_task(&tx, task_id)? else {
+            tx.commit()?;
+            return Ok(None);
+        };
+        if matches!(
+            run.state,
+            ExecutionState::Cancelled | ExecutionState::Completed
+        ) {
+            tx.commit()?;
+            return Ok(Some(run));
+        }
+        let now = iso_now();
+        let active_dispatches: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM execution_intents
+             WHERE execution_id = ?1 AND state = 'dispatching'",
+            params![run.execution_id],
+            |row| row.get(0),
+        )?;
+        let cancelled_queued = tx.execute(
+            "UPDATE execution_intents
+             SET state = 'cancelled', completed_at = ?1,
+                 error_summary = COALESCE(error_summary, 'Task cancellation fenced queued intent')
+             WHERE execution_id = ?2 AND state = 'queued'",
+            params![now, run.execution_id],
+        )?;
+        let previous_version = run.version;
+        run.version = run.version.saturating_add(1);
+        run.cancel_epoch = run.cancel_epoch.saturating_add(1);
+        run.current_intent_id = if active_dispatches > 0 {
+            run.current_intent_id.clone()
+        } else {
+            None
+        };
+        run.state = if active_dispatches > 0 {
+            ExecutionState::Cancelling
+        } else {
+            ExecutionState::Cancelled
+        };
+        run.updated_at = now.clone();
+        if run.state == ExecutionState::Cancelled {
+            run.completed_at = Some(now.clone());
+        }
+        tx.execute(
+            "UPDATE execution_runs
+             SET state = ?1, version = ?2, cancel_epoch = ?3, current_intent_id = ?4,
+                 updated_at = ?5, completed_at = ?6
+             WHERE execution_id = ?7 AND version = ?8",
+            params![
+                execution_state_str(run.state),
+                i64::try_from(run.version).map_err(|_| {
+                    DbError::Message("execution version exceeds SQLite range".into())
+                })?,
+                i64::try_from(run.cancel_epoch).map_err(|_| {
+                    DbError::Message("execution cancellation epoch exceeds SQLite range".into())
+                })?,
+                run.current_intent_id,
+                run.updated_at,
+                run.completed_at,
+                run.execution_id,
+                i64::try_from(previous_version).map_err(|_| {
+                    DbError::Message("execution version exceeds SQLite range".into())
+                })?,
+            ],
+        )?;
+        if tx.changes() == 0 {
+            return Err(DbError::InvalidTransition(
+                "execution run changed while cancelling".into(),
+            ));
+        }
+        insert_execution_event(
+            &tx,
+            &run.execution_id,
+            run.current_intent_id.as_deref(),
+            run.version,
+            "execution.cancellation_requested",
+            &serde_json::json!({
+                "cancelEpoch": run.cancel_epoch,
+                "cancelledQueuedIntents": cancelled_queued,
+                "state": execution_state_str(run.state),
+            }),
+            &now,
+        )?;
+        tx.commit()?;
+        Ok(Some(run))
+    }
+
+    /// Reconcile a durable execution ledger after the Host starts. A prompt
+    /// that was already dispatching may have reached ACP just before the Host
+    /// died, so it becomes `delivery_unknown` and must be explicitly resolved.
+    /// A queued prompt never crossed that boundary and is marked recoverable.
+    pub fn reconcile_execution_ledger(&self) -> Result<ExecutionRecoverySummary, DbError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let now = iso_now();
+        let mut summary = ExecutionRecoverySummary::default();
+
+        let dispatching_execution_ids = {
+            let mut statement = tx.prepare(
+                "SELECT DISTINCT execution_id FROM execution_intents WHERE state = 'dispatching'",
+            )?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for execution_id in dispatching_execution_ids {
+            let Some(mut run) = get_execution_run_by_id(&tx, &execution_id)? else {
+                continue;
+            };
+            let changed = tx.execute(
+                "UPDATE execution_intents
+                 SET state = 'delivery_unknown', completed_at = ?1,
+                     error_summary = COALESCE(error_summary, 'Host stopped before ACP acknowledgement')
+                 WHERE execution_id = ?2 AND state = 'dispatching'",
+                params![now, execution_id],
+            )?;
+            if changed == 0 {
+                continue;
+            }
+            summary.dispatches_marked_unknown =
+                summary
+                    .dispatches_marked_unknown
+                    .saturating_add(u64::try_from(changed).map_err(|_| {
+                        DbError::Message("execution recovery count exceeds u64 range".into())
+                    })?);
+            let previous_version = run.version;
+            run.version = run.version.saturating_add(1);
+            run.state = ExecutionState::DeliveryUnknown;
+            run.current_intent_id = None;
+            run.updated_at = now.clone();
+            tx.execute(
+                "UPDATE execution_runs
+                 SET state = 'delivery_unknown', version = ?1, current_intent_id = NULL,
+                     updated_at = ?2
+                 WHERE execution_id = ?3 AND version = ?4",
+                params![
+                    i64::try_from(run.version).map_err(|_| {
+                        DbError::Message("execution version exceeds SQLite range".into())
+                    })?,
+                    run.updated_at,
+                    run.execution_id,
+                    i64::try_from(previous_version).map_err(|_| {
+                        DbError::Message("execution version exceeds SQLite range".into())
+                    })?,
+                ],
+            )?;
+            if tx.changes() == 0 {
+                return Err(DbError::InvalidTransition(
+                    "execution run changed while recovering an in-flight intent".into(),
+                ));
+            }
+            insert_execution_event(
+                &tx,
+                &run.execution_id,
+                None,
+                run.version,
+                "recovery.delivery_unknown",
+                &serde_json::json!({
+                    "dispatchesMarkedUnknown": changed,
+                    "reason": "Host stopped before ACP acknowledgement",
+                }),
+                &now,
+            )?;
+            tx.execute(
+                "UPDATE sessions
+                 SET attention_required = 1, updated_at = ?1
+                 WHERE session_id = ?2",
+                params![now, run.session_id],
+            )?;
+            tx.execute(
+                "UPDATE tasks
+                 SET state = 'delivery_unknown', updated_at = ?1
+                 WHERE task_id = ?2 AND state NOT IN ('completed', 'cancelled')",
+                params![now, run.task_id],
+            )?;
+        }
+
+        let recoverable = {
+            let mut statement = tx.prepare(
+                "SELECT runs.execution_id, COUNT(intents.intent_id)
+                 FROM execution_runs AS runs
+                 JOIN execution_intents AS intents ON intents.execution_id = runs.execution_id
+                 WHERE runs.completed_at IS NULL
+                   AND runs.state IN ('queued', 'running', 'recovering')
+                   AND intents.state = 'queued'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM execution_intents AS active
+                     WHERE active.execution_id = runs.execution_id
+                       AND active.state = 'dispatching'
+                   )
+                 GROUP BY runs.execution_id",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for (execution_id, queued_count) in recoverable {
+            let Some(mut run) = get_execution_run_by_id(&tx, &execution_id)? else {
+                continue;
+            };
+            let queued_count = nonnegative_u64("recoverable queued intent count", queued_count)?;
+            summary.recoverable_queued_intents = summary
+                .recoverable_queued_intents
+                .saturating_add(queued_count);
+            if run.state == ExecutionState::Recovering {
+                continue;
+            }
+            let previous_version = run.version;
+            run.version = run.version.saturating_add(1);
+            run.state = ExecutionState::Recovering;
+            run.updated_at = now.clone();
+            tx.execute(
+                "UPDATE execution_runs
+                 SET state = 'recovering', version = ?1, updated_at = ?2
+                 WHERE execution_id = ?3 AND version = ?4",
+                params![
+                    i64::try_from(run.version).map_err(|_| {
+                        DbError::Message("execution version exceeds SQLite range".into())
+                    })?,
+                    run.updated_at,
+                    run.execution_id,
+                    i64::try_from(previous_version).map_err(|_| {
+                        DbError::Message("execution version exceeds SQLite range".into())
+                    })?,
+                ],
+            )?;
+            if tx.changes() == 0 {
+                return Err(DbError::InvalidTransition(
+                    "execution run changed while marking recovery pending".into(),
+                ));
+            }
+            summary.executions_marked_recovering =
+                summary.executions_marked_recovering.saturating_add(1);
+            insert_execution_event(
+                &tx,
+                &run.execution_id,
+                None,
+                run.version,
+                "recovery.queued",
+                &serde_json::json!({
+                    "recoverableQueuedIntents": queued_count,
+                }),
+                &now,
+            )?;
+            tx.execute(
+                "UPDATE sessions
+                 SET attention_required = 1, updated_at = ?1
+                 WHERE session_id = ?2",
+                params![now, run.session_id],
+            )?;
+            tx.execute(
+                "UPDATE tasks
+                 SET state = 'awaiting_input', updated_at = ?1
+                 WHERE task_id = ?2 AND state NOT IN ('completed', 'cancelled')",
+                params![now, run.task_id],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(summary)
+    }
+
+    /// Return the next safe-to-replay prompt for a task. Work is only returned
+    /// when no intent from the same execution is in the uncertain dispatching
+    /// state; callers still need to claim it immediately before ACP dispatch.
+    pub fn next_recoverable_execution_intent(
+        &self,
+        task_id: &str,
+    ) -> Result<Option<ExecutionIntent>, DbError> {
+        let conn = self.conn.lock();
+        let raw = conn
+            .query_row(
+                "SELECT intents.intent_id, intents.execution_id, intents.task_id,
+                        intents.session_id, intents.runtime_id, intents.idempotency_key,
+                        intents.ordinal, intents.state, intents.attempt, intents.cancel_epoch,
+                        intents.payload_json, intents.created_at, intents.started_at,
+                        intents.completed_at, intents.error_summary
+                 FROM execution_intents AS intents
+                 JOIN execution_runs AS runs ON runs.execution_id = intents.execution_id
+                 WHERE intents.task_id = ?1
+                   AND intents.state = 'queued'
+                   AND runs.completed_at IS NULL
+                   AND runs.state IN ('queued', 'recovering')
+                   AND NOT EXISTS (
+                     SELECT 1 FROM execution_intents AS active
+                     WHERE active.execution_id = intents.execution_id
+                       AND active.state = 'dispatching'
+                   )
+                 ORDER BY intents.ordinal ASC
+                 LIMIT 1",
+                params![task_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, i64>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, String>(11)?,
+                        row.get::<_, Option<String>>(12)?,
+                        row.get::<_, Option<String>>(13)?,
+                        row.get::<_, Option<String>>(14)?,
+                    ))
+                },
+            )
+            .optional()?;
+        raw.map(execution_intent_from_raw).transpose()
     }
 
     pub fn register_blob(
@@ -2287,6 +3122,7 @@ fn valid_dispatch_transition(current: DispatchState, next: DispatchState) -> boo
     matches!(
         (current, next),
         (DispatchState::Prepared, DispatchState::Sending)
+            | (DispatchState::Prepared, DispatchState::Failed)
             | (DispatchState::Prepared, DispatchState::Cancelled)
             | (DispatchState::Sending, DispatchState::Acknowledged)
             | (DispatchState::Sending, DispatchState::DeliveryUnknown)
@@ -2346,6 +3182,320 @@ fn get_dispatch_by_key(
     }))
 }
 
+fn execution_attribution(
+    conn: &Connection,
+    task_id: &str,
+    remote_session_id: Option<&str>,
+) -> Result<Option<(String, String, Option<String>)>, DbError> {
+    let remote_session_id = remote_session_id.unwrap_or(task_id);
+    Ok(conn
+        .query_row(
+            "SELECT COALESCE((SELECT id FROM workspaces WHERE path = sessions.workspace_root),
+                             sessions.workspace_root),
+                    sessions.session_id, sessions.remote_session_id
+             FROM sessions
+             WHERE session_id = ?1 OR remote_session_id = ?2
+             ORDER BY CASE WHEN session_id = ?1 THEN 0 ELSE 1 END LIMIT 1",
+            params![task_id, remote_session_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?)
+}
+
+fn get_active_execution_for_task(
+    conn: &Connection,
+    task_id: &str,
+) -> Result<Option<ExecutionRun>, DbError> {
+    let raw = conn
+        .query_row(
+            "SELECT execution_id, task_id, workspace_id, session_id, remote_session_id,
+                    runtime_id, state, version, cancel_epoch, current_intent_id, created_at,
+                    updated_at, completed_at
+             FROM execution_runs
+             WHERE task_id = ?1 AND completed_at IS NULL
+             ORDER BY updated_at DESC LIMIT 1",
+            params![task_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, String>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(execution_run_from_raw).transpose()
+}
+
+fn get_execution_run_by_id(
+    conn: &Connection,
+    execution_id: &str,
+) -> Result<Option<ExecutionRun>, DbError> {
+    let raw = conn
+        .query_row(
+            "SELECT execution_id, task_id, workspace_id, session_id, remote_session_id,
+                    runtime_id, state, version, cancel_epoch, current_intent_id, created_at,
+                    updated_at, completed_at
+             FROM execution_runs WHERE execution_id = ?1",
+            params![execution_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, String>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(execution_run_from_raw).transpose()
+}
+
+fn get_execution_intent_by_key(
+    conn: &Connection,
+    idempotency_key: &str,
+) -> Result<Option<ExecutionIntent>, DbError> {
+    let raw = conn
+        .query_row(
+            "SELECT intent_id, execution_id, task_id, session_id, runtime_id, idempotency_key,
+                    ordinal, state, attempt, cancel_epoch, payload_json, created_at, started_at,
+                    completed_at, error_summary
+             FROM execution_intents WHERE idempotency_key = ?1",
+            params![idempotency_key],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, i64>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, String>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<String>>(14)?,
+                ))
+            },
+        )
+        .optional()?;
+    raw.map(execution_intent_from_raw).transpose()
+}
+
+fn execution_run_from_raw(raw: ExecutionRunRow) -> Result<ExecutionRun, DbError> {
+    Ok(ExecutionRun {
+        execution_id: raw.0,
+        task_id: raw.1,
+        workspace_id: raw.2,
+        session_id: raw.3,
+        remote_session_id: raw.4,
+        runtime_id: raw.5,
+        state: parse_execution_state(&raw.6)?,
+        version: nonnegative_u64("execution version", raw.7)?,
+        cancel_epoch: nonnegative_u64("execution cancellation epoch", raw.8)?,
+        current_intent_id: raw.9,
+        created_at: raw.10,
+        updated_at: raw.11,
+        completed_at: raw.12,
+    })
+}
+
+fn execution_intent_from_raw(raw: ExecutionIntentRow) -> Result<ExecutionIntent, DbError> {
+    Ok(ExecutionIntent {
+        intent_id: raw.0,
+        execution_id: raw.1,
+        task_id: raw.2,
+        session_id: raw.3,
+        runtime_id: raw.4,
+        idempotency_key: raw.5,
+        ordinal: nonnegative_u64("execution intent ordinal", raw.6)?,
+        state: parse_execution_intent_state(&raw.7)?,
+        attempt: u32::try_from(nonnegative_u64("execution intent attempt", raw.8)?)
+            .map_err(|_| DbError::Message("execution intent attempt exceeds u32 range".into()))?,
+        cancel_epoch: nonnegative_u64("execution intent cancellation epoch", raw.9)?,
+        payload: serde_json::from_str(&raw.10)?,
+        created_at: raw.11,
+        started_at: raw.12,
+        completed_at: raw.13,
+        error_summary: raw.14,
+    })
+}
+
+fn execution_event_from_raw(
+    raw: (String, String, Option<String>, i64, String, String, String),
+) -> Result<ExecutionEvent, DbError> {
+    Ok(ExecutionEvent {
+        event_id: raw.0,
+        execution_id: raw.1,
+        intent_id: raw.2,
+        aggregate_version: nonnegative_u64("execution event version", raw.3)?,
+        kind: raw.4,
+        payload: serde_json::from_str(&raw.5)?,
+        created_at: raw.6,
+    })
+}
+
+fn insert_execution_event(
+    conn: &Connection,
+    execution_id: &str,
+    intent_id: Option<&str>,
+    aggregate_version: u64,
+    kind: &str,
+    payload: &serde_json::Value,
+    created_at: &str,
+) -> Result<(), DbError> {
+    if kind.trim().is_empty() {
+        return Err(DbError::Message(
+            "execution event kind must not be empty".into(),
+        ));
+    }
+    conn.execute(
+        "INSERT INTO execution_events (
+            event_id, execution_id, intent_id, aggregate_version, kind, payload_json, created_at
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        params![
+            Uuid::new_v4().to_string(),
+            execution_id,
+            intent_id,
+            i64::try_from(aggregate_version).map_err(|_| DbError::Message(
+                "execution event version exceeds SQLite range".into()
+            ))?,
+            kind,
+            serde_json::to_string(payload)?,
+            created_at,
+        ],
+    )?;
+    Ok(())
+}
+
+fn execution_state_str(state: ExecutionState) -> &'static str {
+    match state {
+        ExecutionState::Queued => "queued",
+        ExecutionState::Running => "running",
+        ExecutionState::AwaitingPermission => "awaiting_permission",
+        ExecutionState::Cancelling => "cancelling",
+        ExecutionState::DeliveryUnknown => "delivery_unknown",
+        ExecutionState::Recovering => "recovering",
+        ExecutionState::Completed => "completed",
+        ExecutionState::Failed => "failed",
+        ExecutionState::Cancelled => "cancelled",
+    }
+}
+
+fn parse_execution_state(value: &str) -> Result<ExecutionState, DbError> {
+    match value {
+        "queued" => Ok(ExecutionState::Queued),
+        "running" => Ok(ExecutionState::Running),
+        "awaiting_permission" => Ok(ExecutionState::AwaitingPermission),
+        "cancelling" => Ok(ExecutionState::Cancelling),
+        "delivery_unknown" => Ok(ExecutionState::DeliveryUnknown),
+        "recovering" => Ok(ExecutionState::Recovering),
+        "completed" => Ok(ExecutionState::Completed),
+        "failed" => Ok(ExecutionState::Failed),
+        "cancelled" => Ok(ExecutionState::Cancelled),
+        other => Err(DbError::Message(format!("unknown execution state {other}"))),
+    }
+}
+
+fn execution_intent_state_str(state: ExecutionIntentState) -> &'static str {
+    match state {
+        ExecutionIntentState::Queued => "queued",
+        ExecutionIntentState::Dispatching => "dispatching",
+        ExecutionIntentState::Acknowledged => "acknowledged",
+        ExecutionIntentState::DeliveryUnknown => "delivery_unknown",
+        ExecutionIntentState::Failed => "failed",
+        ExecutionIntentState::Cancelled => "cancelled",
+    }
+}
+
+fn parse_execution_intent_state(value: &str) -> Result<ExecutionIntentState, DbError> {
+    match value {
+        "queued" => Ok(ExecutionIntentState::Queued),
+        "dispatching" => Ok(ExecutionIntentState::Dispatching),
+        "acknowledged" => Ok(ExecutionIntentState::Acknowledged),
+        "delivery_unknown" => Ok(ExecutionIntentState::DeliveryUnknown),
+        "failed" => Ok(ExecutionIntentState::Failed),
+        "cancelled" => Ok(ExecutionIntentState::Cancelled),
+        other => Err(DbError::Message(format!(
+            "unknown execution intent state {other}"
+        ))),
+    }
+}
+
+fn valid_execution_intent_transition(
+    current: ExecutionIntentState,
+    next: ExecutionIntentState,
+) -> bool {
+    if current == next {
+        return true;
+    }
+    matches!(
+        (current, next),
+        (
+            ExecutionIntentState::Queued,
+            ExecutionIntentState::Dispatching
+        ) | (
+            ExecutionIntentState::Queued,
+            ExecutionIntentState::Cancelled
+        ) | (ExecutionIntentState::Queued, ExecutionIntentState::Failed)
+            | (
+                ExecutionIntentState::Dispatching,
+                ExecutionIntentState::Acknowledged
+            )
+            | (
+                ExecutionIntentState::Dispatching,
+                ExecutionIntentState::DeliveryUnknown
+            )
+            | (
+                ExecutionIntentState::Dispatching,
+                ExecutionIntentState::Failed
+            )
+            | (
+                ExecutionIntentState::Dispatching,
+                ExecutionIntentState::Cancelled
+            )
+            | (
+                ExecutionIntentState::DeliveryUnknown,
+                ExecutionIntentState::Dispatching
+            )
+            | (
+                ExecutionIntentState::DeliveryUnknown,
+                ExecutionIntentState::Cancelled
+            )
+            | (
+                ExecutionIntentState::Failed,
+                ExecutionIntentState::Dispatching
+            )
+    )
+}
+
+fn nonnegative_u64(label: &str, value: i64) -> Result<u64, DbError> {
+    u64::try_from(value).map_err(|_| DbError::Message(format!("{label} must be non-negative")))
+}
+
 fn backup_legacy_database(path: &Path) -> Result<(), DbError> {
     if !path.exists() {
         return Ok(());
@@ -2403,6 +3553,94 @@ fn migrate_legacy_event_cache(conn: &Connection) -> Result<(), DbError> {
          ) VALUES ('legacy-cache-import', 'migration-v4', 0, ?1)",
         params![now],
     )?;
+    Ok(())
+}
+
+/// Version 5 introduces the execution ledger. It deliberately coexists with
+/// legacy sessions/prompt_dispatches during the transition so a desktop upgrade
+/// is reversible and existing conversations keep opening normally.
+fn migrate_execution_ledger(conn: &mut Connection) -> Result<(), DbError> {
+    let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version >= 5 {
+        return Ok(());
+    }
+    let tx = conn.transaction()?;
+    tx.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS execution_runs (
+          execution_id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          remote_session_id TEXT,
+          runtime_id TEXT NOT NULL,
+          state TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          cancel_epoch INTEGER NOT NULL DEFAULT 0,
+          current_intent_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_execution_runs_task_updated
+          ON execution_runs(task_id, updated_at DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_execution_runs_active_task
+          ON execution_runs(task_id) WHERE completed_at IS NULL;
+
+        CREATE TABLE IF NOT EXISTS execution_intents (
+          intent_id TEXT PRIMARY KEY,
+          execution_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          runtime_id TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          ordinal INTEGER NOT NULL,
+          state TEXT NOT NULL,
+          attempt INTEGER NOT NULL DEFAULT 0,
+          cancel_epoch INTEGER NOT NULL DEFAULT 0,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          completed_at TEXT,
+          error_summary TEXT,
+          FOREIGN KEY(execution_id) REFERENCES execution_runs(execution_id) ON DELETE CASCADE,
+          UNIQUE(execution_id, ordinal)
+        );
+        CREATE INDEX IF NOT EXISTS idx_execution_intents_dispatch
+          ON execution_intents(task_id, state, ordinal);
+
+        CREATE TABLE IF NOT EXISTS execution_events (
+          event_id TEXT PRIMARY KEY,
+          execution_id TEXT NOT NULL,
+          intent_id TEXT,
+          aggregate_version INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(execution_id) REFERENCES execution_runs(execution_id) ON DELETE CASCADE,
+          FOREIGN KEY(intent_id) REFERENCES execution_intents(intent_id) ON DELETE SET NULL,
+          UNIQUE(execution_id, aggregate_version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_execution_events_execution_version
+          ON execution_events(execution_id, aggregate_version);
+
+        CREATE TABLE IF NOT EXISTS execution_leases (
+          lease_id TEXT PRIMARY KEY,
+          execution_id TEXT NOT NULL,
+          resource_kind TEXT NOT NULL,
+          resource_key TEXT NOT NULL,
+          owner_epoch INTEGER NOT NULL,
+          acquired_at TEXT NOT NULL,
+          expires_at TEXT,
+          released_at TEXT,
+          FOREIGN KEY(execution_id) REFERENCES execution_runs(execution_id) ON DELETE CASCADE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_execution_leases_active_resource
+          ON execution_leases(resource_kind, resource_key) WHERE released_at IS NULL;
+        ",
+    )?;
+    tx.execute_batch("PRAGMA user_version = 5;")?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -2670,7 +3908,17 @@ mod tests {
             .lock()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(schema_version, 4);
+        assert_eq!(schema_version, 5);
+        let ledger_table: String = db
+            .conn
+            .lock()
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'execution_intents'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(ledger_table, "execution_intents");
         assert_eq!(db.list_sessions(Some("/tmp/proj")).unwrap().len(), 1);
 
         db.append_event("s1", 1, "t", "chunk", &serde_json::json!({"text": "a"}))
@@ -2979,6 +4227,29 @@ mod tests {
         assert_eq!(prepared.state, DispatchState::Prepared);
         db.transition_prompt_dispatch("dispatch-key-1", DispatchState::Sending, None)
             .unwrap();
+        db.prepare_prompt_dispatch(
+            "task-1",
+            "remote-1",
+            "runtime-1",
+            "turn-2",
+            "dispatch-key-2",
+        )
+        .unwrap();
+        assert_eq!(db.cancel_prepared_prompt_dispatches("task-1").unwrap(), 1);
+        assert_eq!(
+            db.get_prompt_dispatch("dispatch-key-1")
+                .unwrap()
+                .unwrap()
+                .state,
+            DispatchState::Sending
+        );
+        assert_eq!(
+            db.get_prompt_dispatch("dispatch-key-2")
+                .unwrap()
+                .unwrap()
+                .state,
+            DispatchState::Cancelled
+        );
         db.mark_inflight_dispatches_unknown().unwrap();
         let existing = db
             .prepare_prompt_dispatch(
@@ -2998,6 +4269,183 @@ mod tests {
         assert!(db
             .transition_prompt_dispatch("dispatch-key-1", DispatchState::Sending, None)
             .is_err());
+    }
+
+    #[test]
+    fn execution_ledger_is_idempotent_versioned_and_cancellation_fenced() {
+        let db = temp_db();
+        db.upsert_workspace("/w", Some("w")).unwrap();
+        let summary = SessionSummary {
+            session_id: "task-ledger".into(),
+            connection_id: Some("runtime-1".into()),
+            workspace_root: "/w".into(),
+            title: "ledger".into(),
+            created_at: "t0".into(),
+            updated_at: "t0".into(),
+            last_message_preview: None,
+            run_state: SessionRunState::Idle,
+            remote_session_id: Some("remote-ledger".into()),
+            worktree_path: None,
+            execution_root: Some("/w".into()),
+            base_commit: None,
+            mode: TaskMode::Agent,
+            permission_policy: PermissionPolicy::WorkspaceEdit,
+            sandbox: SandboxMode::Workspace,
+            archived: false,
+            attention_required: false,
+            applied_at: None,
+            model: None,
+            reasoning_effort: None,
+            always_approve: false,
+            draft: None,
+        };
+        db.upsert_session(&summary).unwrap();
+        let first_input = ExecutionIntentInput {
+            task_id: "task-ledger".into(),
+            remote_session_id: Some("remote-ledger".into()),
+            runtime_id: "runtime-1".into(),
+            idempotency_key: "intent-ledger-1".into(),
+            payload: serde_json::json!({ "text": "first" }),
+        };
+        let first = db.enqueue_execution_intent(&first_input).unwrap();
+        let duplicate = db.enqueue_execution_intent(&first_input).unwrap();
+        assert_eq!(first.intent_id, duplicate.intent_id);
+        assert_eq!(first.ordinal, 1);
+
+        let second = db
+            .enqueue_execution_intent(&ExecutionIntentInput {
+                idempotency_key: "intent-ledger-2".into(),
+                payload: serde_json::json!({ "text": "second" }),
+                ..first_input.clone()
+            })
+            .unwrap();
+        assert_eq!(second.execution_id, first.execution_id);
+        assert_eq!(second.ordinal, 2);
+        assert!(db.claim_execution_intent("intent-ledger-2").is_err());
+        let claimed = db.claim_execution_intent("intent-ledger-1").unwrap();
+        assert_eq!(claimed.state, ExecutionIntentState::Dispatching);
+        assert_eq!(claimed.attempt, 1);
+
+        let cancelling = db
+            .cancel_execution_for_task("task-ledger")
+            .unwrap()
+            .unwrap();
+        assert_eq!(cancelling.state, ExecutionState::Cancelling);
+        assert_eq!(cancelling.cancel_epoch, 1);
+        assert_eq!(
+            db.get_execution_intent("intent-ledger-2")
+                .unwrap()
+                .unwrap()
+                .state,
+            ExecutionIntentState::Cancelled
+        );
+        let finished = db
+            .finish_execution_intent(
+                "intent-ledger-1",
+                ExecutionIntentState::Cancelled,
+                Some("cancelled by test"),
+            )
+            .unwrap();
+        assert_eq!(finished.state, ExecutionIntentState::Cancelled);
+        assert!(db.get_active_execution("task-ledger").unwrap().is_none());
+        let events = db.list_execution_events(&first.execution_id).unwrap();
+        assert!(events.len() >= 4);
+        assert!(events
+            .windows(2)
+            .all(|pair| pair[0].aggregate_version < pair[1].aggregate_version));
+    }
+
+    #[test]
+    fn execution_recovery_replays_only_work_that_never_entered_acp() {
+        let db = temp_db();
+        db.upsert_workspace("/w", Some("w")).unwrap();
+        db.upsert_session(&SessionSummary {
+            session_id: "task-recovery".into(),
+            connection_id: Some("runtime-1".into()),
+            workspace_root: "/w".into(),
+            title: "recovery".into(),
+            created_at: "t0".into(),
+            updated_at: "t0".into(),
+            last_message_preview: None,
+            run_state: SessionRunState::Idle,
+            remote_session_id: Some("remote-recovery".into()),
+            worktree_path: None,
+            execution_root: Some("/w".into()),
+            base_commit: None,
+            mode: TaskMode::Agent,
+            permission_policy: PermissionPolicy::WorkspaceEdit,
+            sandbox: SandboxMode::Workspace,
+            archived: false,
+            attention_required: false,
+            applied_at: None,
+            model: None,
+            reasoning_effort: None,
+            always_approve: false,
+            draft: None,
+        })
+        .unwrap();
+        let intent = db
+            .enqueue_execution_intent(&ExecutionIntentInput {
+                task_id: "task-recovery".into(),
+                remote_session_id: Some("remote-recovery".into()),
+                runtime_id: "runtime-1".into(),
+                idempotency_key: "intent-recovery-1".into(),
+                payload: serde_json::json!({ "text": "safe queued work" }),
+            })
+            .unwrap();
+
+        let queued_recovery = db.reconcile_execution_ledger().unwrap();
+        assert_eq!(queued_recovery.dispatches_marked_unknown, 0);
+        assert_eq!(queued_recovery.executions_marked_recovering, 1);
+        assert_eq!(queued_recovery.recoverable_queued_intents, 1);
+        assert!(
+            db.get_session("task-recovery")
+                .unwrap()
+                .unwrap()
+                .attention_required
+        );
+        assert_eq!(
+            db.get_active_execution("task-recovery")
+                .unwrap()
+                .unwrap()
+                .state,
+            ExecutionState::Recovering
+        );
+        assert_eq!(
+            db.next_recoverable_execution_intent("task-recovery")
+                .unwrap()
+                .unwrap()
+                .intent_id,
+            intent.intent_id
+        );
+
+        db.claim_execution_intent("intent-recovery-1").unwrap();
+        let uncertain_recovery = db.reconcile_execution_ledger().unwrap();
+        assert_eq!(uncertain_recovery.dispatches_marked_unknown, 1);
+        assert_eq!(uncertain_recovery.recoverable_queued_intents, 0);
+        assert_eq!(
+            db.get_execution_intent("intent-recovery-1")
+                .unwrap()
+                .unwrap()
+                .state,
+            ExecutionIntentState::DeliveryUnknown
+        );
+        assert_eq!(
+            db.get_active_execution("task-recovery")
+                .unwrap()
+                .unwrap()
+                .state,
+            ExecutionState::DeliveryUnknown
+        );
+        assert!(db
+            .next_recoverable_execution_intent("task-recovery")
+            .unwrap()
+            .is_none());
+        let events = db.list_execution_events(&intent.execution_id).unwrap();
+        assert!(events.iter().any(|event| event.kind == "recovery.queued"));
+        assert!(events
+            .iter()
+            .any(|event| event.kind == "recovery.delivery_unknown"));
     }
 
     #[test]

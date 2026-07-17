@@ -127,6 +127,88 @@ export type PromptDispatch = {
   errorSummary?: string | null;
 };
 
+/** Host-owned execution aggregate; distinct from a single ACP prompt delivery. */
+export type ExecutionState =
+  | "queued"
+  | "running"
+  | "awaiting_permission"
+  | "cancelling"
+  | "delivery_unknown"
+  | "recovering"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type ExecutionIntentState =
+  | "queued"
+  | "dispatching"
+  | "acknowledged"
+  | "delivery_unknown"
+  | "failed"
+  | "cancelled";
+
+export type ExecutionRun = {
+  executionId: string;
+  taskId: string;
+  workspaceId: string;
+  sessionId: string;
+  remoteSessionId?: string | null;
+  runtimeId: string;
+  state: ExecutionState;
+  version: number;
+  cancelEpoch: number;
+  currentIntentId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+};
+
+export type ExecutionIntent = {
+  intentId: string;
+  executionId: string;
+  taskId: string;
+  sessionId: string;
+  runtimeId: string;
+  idempotencyKey: string;
+  ordinal: number;
+  state: ExecutionIntentState;
+  attempt: number;
+  cancelEpoch: number;
+  payload: unknown;
+  createdAt: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  errorSummary?: string | null;
+};
+
+export type ExecutionEvent = {
+  eventId: string;
+  executionId: string;
+  intentId?: string | null;
+  aggregateVersion: number;
+  kind: string;
+  payload: unknown;
+  createdAt: string;
+};
+
+export type ExecutionLease = {
+  leaseId: string;
+  executionId: string;
+  resourceKind: string;
+  resourceKey: string;
+  ownerEpoch: number;
+  acquiredAt: string;
+  expiresAt?: string | null;
+  releasedAt?: string | null;
+};
+
+/** Result of Host startup recovery. Sent work is never blindly replayed. */
+export type ExecutionRecoverySummary = {
+  dispatchesMarkedUnknown: number;
+  executionsMarkedRecovering: number;
+  recoverableQueuedIntents: number;
+};
+
 export type PromptDispatchContext = {
   taskId: string;
   turnId: string;

@@ -258,6 +258,10 @@ export const mockDesktopBridge: DesktopBridge = {
       skills: [
         { id: "frontend-design", name: "Frontend design", description: "Build polished product interfaces", source: "user", enabled: true },
       ],
+      agents: [
+        { id: "explore", name: "Explore", description: "Read-only investigation agent", source: "builtin", enabled: true },
+        { id: "plan", name: "Plan", description: "Planning agent", source: "builtin", enabled: true },
+      ],
       plugins: [
         { id: "github", name: "GitHub", description: "Repository workflows", source: "plugin", enabled: true },
       ],
@@ -281,7 +285,6 @@ export const mockDesktopBridge: DesktopBridge = {
           { vendor: "codex", surface: "sessions", enabled: true, source: "default" },
         ],
       },
-      raw: null,
     };
   },
   async startAgent(config) {
@@ -502,6 +505,9 @@ export const mockDesktopBridge: DesktopBridge = {
   async getTask(taskId) {
     return { taskId, workspaceId: "workspace", state: "running", goal: "Complete the coding task", constraints: [], acceptance: [], allowedPaths: [], verificationCommands: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   },
+  async getExecution() { return null; },
+  async listExecutionEvents() { return []; },
+  async resumeExecution() { return { scheduled: false, reason: "no recoverable execution intent" }; },
   async upsertTask() {},
   async listContextManifests() { return []; },
   async saveContextManifest() {},

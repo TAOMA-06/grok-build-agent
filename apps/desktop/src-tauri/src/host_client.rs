@@ -81,7 +81,7 @@ impl HostClient {
 
     pub async fn subscribe<F>(&self, mut on_event: F) -> Result<(), HostClientError>
     where
-        F: FnMut(String, Value) + Send,
+        F: FnMut(String, Value) -> Result<(), String> + Send,
     {
         let _subscription = self.subscription_guard.lock().await;
         let mut stream = UnixStream::connect(&self.socket)
@@ -112,9 +112,9 @@ impl HostClient {
             let Some(params) = notification.get("params") else {
                 continue;
             };
-            if let Some(cursor) = notification.get("cursor").and_then(Value::as_i64) {
-                let previous = self.event_cursor.fetch_max(cursor, Ordering::AcqRel);
-                if cursor <= previous {
+            let cursor = notification.get("cursor").and_then(Value::as_i64);
+            if let Some(cursor) = cursor {
+                if cursor <= self.event_cursor.load(Ordering::Acquire) {
                     continue;
                 }
             }
@@ -124,7 +124,13 @@ impl HostClient {
             on_event(
                 name.to_string(),
                 params.get("payload").cloned().unwrap_or(Value::Null),
-            );
+            )
+            .map_err(HostClientError::Message)?;
+            // A renderer retry is safer than advancing the durable cursor before
+            // Tauri has accepted the event for delivery.
+            if let Some(cursor) = cursor {
+                self.event_cursor.fetch_max(cursor, Ordering::AcqRel);
+            }
         }
     }
 }

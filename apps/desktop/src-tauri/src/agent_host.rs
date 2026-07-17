@@ -32,9 +32,13 @@ struct HostState {
     token: Arc<String>,
     events: broadcast::Sender<HostNotification>,
     idempotency_locks: Arc<Mutex<IdempotencyLocks>>,
+    task_run_locks: Arc<Mutex<TaskRunLocks>>,
+    execution_workers: Arc<Mutex<TaskExecutionWorkers>>,
+    execution_waiters: Arc<parking_lot::Mutex<HashMap<String, ExecutionWaiter>>>,
+    recovery_routes: Arc<parking_lot::Mutex<HashMap<String, ExecutionResumeRoute>>>,
     blobs: Arc<crate::blob_store::BlobStore>,
     pending_actions: Arc<parking_lot::Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
-    task_roots: Arc<parking_lot::Mutex<HashMap<String, PathBuf>>>,
+    task_roots: Arc<parking_lot::Mutex<TaskRootLeases>>,
     private_task_roots: Arc<parking_lot::Mutex<HashMap<String, PathBuf>>>,
     private_sessions: Arc<parking_lot::Mutex<HashMap<String, String>>>,
     private_connections: Arc<parking_lot::Mutex<HashSet<String>>>,
@@ -45,38 +49,87 @@ struct HostState {
 /// a retry of that exact request, never unrelated permission, cancellation, or
 /// terminal RPCs.
 type IdempotencyLocks = HashMap<String, Weak<Mutex<()>>>;
+type TaskRunLocks = HashMap<String, Weak<Mutex<()>>>;
+type TaskExecutionWorkers = HashSet<String>;
+
+/// A renderer waits for its own durable prompt intent, not for an arbitrary
+/// task mutex. If the Host restarts, the waiter disappears but the intent
+/// remains in SQLite for explicit recovery.
+struct ExecutionWaiter {
+    task_id: String,
+    sender: tokio::sync::oneshot::Sender<Result<Value, String>>,
+}
+
+#[derive(Debug)]
+struct TaskRootOwner {
+    execution_root: PathBuf,
+    leases: usize,
+}
+
+type TaskRootLeases = HashMap<String, TaskRootOwner>;
 
 /// A workspace write lease exists only while a task turn is actively running.
 /// Keeping it for the lifetime of a resumable session prevents every later
 /// task in a non-Git workspace, even after the original task is idle.
 struct TaskRootLease {
     task_id: String,
-    roots: Arc<parking_lot::Mutex<HashMap<String, PathBuf>>>,
+    execution_root: PathBuf,
+    roots: Arc<parking_lot::Mutex<TaskRootLeases>>,
 }
 
 impl Drop for TaskRootLease {
     fn drop(&mut self) {
-        self.roots.lock().remove(&self.task_id);
+        let mut task_roots = self.roots.lock();
+        let release = match task_roots.get_mut(&self.task_id) {
+            Some(owner) if owner.execution_root == self.execution_root => {
+                owner.leases = owner.leases.saturating_sub(1);
+                owner.leases == 0
+            }
+            _ => false,
+        };
+        if release {
+            task_roots.remove(&self.task_id);
+        }
     }
 }
 
 fn claim_task_root(
-    roots: &Arc<parking_lot::Mutex<HashMap<String, PathBuf>>>,
+    roots: &Arc<parking_lot::Mutex<TaskRootLeases>>,
     task_id: &str,
     execution_root: PathBuf,
 ) -> Result<TaskRootLease, String> {
     let mut task_roots = roots.lock();
+    if let Some(existing) = task_roots.get_mut(task_id) {
+        if existing.execution_root != execution_root {
+            return Err(format!(
+                "task {task_id} changed execution root while a turn is active"
+            ));
+        }
+        existing.leases = existing.leases.saturating_add(1);
+        return Ok(TaskRootLease {
+            task_id: task_id.to_string(),
+            execution_root,
+            roots: roots.clone(),
+        });
+    }
     if let Some((owner, _)) = task_roots
         .iter()
-        .find(|(owner, root)| owner.as_str() != task_id && **root == execution_root)
+        .find(|(_, root)| root.execution_root == execution_root)
     {
         return Err(format!(
             "execution root is already owned by task {owner}; parallel write tasks require separate worktrees"
         ));
     }
-    task_roots.insert(task_id.to_string(), execution_root);
+    task_roots.insert(
+        task_id.to_string(),
+        TaskRootOwner {
+            execution_root: execution_root.clone(),
+            leases: 1,
+        },
+    );
     Ok(TaskRootLease {
         task_id: task_id.to_string(),
+        execution_root,
         roots: roots.clone(),
     })
 }
@@ -341,7 +394,7 @@ fn persist_policy_audit(db: &Database, payload: &Value) {
     });
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PromptParams {
     connection_id: String,
@@ -366,6 +419,25 @@ struct PromptParams {
 struct SessionRoute {
     connection_id: String,
     session_id: String,
+}
+
+/// Explicitly binds recoverable queued work to a live ACP route. The Host never
+/// silently changes a recovered prompt's destination after restart.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecutionResumeRoute {
+    task_id: String,
+    connection_id: String,
+    session_id: String,
+}
+
+fn execution_resume_route_matches_session(
+    route: &ExecutionResumeRoute,
+    connection_id: Option<&str>,
+    remote_session_id: Option<&str>,
+) -> bool {
+    connection_id == Some(route.connection_id.as_str())
+        && remote_session_id == Some(route.session_id.as_str())
 }
 
 #[derive(Deserialize)]
@@ -431,6 +503,8 @@ async fn run() -> Result<(), AgentHostError> {
         .map_err(|error| AgentHostError::Message(error.to_string()))?;
     db.mark_inflight_dispatches_unknown()
         .map_err(|error| AgentHostError::Message(error.to_string()))?;
+    db.reconcile_execution_ledger()
+        .map_err(|error| AgentHostError::Message(error.to_string()))?;
     db.interrupt_pending_permissions()
         .map_err(|error| AgentHostError::Message(error.to_string()))?;
     db.reconcile_orphan_runtime_processes()
@@ -456,6 +530,10 @@ async fn run() -> Result<(), AgentHostError> {
         token,
         events,
         idempotency_locks: Arc::new(Mutex::new(HashMap::new())),
+        task_run_locks: Arc::new(Mutex::new(HashMap::new())),
+        execution_workers: Arc::new(Mutex::new(HashSet::new())),
+        execution_waiters: Arc::new(parking_lot::Mutex::new(HashMap::new())),
+        recovery_routes: Arc::new(parking_lot::Mutex::new(HashMap::new())),
         blobs: Arc::new(
             crate::blob_store::BlobStore::new(blob_root)
                 .map_err(|error| AgentHostError::Message(error.to_string()))?,
@@ -545,6 +623,49 @@ async fn run() -> Result<(), AgentHostError> {
     }
 }
 
+/// Rebuild the persisted portion of an event stream in global cursor order.
+/// A broadcast notification is only an acceleration path: its durable cursor
+/// always resolves through this function so concurrent senders cannot reorder
+/// or skip events for a live subscriber.
+async fn replay_persisted_events(
+    stream: &mut UnixStream,
+    db: &Database,
+    replay_cursor: &mut i64,
+) -> Result<(), AgentHostError> {
+    loop {
+        let batch = db
+            .replay_platform_events(*replay_cursor, 10_000)
+            .map_err(|error| AgentHostError::Message(error.to_string()))?;
+        let batch_len = batch.len();
+        for (rowid, event) in batch {
+            *replay_cursor = rowid;
+            let event_name = host_event_name_for_kind(&event.kind);
+            let payload = SessionEventEnvelope {
+                connection_id: event.runtime_id,
+                session_id: Some(event.session_id),
+                sequence: event.sequence,
+                timestamp: event.timestamp,
+                source: crate::contracts::EventSource::Runtime,
+                kind: event.kind,
+                payload: event.payload,
+            };
+            host_rpc::write_frame(
+                stream,
+                &HostNotification {
+                    jsonrpc: "2.0",
+                    method: "host.event",
+                    params: json!({ "eventName": event_name, "payload": payload }),
+                    cursor: Some(rowid),
+                },
+            )
+            .await?;
+        }
+        if batch_len < 10_000 {
+            return Ok(());
+        }
+    }
+}
+
 async fn serve_connection(mut stream: UnixStream, state: HostState) -> Result<(), AgentHostError> {
     host_rpc::verify_peer_uid(&stream)?;
     loop {
@@ -578,53 +699,33 @@ async fn serve_connection(mut stream: UnixStream, state: HostState) -> Result<()
                 &success(request.id, json!({ "subscribed": true })),
             )
             .await?;
-            loop {
-                let batch = state
-                    .db
-                    .replay_platform_events(replay_cursor, 10_000)
-                    .map_err(|error| AgentHostError::Message(error.to_string()))?;
-                let batch_len = batch.len();
-                for (rowid, event) in batch {
-                    replay_cursor = rowid;
-                    let event_name = host_event_name_for_kind(&event.kind);
-                    let payload = SessionEventEnvelope {
-                        connection_id: event.runtime_id,
-                        session_id: Some(event.session_id),
-                        sequence: event.sequence,
-                        timestamp: event.timestamp,
-                        source: crate::contracts::EventSource::Runtime,
-                        kind: event.kind,
-                        payload: event.payload,
-                    };
-                    host_rpc::write_frame(
-                        &mut stream,
-                        &HostNotification {
-                            jsonrpc: "2.0",
-                            method: "host.event",
-                            params: json!({ "eventName": event_name, "payload": payload }),
-                            cursor: Some(rowid),
-                        },
-                    )
-                    .await?;
-                }
-                if batch_len < 10_000 {
-                    break;
-                }
-            }
+            replay_persisted_events(&mut stream, state.db.as_ref(), &mut replay_cursor).await?;
             loop {
                 match receiver.recv().await {
-                    Ok(notification) => {
-                        if notification
-                            .cursor
-                            .is_some_and(|cursor| cursor <= replay_cursor)
-                        {
-                            continue;
+                    Ok(notification) => match notification.cursor {
+                        // Persisted events replay through SQLite even while the
+                        // socket is live. That preserves row ordering if two
+                        // concurrent runtimes publish notifications out of order.
+                        Some(cursor) if cursor > replay_cursor => {
+                            replay_persisted_events(
+                                &mut stream,
+                                state.db.as_ref(),
+                                &mut replay_cursor,
+                            )
+                            .await?;
                         }
-                        host_rpc::write_frame(&mut stream, &notification).await?;
+                        Some(_) => {}
+                        // Private and other ephemeral notifications are not part
+                        // of the durable stream, so forward them directly.
+                        None => host_rpc::write_frame(&mut stream, &notification).await?,
+                    },
+                    // High-frequency notifications can outrun a slow UI socket.
+                    // Rebuild the durable gap immediately instead of waiting for
+                    // a reconnect, then resume draining the broadcast channel.
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        replay_persisted_events(&mut stream, state.db.as_ref(), &mut replay_cursor)
+                            .await?;
                     }
-                    // High-frequency thought chunks can outrun a slow UI socket.
-                    // Stay subscribed and keep draining; DB replay covers gaps on reconnect.
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
@@ -653,6 +754,233 @@ async fn acquire_idempotency_guard(
         }
     };
     lock.lock_owned().await
+}
+
+/// Prompts for one task share a single host-owned execution lane. This protects
+/// the ACP session, workspace lease, and cancellation semantics even when
+/// multiple renderer connections submit work concurrently.
+async fn acquire_task_run_guard(
+    locks: &Mutex<TaskRunLocks>,
+    task_id: &str,
+) -> tokio::sync::OwnedMutexGuard<()> {
+    let lock = {
+        let mut locks = locks.lock().await;
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        if let Some(lock) = locks.get(task_id).and_then(|lock| lock.upgrade()) {
+            lock
+        } else {
+            let lock = Arc::new(Mutex::new(()));
+            locks.insert(task_id.to_string(), Arc::downgrade(&lock));
+            lock
+        }
+    };
+    lock.lock_owned().await
+}
+
+fn settle_execution_waiter(
+    state: &HostState,
+    idempotency_key: &str,
+    result: Result<Value, String>,
+) {
+    let waiter = state.execution_waiters.lock().remove(idempotency_key);
+    if let Some(waiter) = waiter {
+        let _ = waiter.sender.send(result);
+    }
+}
+
+fn fail_execution_waiters_for_task(state: &HostState, task_id: &str, reason: &str) {
+    let waiters = {
+        let mut waiters = state.execution_waiters.lock();
+        let keys = waiters
+            .iter()
+            .filter_map(|(key, waiter)| (waiter.task_id == task_id).then_some(key.clone()))
+            .collect::<Vec<_>>();
+        keys.into_iter()
+            .filter_map(|key| waiters.remove(&key))
+            .collect::<Vec<_>>()
+    };
+    for waiter in waiters {
+        let _ = waiter.sender.send(Err(reason.to_string()));
+    }
+}
+
+/// Start one FIFO worker for a task, if it is not already draining that task's
+/// SQLite-backed queue. The marker is intentionally independent from the
+/// task-run mutex: it governs scheduling, while the mutex protects execution
+/// root ownership during the actual ACP call.
+async fn ensure_execution_worker(state: &HostState, task_id: &str) {
+    let should_start = state
+        .execution_workers
+        .lock()
+        .await
+        .insert(task_id.to_string());
+    if !should_start {
+        return;
+    }
+    let state = state.clone();
+    let task_id = task_id.to_string();
+    tokio::spawn(async move {
+        run_execution_worker(state, task_id).await;
+    });
+}
+
+async fn run_execution_worker(state: HostState, task_id: String) {
+    loop {
+        let intent = match state.db.next_recoverable_execution_intent(&task_id) {
+            Ok(Some(intent)) => intent,
+            Ok(None) => {
+                state.execution_workers.lock().await.remove(&task_id);
+                // An enqueue can observe the old marker just before removal.
+                // Reclaim the marker ourselves when that race left queue work;
+                // otherwise let the enqueue that saw no marker spawn its worker.
+                let has_pending = state
+                    .db
+                    .next_recoverable_execution_intent(&task_id)
+                    .ok()
+                    .flatten()
+                    .is_some();
+                if has_pending && state.execution_workers.lock().await.insert(task_id.clone()) {
+                    continue;
+                }
+                state.recovery_routes.lock().remove(&task_id);
+                return;
+            }
+            Err(error) => {
+                fail_execution_waiters_for_task(&state, &task_id, &error.to_string());
+                state.execution_workers.lock().await.remove(&task_id);
+                state.recovery_routes.lock().remove(&task_id);
+                return;
+            }
+        };
+        let idempotency_key = intent.idempotency_key.clone();
+        match process_execution_intent(&state, intent).await {
+            Ok(value) => settle_execution_waiter(&state, &idempotency_key, Ok(value)),
+            Err(error) => {
+                settle_execution_waiter(&state, &idempotency_key, Err(error.clone()));
+                fail_execution_waiters_for_task(&state, &task_id, &error);
+                state.execution_workers.lock().await.remove(&task_id);
+                state.recovery_routes.lock().remove(&task_id);
+                return;
+            }
+        }
+    }
+}
+
+async fn process_execution_intent(
+    state: &HostState,
+    intent: crate::platform::ExecutionIntent,
+) -> Result<Value, String> {
+    let idempotency_key = intent.idempotency_key.clone();
+    let mut params: PromptParams = match serde_json::from_value(intent.payload) {
+        Ok(params) => params,
+        Err(error) => {
+            let reason = format!(
+                "persisted execution intent {} has an invalid prompt payload: {error}",
+                intent.intent_id
+            );
+            mark_execution_intent_failed(state, &idempotency_key, &reason);
+            return Err(reason);
+        }
+    };
+    if params.private_chat
+        || params.task_id != intent.task_id
+        || params.idempotency_key != idempotency_key
+    {
+        let reason = format!(
+            "persisted execution intent {} failed integrity validation",
+            intent.intent_id
+        );
+        mark_execution_intent_failed(state, &idempotency_key, &reason);
+        return Err(reason);
+    }
+    if let Some(route) = state.recovery_routes.lock().get(&intent.task_id).cloned() {
+        params.connection_id = route.connection_id;
+        params.session_id = route.session_id;
+    }
+    let result = execute_persisted_prompt(
+        state,
+        serde_json::to_value(params).map_err(|error| error.to_string())?,
+    )
+    .await;
+    if result.is_err()
+        && state
+            .db
+            .get_execution_intent(&idempotency_key)
+            .ok()
+            .flatten()
+            .is_some_and(|current| {
+                matches!(
+                    current.state,
+                    crate::platform::ExecutionIntentState::Queued
+                        | crate::platform::ExecutionIntentState::Dispatching
+                )
+            })
+    {
+        let cancellation_requested = state
+            .db
+            .get_active_execution(&intent.task_id)
+            .ok()
+            .flatten()
+            .is_some_and(|run| {
+                matches!(
+                    run.state,
+                    crate::platform::ExecutionState::Cancelling
+                        | crate::platform::ExecutionState::Cancelled
+                )
+            })
+            || state
+                .db
+                .get_task(&intent.task_id)
+                .ok()
+                .flatten()
+                .is_some_and(|task| task.state == crate::platform::TaskState::Cancelled);
+        if cancellation_requested {
+            mark_execution_intent_cancelled(
+                state,
+                &idempotency_key,
+                "Task cancellation fenced the execution intent",
+            );
+        } else {
+            mark_execution_intent_failed(
+                state,
+                &idempotency_key,
+                "Host could not complete the queued execution intent",
+            );
+        }
+    }
+    result
+}
+
+fn mark_execution_intent_failed(state: &HostState, idempotency_key: &str, reason: &str) {
+    use crate::platform::{DispatchState, ExecutionIntentState};
+
+    let redacted = crate::secrets::redact_secrets(reason);
+    let _ = state.db.transition_prompt_dispatch(
+        idempotency_key,
+        DispatchState::Failed,
+        Some(&redacted),
+    );
+    let _ = state.db.finish_execution_intent(
+        idempotency_key,
+        ExecutionIntentState::Failed,
+        Some(&redacted),
+    );
+}
+
+fn mark_execution_intent_cancelled(state: &HostState, idempotency_key: &str, reason: &str) {
+    use crate::platform::{DispatchState, ExecutionIntentState};
+
+    let redacted = crate::secrets::redact_secrets(reason);
+    let _ = state.db.transition_prompt_dispatch(
+        idempotency_key,
+        DispatchState::Cancelled,
+        Some(&redacted),
+    );
+    let _ = state.db.finish_execution_intent(
+        idempotency_key,
+        ExecutionIntentState::Cancelled,
+        Some(&redacted),
+    );
 }
 
 async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
@@ -739,6 +1067,56 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
             )
         }),
         "doctor.gcBlobs" => gc_blobs(state),
+        "execution.get" => request
+            .params
+            .get("taskId")
+            .and_then(Value::as_str)
+            .filter(|task_id| !task_id.trim().is_empty())
+            .ok_or_else(|| "execution.get requires taskId".to_string())
+            .and_then(|task_id| {
+                state
+                    .db
+                    .get_active_execution(task_id)
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| {
+                        serde_json::to_value(value).map_err(|error| error.to_string())
+                    })
+            }),
+        "execution.events" => request
+            .params
+            .get("executionId")
+            .and_then(Value::as_str)
+            .filter(|execution_id| !execution_id.trim().is_empty())
+            .ok_or_else(|| "execution.events requires executionId".to_string())
+            .and_then(|execution_id| {
+                state
+                    .db
+                    .list_execution_events(execution_id)
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| {
+                        serde_json::to_value(value).map_err(|error| error.to_string())
+                    })
+            }),
+        "execution.intent" => request
+            .params
+            .get("idempotencyKey")
+            .and_then(Value::as_str)
+            .filter(|idempotency_key| !idempotency_key.trim().is_empty())
+            .ok_or_else(|| "execution.intent requires idempotencyKey".to_string())
+            .and_then(|idempotency_key| {
+                state
+                    .db
+                    .get_execution_intent(idempotency_key)
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| {
+                        serde_json::to_value(value).map_err(|error| error.to_string())
+                    })
+            }),
+        "execution.resume" => match serde_json::from_value::<ExecutionResumeRoute>(request.params)
+        {
+            Ok(route) => resume_execution(state, route).await,
+            Err(error) => Err(error.to_string()),
+        },
         "transcript.export" => export_transcript(state, &request.params),
         "runtime.status" => serde_json::to_value(state.runtime.status()).map_err(|e| e.to_string()),
         "runtime.snapshot" => {
@@ -1171,29 +1549,6 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                     Ok(root) => root,
                     Err(error) => return error_response(id, -32000, &error),
                 };
-                {
-                    let roots = state.task_roots.lock();
-                    let private_roots = state.private_task_roots.lock();
-                    if let Some((owner, _)) = roots
-                        .iter()
-                        .find(|(owner, root)| {
-                            owner.as_str() != task_id.as_str() && **root == execution_root
-                        })
-                        .or_else(|| {
-                            private_roots.iter().find(|(owner, root)| {
-                                owner.as_str() != task_id.as_str() && **root == execution_root
-                            })
-                        })
-                    {
-                        return error_response(
-                            id,
-                            -32000,
-                            &format!(
-                                "execution root is already owned by task {owner}; parallel write tasks require separate worktrees"
-                            ),
-                        );
-                    }
-                }
                 let private_chat = config.private_chat;
                 if !private_chat && !config.cwd.trim().is_empty() {
                     if let Err(error) = state.db.upsert_workspace(&config.cwd, None) {
@@ -1208,10 +1563,6 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                 });
                 match state.runtime.start_with_bus(bus, config).await {
                     Ok(status) => {
-                        state
-                            .task_roots
-                            .lock()
-                            .insert(task_id.clone(), execution_root.clone());
                         if private_chat {
                             state
                                 .private_task_roots
@@ -1248,7 +1599,6 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                     let _ = state.db.clear_session_policy_rules();
                     let _ = state.db.mark_runtime_processes_stopped();
                 }
-                state.task_roots.lock().clear();
                 state.private_task_roots.lock().clear();
                 state.private_sessions.lock().clear();
                 state.private_connections.lock().clear();
@@ -1267,13 +1617,14 @@ async fn dispatch(state: &HostState, request: HostRequest) -> HostResponse {
                 if result.is_ok() {
                     if let Some(task_id) = private_task_for_session(state, &route.session_id) {
                         state.terminals.cancel_task(&task_id);
-                        state.task_roots.lock().remove(&task_id);
                         state.private_task_roots.lock().remove(&task_id);
                         state.private_sessions.lock().remove(&route.session_id);
                     } else if let Ok(Some(task_id)) = state.db.local_session_id(&route.session_id) {
+                        let _ = state.db.cancel_execution_for_task(&task_id);
+                        let _ = state.db.cancel_prepared_prompt_dispatches(&task_id);
+                        fail_execution_waiters_for_task(state, &task_id, "prompt was cancelled");
                         state.terminals.cancel_task(&task_id);
                         let _ = state.db.mark_task_terminals_stopped(&task_id);
-                        state.task_roots.lock().remove(&task_id);
                         let _ = state
                             .db
                             .transition_task_state(&task_id, crate::platform::TaskState::Cancelled);
@@ -2154,10 +2505,77 @@ fn gc_blobs(state: &HostState) -> Result<Value, String> {
     Ok(json!({ "removed": removed, "reclaimedBytes": reclaimed }))
 }
 
+/// Persist a durable prompt and wait for its task's FIFO worker. The worker is
+/// the only code path that may claim an intent for ACP dispatch.
 async fn prompt(state: &HostState, params: Value) -> Result<Value, String> {
+    let mut params: PromptParams =
+        serde_json::from_value(params).map_err(|error| error.to_string())?;
+    apply_privacy_guardrails(&mut params)?;
+    if params.private_chat {
+        return execute_persisted_prompt(
+            state,
+            serde_json::to_value(params).map_err(|error| error.to_string())?,
+        )
+        .await;
+    }
+    let dispatch = state
+        .db
+        .prepare_prompt_dispatch(
+            &params.task_id,
+            &params.session_id,
+            &params.connection_id,
+            &params.turn_id,
+            &params.idempotency_key,
+        )
+        .map_err(|error| error.to_string())?;
+    use crate::platform::DispatchState;
+    match dispatch.state {
+        DispatchState::Acknowledged => return Ok(json!({ "deduplicated": true })),
+        DispatchState::Sending | DispatchState::DeliveryUnknown => {
+            return Err("PROMPT_DELIVERY_UNCERTAIN: explicit resolution required".into())
+        }
+        DispatchState::Cancelled => return Err("prompt dispatch was cancelled".into()),
+        DispatchState::Prepared | DispatchState::Failed => {}
+    }
+    state
+        .db
+        .enqueue_execution_intent(&crate::db::ExecutionIntentInput {
+            task_id: params.task_id.clone(),
+            remote_session_id: Some(params.session_id.clone()),
+            runtime_id: params.connection_id.clone(),
+            idempotency_key: params.idempotency_key.clone(),
+            payload: serde_json::to_value(&params).map_err(|error| error.to_string())?,
+        })
+        .map_err(|error| error.to_string())?;
+
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    {
+        let mut waiters = state.execution_waiters.lock();
+        if waiters.contains_key(&params.idempotency_key) {
+            return Err("prompt is already waiting for its execution result".into());
+        }
+        waiters.insert(
+            params.idempotency_key.clone(),
+            ExecutionWaiter {
+                task_id: params.task_id.clone(),
+                sender,
+            },
+        );
+    }
+    ensure_execution_worker(state, &params.task_id).await;
+    receiver
+        .await
+        .map_err(|_| "execution worker stopped before returning a result".to_string())?
+}
+
+/// Execute a queued durable prompt after the task worker selected its next
+/// intent. This still rechecks the legacy dispatch record so upgrades and
+/// idempotent renderer retries retain their original safety semantics.
+async fn execute_persisted_prompt(state: &HostState, params: Value) -> Result<Value, String> {
     let mut params: PromptParams = serde_json::from_value(params).map_err(|e| e.to_string())?;
     apply_privacy_guardrails(&mut params)?;
     if params.private_chat {
+        let _task_run_guard = acquire_task_run_guard(&state.task_run_locks, &params.task_id).await;
         if !is_private_task(state, &params.task_id) {
             return Err(format!("private task {} is unavailable", params.task_id));
         }
@@ -2200,6 +2618,37 @@ async fn prompt(state: &HostState, params: Value) -> Result<Value, String> {
         }
         DispatchState::Cancelled => return Err("prompt dispatch was cancelled".into()),
         DispatchState::Prepared | DispatchState::Failed => {}
+    }
+    state
+        .db
+        .enqueue_execution_intent(&crate::db::ExecutionIntentInput {
+            task_id: params.task_id.clone(),
+            remote_session_id: Some(params.session_id.clone()),
+            runtime_id: params.connection_id.clone(),
+            idempotency_key: params.idempotency_key.clone(),
+            payload: serde_json::to_value(&params).map_err(|error| error.to_string())?,
+        })
+        .map_err(|error| error.to_string())?;
+    let _task_run_guard = acquire_task_run_guard(&state.task_run_locks, &params.task_id).await;
+    let dispatch = state
+        .db
+        .get_prompt_dispatch(&params.idempotency_key)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "prompt dispatch disappeared while waiting for its task lane".to_string())?;
+    match dispatch.state {
+        DispatchState::Acknowledged => return Ok(json!({ "deduplicated": true })),
+        DispatchState::Sending | DispatchState::DeliveryUnknown => {
+            return Err("PROMPT_DELIVERY_UNCERTAIN: explicit resolution required".into())
+        }
+        DispatchState::Cancelled => return Err("prompt dispatch was cancelled".into()),
+        DispatchState::Prepared | DispatchState::Failed => {}
+    }
+    let execution_intent = state
+        .db
+        .claim_execution_intent(&params.idempotency_key)
+        .map_err(|error| error.to_string())?;
+    if execution_intent.state == crate::platform::ExecutionIntentState::Cancelled {
+        return Err("prompt was cancelled before entering the runtime".into());
     }
     let summary = state
         .db
@@ -2248,6 +2697,30 @@ async fn prompt(state: &HostState, params: Value) -> Result<Value, String> {
             .prompt_session_content(&params.connection_id, &params.session_id, params.content)
             .await
     };
+    let task_cancelled = state
+        .db
+        .get_task(&dispatch.task_id)
+        .map_err(|error| error.to_string())?
+        .is_some_and(|task| task.state == crate::platform::TaskState::Cancelled);
+    if task_cancelled {
+        state
+            .db
+            .transition_prompt_dispatch(
+                &params.idempotency_key,
+                DispatchState::Cancelled,
+                Some("Task was cancelled before the runtime turn completed"),
+            )
+            .map_err(|error| error.to_string())?;
+        state
+            .db
+            .finish_execution_intent(
+                &params.idempotency_key,
+                crate::platform::ExecutionIntentState::Cancelled,
+                Some("Task was cancelled before the runtime turn completed"),
+            )
+            .map_err(|error| error.to_string())?;
+        return Err("prompt was cancelled".into());
+    }
     match result {
         Ok(value) => {
             state
@@ -2258,6 +2731,14 @@ async fn prompt(state: &HostState, params: Value) -> Result<Value, String> {
                     None,
                 )
                 .map_err(|e| e.to_string())?;
+            state
+                .db
+                .finish_execution_intent(
+                    &params.idempotency_key,
+                    crate::platform::ExecutionIntentState::Acknowledged,
+                    None,
+                )
+                .map_err(|error| error.to_string())?;
             state
                 .db
                 .append_turn_snapshot(
@@ -2297,6 +2778,14 @@ async fn prompt(state: &HostState, params: Value) -> Result<Value, String> {
                 .map_err(|e| e.to_string())?;
             state
                 .db
+                .finish_execution_intent(
+                    &params.idempotency_key,
+                    crate::platform::ExecutionIntentState::DeliveryUnknown,
+                    Some(&summary),
+                )
+                .map_err(|db_error| db_error.to_string())?;
+            state
+                .db
                 .append_turn_snapshot(
                     &dispatch.workspace_id,
                     &dispatch.task_id,
@@ -2316,6 +2805,49 @@ async fn prompt(state: &HostState, params: Value) -> Result<Value, String> {
             Err(summary)
         }
     }
+}
+
+/// Resume only work that the ledger proves never entered ACP. Callers provide
+/// the live connection/session deliberately, which prevents a Host restart
+/// from silently replaying a prompt into a newly-created or wrong session.
+async fn resume_execution(state: &HostState, route: ExecutionResumeRoute) -> Result<Value, String> {
+    for (name, value) in [
+        ("taskId", route.task_id.as_str()),
+        ("connectionId", route.connection_id.as_str()),
+        ("sessionId", route.session_id.as_str()),
+    ] {
+        if value.trim().is_empty() {
+            return Err(format!("execution.resume requires {name}"));
+        }
+    }
+
+    let session = state
+        .db
+        .get_session(&route.task_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "execution.resume task was not found".to_string())?;
+    if !execution_resume_route_matches_session(
+        &route,
+        session.connection_id.as_deref(),
+        session.remote_session_id.as_deref(),
+    ) {
+        return Err("execution.resume route is not the task's current session".into());
+    }
+
+    let queued = state
+        .db
+        .next_recoverable_execution_intent(&route.task_id)
+        .map_err(|error| error.to_string())?
+        .is_some();
+    if !queued {
+        return Ok(json!({ "scheduled": false, "reason": "no recoverable execution intent" }));
+    }
+    let task_id = route.task_id.clone();
+    state.recovery_routes.lock().insert(task_id.clone(), route);
+    ensure_execution_worker(state, &task_id).await;
+    Ok(json!({
+        "scheduled": true,
+    }))
 }
 
 fn apply_privacy_guardrails(params: &mut PromptParams) -> Result<(), String> {
@@ -2819,6 +3351,81 @@ mod tests {
         assert_eq!(host_event_name_for_kind("error"), "acp:error");
     }
 
+    #[test]
+    fn execution_recovery_route_cannot_be_redirected_to_another_session() {
+        let route = ExecutionResumeRoute {
+            task_id: "task-1".into(),
+            connection_id: "connection-1".into(),
+            session_id: "remote-1".into(),
+        };
+
+        assert!(execution_resume_route_matches_session(
+            &route,
+            Some("connection-1"),
+            Some("remote-1"),
+        ));
+        assert!(!execution_resume_route_matches_session(
+            &route,
+            Some("connection-2"),
+            Some("remote-1"),
+        ));
+        assert!(!execution_resume_route_matches_session(
+            &route,
+            Some("connection-1"),
+            Some("remote-2"),
+        ));
+    }
+
+    #[tokio::test]
+    async fn durable_replay_advances_cursor_in_persisted_order() {
+        let path = std::env::temp_dir().join(format!(
+            "gbd-host-replay-{}-{}.sqlite",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let db = Database::open_path(&path).unwrap();
+        for sequence in [1_u64, 2] {
+            db.append_platform_event(&crate::platform::PlatformEvent {
+                event_id: format!("event-{sequence}"),
+                workspace_id: "workspace".into(),
+                task_id: "task".into(),
+                session_id: "session".into(),
+                turn_id: None,
+                runtime_id: "runtime".into(),
+                sequence,
+                timestamp: crate::acp::iso_now(),
+                kind: "session_update".into(),
+                schema_version: crate::platform::EVENT_SCHEMA_VERSION,
+                payload: json!({ "sequence": sequence }),
+                causation_id: None,
+                correlation_id: "task".into(),
+                dedupe_key: Some(format!("replay-{sequence}")),
+            })
+            .unwrap();
+        }
+        let (mut host_stream, mut client_stream) = UnixStream::pair().unwrap();
+        let mut cursor = 0;
+        replay_persisted_events(&mut host_stream, &db, &mut cursor)
+            .await
+            .unwrap();
+
+        let first: Value = host_rpc::read_frame(&mut client_stream).await.unwrap();
+        let second: Value = host_rpc::read_frame(&mut client_stream).await.unwrap();
+        let first_cursor = first.get("cursor").and_then(Value::as_i64).unwrap();
+        let second_cursor = second.get("cursor").and_then(Value::as_i64).unwrap();
+        assert!(second_cursor > first_cursor);
+        assert_eq!(cursor, second_cursor);
+        assert_eq!(
+            first.pointer("/params/eventName").and_then(Value::as_str),
+            Some("acp:session_update")
+        );
+
+        drop(client_stream);
+        drop(host_stream);
+        drop(db);
+        let _ = std::fs::remove_file(path);
+    }
+
     #[tokio::test]
     async fn idempotency_guards_are_scoped_to_the_request_key() {
         let locks = Arc::new(Mutex::new(HashMap::new()));
@@ -2893,6 +3500,53 @@ mod tests {
         assert!(claim_task_root(&roots, "task-2", root.clone()).is_err());
         drop(first);
         assert!(claim_task_root(&roots, "task-2", root).is_ok());
+    }
+
+    #[test]
+    fn task_root_lease_does_not_release_an_overlapping_turn() {
+        let roots = Arc::new(parking_lot::Mutex::new(HashMap::new()));
+        let root = PathBuf::from("/tmp/non-git-workspace");
+        let first = claim_task_root(&roots, "task-1", root.clone()).unwrap();
+        let second = claim_task_root(&roots, "task-1", root.clone()).unwrap();
+
+        drop(first);
+        assert!(
+            claim_task_root(&roots, "task-2", root.clone()).is_err(),
+            "the second active turn must keep the workspace lease alive"
+        );
+        drop(second);
+        assert!(claim_task_root(&roots, "task-2", root).is_ok());
+    }
+
+    #[tokio::test]
+    async fn task_run_guards_serialize_one_task_without_blocking_another() {
+        let locks = Arc::new(Mutex::new(HashMap::new()));
+        let first = acquire_task_run_guard(&locks, "task-1").await;
+
+        let unrelated = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            acquire_task_run_guard(&locks, "task-2"),
+        )
+        .await
+        .expect("an unrelated task must not wait for task-1");
+        drop(unrelated);
+
+        let waiting_locks = locks.clone();
+        let mut same_task_waiter = tokio::spawn(async move {
+            let _guard = acquire_task_run_guard(&waiting_locks, "task-1").await;
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut same_task_waiter)
+                .await
+                .is_err(),
+            "a follow-up prompt must wait for the active task turn"
+        );
+
+        drop(first);
+        tokio::time::timeout(std::time::Duration::from_secs(1), same_task_waiter)
+            .await
+            .expect("same-task waiter must proceed after the active turn")
+            .expect("same-task waiter task must not panic");
     }
 
     #[test]

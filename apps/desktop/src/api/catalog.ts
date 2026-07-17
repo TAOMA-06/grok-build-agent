@@ -236,6 +236,26 @@ export async function getTask(taskId: string): Promise<import("../types").TaskDe
   return invoke("get_task", { taskId });
 }
 
+export async function getExecution(
+  taskId: string,
+): Promise<import("../types").ExecutionRun | null> {
+  return invoke("get_execution", { taskId });
+}
+
+export async function listExecutionEvents(
+  executionId: string,
+): Promise<import("../types").ExecutionEvent[]> {
+  return invoke("list_execution_events", { executionId });
+}
+
+export async function resumeExecution(
+  taskId: string,
+  connectionId: string,
+  sessionId: string,
+): Promise<{ scheduled: boolean; reason?: string }> {
+  return invoke("resume_execution", { taskId, connectionId, sessionId });
+}
+
 export async function upsertTask(task: import("../types").TaskDefinition): Promise<void> {
   return invoke("upsert_task", { task });
 }

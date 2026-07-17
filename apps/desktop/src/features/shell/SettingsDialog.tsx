@@ -209,6 +209,7 @@ export function SettingsDialog({
                   <div className="gb-capability-groups">
                     {([
                       [t.skills, capabilitiesQuery.data.skills],
+                      [t.agentTypes, capabilitiesQuery.data.agents],
                       [t.plugins, capabilitiesQuery.data.plugins],
                       [t.hooks, capabilitiesQuery.data.hooks],
                       [t.mcp, capabilitiesQuery.data.mcpServers],

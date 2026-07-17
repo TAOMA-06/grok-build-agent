@@ -16,6 +16,11 @@ describe("slash command catalog", () => {
     expect(parseSlashCommand("/clear", catalog)?.descriptor.name).toBe("/new");
     expect(parseSlashCommand("/m grok-build", catalog)?.descriptor.name).toBe("/model");
     expect(parseSlashCommand("/goal ship the release", catalog)?.descriptor.available).toBe(true);
+    expect(parseSlashCommand("/agents-dashboard", catalog)?.descriptor).toMatchObject({
+      name: "/dashboard",
+      execution: "local",
+      available: true,
+    });
     expect(parseSlashCommand("/context", catalog)?.descriptor).toMatchObject({
       source: "documented",
       execution: "acp",

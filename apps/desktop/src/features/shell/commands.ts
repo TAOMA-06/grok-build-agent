@@ -56,7 +56,7 @@ export const DESKTOP_COMMANDS: CommandDescriptor[] = [
   local({ name: "/diff", aliases: [], descriptionKey: "diff", category: "tools", execution: "local" }),
   local({ name: "/export", aliases: [], descriptionKey: "export", category: "session", execution: "cli" }),
   unsupported("/import-claude"),
-  unsupported("/dashboard"),
+  local({ name: "/dashboard", aliases: ["/agents-dashboard"], descriptionKey: "dashboard", category: "session", execution: "local" }),
   local({ name: "/login", aliases: [], descriptionKey: "login", category: "account", execution: "cli" }),
   local({ name: "/logout", aliases: [], descriptionKey: "logout", category: "account", execution: "cli" }),
 ];

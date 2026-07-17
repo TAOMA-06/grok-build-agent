@@ -173,6 +173,13 @@ export interface DesktopBridge {
   gcBlobs(): Promise<{ removed: number; reclaimedBytes: number }>;
   rebuildProjections(): Promise<ProjectionRebuildReport>;
   getTask(taskId: string): Promise<TaskDefinition | null>;
+  getExecution(taskId: string): Promise<import("../types").ExecutionRun | null>;
+  listExecutionEvents(executionId: string): Promise<import("../types").ExecutionEvent[]>;
+  resumeExecution(
+    taskId: string,
+    connectionId: string,
+    sessionId: string,
+  ): Promise<{ scheduled: boolean; reason?: string }>;
   upsertTask(task: TaskDefinition): Promise<void>;
   listContextManifests(taskId: string): Promise<ContextManifest[]>;
   saveContextManifest(manifest: ContextManifest): Promise<void>;

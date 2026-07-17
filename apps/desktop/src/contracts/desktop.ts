@@ -82,13 +82,13 @@ export type ExternalCompatibilitySnapshot = {
 
 export type CapabilitySnapshot = {
   skills: CapabilityItem[];
+  agents: CapabilityItem[];
   plugins: CapabilityItem[];
   hooks: CapabilityItem[];
   mcpServers: CapabilityItem[];
   commands: CapabilityItem[];
   rules: CapabilityItem[];
   externalCompat?: ExternalCompatibilitySnapshot | null;
-  raw?: unknown;
 };
 
 export type AuthFlowState = {

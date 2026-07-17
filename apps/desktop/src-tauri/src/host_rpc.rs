@@ -121,6 +121,7 @@ pub fn is_write_method(method: &str) -> bool {
             | "session.resume"
             | "session.prompt"
             | "session.cancel"
+            | "execution.resume"
             | "session.setModel"
             | "session.setEffort"
             | "session.setMode"
