@@ -112,7 +112,7 @@ Grok Build Desktop turns the official Grok Build CLI into a dependable desktop c
 - The first task instruction automatically becomes an editable **Task focus** in the Context drawer.
 - **Economy** focus uses short task anchors and refreshes the full task contract less often; **Balanced** favors more regular full refreshes. Both show the injected token estimate and strategy in Context.
 - New installs default to **Privacy Mode** on (Grok Build `/privacy opt-out`): coding session data is not used to train or improve the product. The app syncs this preference when an agent is connected and you are signed in. See [PRIVACY.md](PRIVACY.md).
-- New installs default to **durable tasks** (Private Chat off) with **Orchestrator harness** on: task contracts, verification commands, and plan/explore/verify guidance are active by default.
+- New installs default to **durable tasks** (Private Chat off) with **Orchestrator harness** on: task contracts, verification commands, orchestration rules, and session harness skills (Grok 0.2.99+) when the package path resolves.
 - New tasks seed a structured **task contract** (goal, acceptance, inferred verify commands) and auto-run declared argv-only verifications after each turn when policy allows; shell, network, and destructive commands remain blocked pending confirmation.
 - New installs default to **Medium** reasoning effort and **Strict Privacy Shield** to reduce recurring token use and protect common prompt secrets and high-risk attachments from accidental dispatch.
 - Strict mode redacts detected API keys, access tokens, JWTs, and PEM private keys, and blocks high-risk attachment names. It is local protection only; account-level training is handled by Privacy Mode. See [PRIVACY.md](PRIVACY.md).

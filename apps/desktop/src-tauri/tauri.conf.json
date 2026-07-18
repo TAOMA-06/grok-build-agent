@@ -26,6 +26,9 @@
   "bundle": {
     "active": true,
     "externalBin": ["binaries/grok-build-agent-host"],
+    "resources": {
+      "../../../harness": "harness"
+    },
     "targets": ["dmg", "app"],
     "createUpdaterArtifacts": false,
     "category": "DeveloperTool",

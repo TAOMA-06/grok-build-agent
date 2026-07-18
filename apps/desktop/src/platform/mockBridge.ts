@@ -18,12 +18,12 @@ const projectPath = "/Users/demo/Projects/orbit";
 const now = new Date().toISOString();
 
 const health: RuntimeHealth = {
-  grok: { found: true, path: "~/.grok/bin/grok", version: "0.2.99" },
+  grok: { found: true, path: "~/.grok/bin/grok", version: "0.2.101" },
   authenticated: true,
   authMethod: "device",
   ready: true,
   checklist: [
-    { id: "cli", label: "Grok CLI", ok: true, detail: "0.2.99" },
+    { id: "cli", label: "Grok CLI", ok: true, detail: "0.2.101" },
     { id: "auth", label: "Signed in", ok: true, detail: "Device auth" },
   ],
 };

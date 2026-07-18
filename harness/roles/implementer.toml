@@ -1,0 +1,5 @@
+# Implementer role — full access; used with implementer persona overlay
+description = "Implementer that edits code and addresses review notes"
+default_capability_mode = "all"
+reasoning_effort = "high"
+default_fork_context = true

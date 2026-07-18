@@ -1,7 +1,7 @@
 {
   "name": "grok-build-desktop-harness",
-  "version": "0.1.0",
-  "description": "Orchestrator harness that maximizes Grok Build subagents, plan mode, and verification. Usable from Grok Build Desktop or the TUI via plugin install.",
+  "version": "0.2.0",
+  "description": "Orchestrator harness aligned with Grok Build 0.2.99–0.2.101: parallel subagents, plan/goal modes, persona I/O contracts, worktrees, and platform Verify gates. Usable from Grok Build Desktop or the TUI via plugin install.",
   "author": {
     "name": "Grok Build Desktop Contributors"
   }
