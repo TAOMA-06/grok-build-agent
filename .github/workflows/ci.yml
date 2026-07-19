@@ -85,6 +85,9 @@ jobs:
           path: apps/desktop
           format: spdx-json
           output-file: grok-build-desktop.sbom.spdx.json
+          # CI runs on both branches and release tags with read-only contents.
+          # The release workflow publishes its signed bundle SBOM separately.
+          upload-release-assets: false
       - uses: actions/upload-artifact@v4
         with:
           name: source-sbom
