@@ -12,7 +12,7 @@ const contentRules = [
   ["token-shaped credential", /(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|gho_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk-[A-Za-z0-9]{20,}|xai-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,})/],
   ["private key", /-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----/],
 ];
-const sensitiveFile = /(^|\/)(\.env(?:\..+)?|[^/]+\.(?:p12|pfx|pem|key|cer|mobileprovision)|notarization-credentials\.json|release\.env)$/i;
+const sensitiveFile = /(^|\/)(\.env(?:\..+)?|[^/]+\.(?:p12|pfx|p8|pem|key|cer|mobileprovision)|notarization-credentials\.json|release\.env)$/i;
 const findings = [];
 
 for (const relativePath of trackedFiles) {

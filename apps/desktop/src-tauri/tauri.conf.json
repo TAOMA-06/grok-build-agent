@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Grok Build Desktop",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "identifier": "com.grokbuilddesktop.community",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -58,7 +58,7 @@
           "height": 400
         }
       },
-      "signingIdentity": "-",
+      "signingIdentity": null,
       "entitlements": "entitlements.generated.plist",
       "exceptionDomain": null,
       "frameworks": [],

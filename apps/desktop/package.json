@@ -1,7 +1,7 @@
 {
   "name": "grok-build-desktop",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,8 +18,9 @@
     "release:check": "node scripts/release-safety-check.mjs",
     "tauri": "tauri",
     "app:dev": "GROK_BUILD_IN_PROCESS_HOST=1 tauri dev",
-    "app:build": "tauri build",
-    "app:build:universal": "tauri build --target universal-apple-darwin",
+    "app:build": "APPLE_SIGNING_IDENTITY=- tauri build",
+    "app:build:release": "node scripts/macos-release-preflight.mjs && tauri build",
+    "app:build:universal": "node scripts/macos-release-preflight.mjs && tauri build --target universal-apple-darwin",
     "app:open": "open 'src-tauri/target/release/bundle/macos/Grok Build Desktop.app'"
   },
   "dependencies": {
@@ -38,6 +39,7 @@
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "lucide-react": "^1.24.0",
+    "motion": "^12.42.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",

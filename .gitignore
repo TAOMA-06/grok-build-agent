@@ -30,6 +30,7 @@ Thumbs.db
 # Signing, notarization and private release material
 *.p12
 *.pfx
+*.p8
 *.mobileprovision
 *.pem
 *.key

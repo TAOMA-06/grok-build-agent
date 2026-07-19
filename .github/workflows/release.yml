@@ -21,31 +21,54 @@ jobs:
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - name: Refuse an unsigned public release
+      - name: Refuse an incomplete public release
         shell: bash
         run: |
           required=(
             APPLE_CERTIFICATE
             APPLE_CERTIFICATE_PASSWORD
-            APPLE_SIGNING_IDENTITY
-            APPLE_ID
-            APPLE_PASSWORD
-            APPLE_TEAM_ID
           )
           missing=()
           for name in "${required[@]}"; do
-            if [[ -z "${!name}" ]]; then
+            if [[ -z "$(printenv "$name")" ]]; then
               missing+=("$name")
             fi
           done
           if (( ${#missing[@]} > 0 )); then
-            echo "Refusing to publish an unsigned or unnotarized build."
+            echo "Refusing to publish without a Developer ID certificate."
             echo "Missing repository secrets: ${missing[*]}"
+            exit 1
+          fi
+
+          count_present() {
+            local count=0
+            for name in "$@"; do
+              if [[ -n "$(printenv "$name")" ]]; then
+                ((count += 1))
+              fi
+            done
+            printf '%s' "$count"
+          }
+
+          api_count="$(count_present APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8)"
+          apple_id_count="$(count_present APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID)"
+          if (( api_count > 0 && api_count < 3 )); then
+            echo "App Store Connect notarization requires APPLE_API_ISSUER, APPLE_API_KEY and APPLE_API_KEY_P8."
+            exit 1
+          fi
+          if (( apple_id_count > 0 && apple_id_count < 3 )); then
+            echo "Apple ID notarization requires APPLE_ID, APPLE_PASSWORD and APPLE_TEAM_ID."
+            exit 1
+          fi
+          if (( api_count == 0 && apple_id_count == 0 )); then
+            echo "Refusing to publish an unnotarized build. Configure App Store Connect API credentials or Apple ID credentials."
             exit 1
           fi
 
@@ -56,7 +79,9 @@ jobs:
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -85,6 +110,37 @@ jobs:
         working-directory: apps/desktop
         run: npm ci
 
+      - name: Import Developer ID certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          printf '%s' "$APPLE_CERTIFICATE" | openssl base64 -d -A -out "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F'"' '/Developer ID Application:/ { print $2; exit }')"
+          test -n "$IDENTITY"
+          printf 'APPLE_SIGNING_IDENTITY=%s\n' "$IDENTITY" >> "$GITHUB_ENV"
+          rm -f "$CERTIFICATE_PATH"
+
+      - name: Prepare App Store Connect notarization credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$(printenv APPLE_API_ISSUER)" ]]; then
+            API_KEY_PATH="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+            printf '%s' "$APPLE_API_KEY_P8" | openssl base64 -d -A -out "$API_KEY_PATH"
+            chmod 600 "$API_KEY_PATH"
+            printf 'APPLE_API_KEY_PATH=%s\n' "$API_KEY_PATH" >> "$GITHUB_ENV"
+          fi
+
       - name: Refuse source containing credentials or personal data
         working-directory: apps/desktop
         run: npm run release:check
@@ -102,14 +158,23 @@ jobs:
           DMG_PATH=$(find "$BUNDLE/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)
           test -n "$APP_PATH"
           test -n "$DMG_PATH"
+          MAIN_PATH="$APP_PATH/Contents/MacOS/grok-build-desktop"
           HOST_PATH="$APP_PATH/Contents/MacOS/grok-build-agent-host"
+          test -x "$MAIN_PATH"
           test -x "$HOST_PATH"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -q 'Authority=Developer ID Application'
-          lipo -archs "$HOST_PATH" | grep -q arm64
-          lipo -archs "$HOST_PATH" | grep -q x86_64
-          codesign -d --entitlements :- "$APP_PATH/Contents/MacOS/grok-build-desktop" 2>&1 | grep -q "$APPLE_TEAM_ID.com.grokbuilddesktop.community.shared"
-          codesign -d --entitlements :- "$HOST_PATH" 2>&1 | grep -q "$APPLE_TEAM_ID.com.grokbuilddesktop.community.shared"
+          for binary in "$MAIN_PATH" "$HOST_PATH"; do
+            codesign --verify --strict --verbose=2 "$binary"
+            codesign -dv --verbose=4 "$binary" 2>&1 | grep -q 'Authority=Developer ID Application:'
+            codesign -dv --verbose=4 "$binary" 2>&1 | grep -q 'runtime'
+            if codesign -d --entitlements :- "$binary" 2>&1 | grep -q 'com.apple.security.get-task-allow'; then
+              echo "Distribution binary unexpectedly contains get-task-allow: $binary"
+              exit 1
+            fi
+            lipo -archs "$binary" | grep -q arm64
+            lipo -archs "$binary" | grep -q x86_64
+          done
+          hdiutil verify "$DMG_PATH"
           xcrun stapler validate "$APP_PATH"
           xcrun stapler validate "$DMG_PATH"
           spctl --assess --type execute --verbose=4 "$APP_PATH"
