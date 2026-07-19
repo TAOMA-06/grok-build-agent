@@ -282,13 +282,10 @@ mod harness_tests {
 
         let resolved = resolve_harness_plugin_dir_from(
             Some(root.to_str().unwrap()),
-            &[other.clone()],
+            std::slice::from_ref(&other),
         )
         .expect("env harness dir");
-        assert_eq!(
-            std::fs::canonicalize(&root).unwrap(),
-            resolved
-        );
+        assert_eq!(std::fs::canonicalize(&root).unwrap(), resolved);
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&other);
@@ -323,7 +320,7 @@ mod harness_tests {
         std::fs::create_dir_all(&incomplete).unwrap();
         std::fs::write(incomplete.join("plugin.json"), r#"{"name":"t"}"#).unwrap();
         // Missing AGENTS.md and skills/
-        assert!(resolve_harness_plugin_dir_from(None, &[incomplete.clone()]).is_none());
+        assert!(resolve_harness_plugin_dir_from(None, std::slice::from_ref(&incomplete)).is_none());
         let _ = std::fs::remove_dir_all(&incomplete);
     }
 
@@ -336,7 +333,7 @@ mod harness_tests {
             repo.display()
         );
         assert!(
-            resolve_harness_plugin_dir_from(None, &[repo.clone()]).is_some(),
+            resolve_harness_plugin_dir_from(None, std::slice::from_ref(&repo)).is_some(),
             "repo harness must resolve"
         );
     }
