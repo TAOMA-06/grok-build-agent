@@ -4,7 +4,7 @@
 > 面向官方 Grok Build CLI 的本地优先、开源 macOS 桌面控制台。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform: macOS 12+](https://img.shields.io/badge/platform-macOS%2012%2B%20Apple%20Silicon-black)](#download--安装)
+[![Platform: macOS 12+](https://img.shields.io/badge/platform-macOS%2012%2B%20universal-black)](#download--安装)
 [![GitHub Release](https://img.shields.io/github/v/release/TAOMA-06/grok-build-agent?include_prereleases)](https://github.com/TAOMA-06/grok-build-agent/releases)
 
 English · [中文](#中文)
@@ -23,7 +23,7 @@ Grok Build Desktop now tracks the latest Grok Build CLI workflow with:
 - `PageUp` / `PageDown` transcript scrolling while the composer is focused
 - CLI-aware `/vim-mode` discovery in the command palette when that command is advertised
 - Queued follow-up prompts during a running Grok turn, with an explicit queued state and a separate Stop control
-- A read-only Cursor, Claude Code, and Codex compatibility matrix sourced from `grok inspect --json`; it never imports or transmits third-party sessions
+- A read-only external-tool compatibility matrix sourced from `grok inspect --json`; it never imports or transmits third-party sessions
 
 The official Grok Build CLI remains the runtime and authentication owner; this project does not bundle, replace, or emulate it.
 
@@ -35,7 +35,7 @@ Grok Build Desktop 已适配最新 Grok Build CLI 工作流，新增：
 - 输入框聚焦时，可用 `PageUp` / `PageDown` 滚动当前对话
 - 当 CLI 声明支持时，命令面板会提供 `/vim-mode` 快捷入口
 - Grok 运行期间可排队后续消息，时间线会明确显示排队状态，并保留独立的停止控制
-- 通过 `grok inspect --json` 只读显示 Cursor、Claude Code 与 Codex 的兼容性矩阵；不会导入或传输第三方会话
+- 通过 `grok inspect --json` 只读显示外部工具兼容性矩阵；不会导入或传输第三方会话
 
 官方 Grok Build CLI 仍负责运行与登录；本项目不会打包、替代或模拟该 CLI。
 
@@ -44,49 +44,55 @@ Grok Build Desktop 已适配最新 Grok Build CLI 工作流，新增：
 ## Screenshots · 截图
 
 <p align="center">
-  <img src="docs/screenshots/01-home.png" alt="Mission Control new task workspace" width="900" />
+  <img src="docs/screenshots/01-home.png" alt="New task workspace" width="900" />
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/02-settings.png" alt="Mission Control settings" width="440" />
+  <img src="docs/screenshots/02-settings.png" alt="Desktop settings" width="440" />
   &nbsp;
-  <img src="docs/screenshots/03-commands.png" alt="Mission Control command palette" width="440" />
+  <img src="docs/screenshots/03-commands.png" alt="Command palette" width="440" />
 </p>
 
 | | |
 |---|---|
-| **Workspace** · 工作区 | Deep-space mission workspace with project navigation, a multiline composer, and Agent / Plan / Goal controls. |
-| **Settings** · 设置 | Alloy configuration deck for theme, language, agent, permissions, extensions, and diagnostics. |
-| **Command palette** · 命令面板 | Carbon avionics layer for keyboard-first `/plan`, `/effort`, `/diff`, and CLI-aware `/vim-mode`. |
+| **Workspace** · 工作区 | A focused new-task canvas with quick project review, a multiline composer, and Agent / Plan / Goal controls. |
+| **Settings** · 设置 | Clear controls for theme, language, privacy, agent behavior, permissions, extensions, and diagnostics. |
+| **Command palette** · 命令面板 | Keyboard-first access to `/plan`, `/effort`, `/diff`, and other desktop controls. |
 
 ---
 
 ## Download · 安装
 
-### Apple Silicon (M1 / M2 / M3 / M4 /M5)
+The latest release is a **Developer ID–signed, Apple-notarized universal DMG** for both Apple Silicon and Intel Macs.
 
-Download the latest **macOS arm64** build from Releases:
+Download it from Releases:
 
 **→ [GitHub Releases](https://github.com/TAOMA-06/grok-build-agent/releases/latest)**
 
 Artifact name:
 
-- `Grok-Build-Desktop-<version>-macos-arm64.zip`
+- `Grok.Build.Desktop_<version>_universal.dmg`
 
 Install:
 
-1. Unzip the archive.
+1. Open the downloaded DMG.
 2. Drag **Grok Build Desktop.app** into `/Applications`.
-3. First launch: right-click the app → **Open** (ad-hoc signed; Gatekeeper may warn until you approve once).
+3. Open the app normally. The release is signed and notarized for macOS.
 4. Install / sign in to the official **Grok CLI** if prompted (`grok login --oauth` or device auth).
 
 Requirements:
 
 - macOS 12+
-- Apple Silicon Mac
+- Apple Silicon or Intel Mac
 - Official [Grok Build CLI](https://docs.x.ai/build/overview) (not bundled)
 
-> Universal / Intel builds and Apple notarization need signing secrets in CI. This release ships a local **arm64** package for Apple Silicon first.
+## Contact & support · 联系与赞助
+
+Grok Build Desktop is independently maintained. Feedback, collaboration, and sponsorship enquiries are welcome.
+
+**Email:** [taomahj834225@outlook.com](mailto:taomahj834225@outlook.com)
+
+本项目由独立开发者维护，欢迎反馈、合作与赞助洽谈。
 
 ---
 
@@ -142,8 +148,6 @@ cd src-tauri && cargo test --workspace
 
 More: [architecture](docs/architecture.md) · [release](docs/release.md) · [ACP mapping](docs/acp-mapping.md) · [SECURITY](SECURITY.md) · [THREAT_MODEL](THREAT_MODEL.md)
 
-**Contact:** [taomahj834225@outlook.com](mailto:taomahj834225@outlook.com)
-
 ---
 
 ## 中文
@@ -181,11 +185,11 @@ Grok Build Desktop 把官方 Grok Build CLI 变成可用的桌面编程工作区
 4. 在任务抽屉中查看活动与文件变更。
 5. 确认无误后使用 **Apply to project**（先 dry-run，预检通过才写入主仓库）。
 
-### 下载安装（Apple 芯片）
+### 下载安装
 
-1. 打开 [Releases](https://github.com/TAOMA-06/grok-build-agent/releases/latest)，下载 `Grok-Build-Desktop-*-macos-arm64.zip`。
-2. 解压后将 **Grok Build Desktop.app** 拖入「应用程序」。
-3. 首次打开：右键 → **打开**（当前为 ad-hoc 签名，需手动允许一次）。
+1. 打开 [Releases](https://github.com/TAOMA-06/grok-build-agent/releases/latest)，下载通用 DMG：`Grok.Build.Desktop_<version>_universal.dmg`。
+2. 打开 DMG 后，将 **Grok Build Desktop.app** 拖入「应用程序」。
+3. 该版本已完成 Developer ID 签名与 Apple 公证，可正常打开。
 4. 如提示缺少 CLI，按引导安装官方 Grok CLI 并完成登录。
 
 ### 从源码开发
@@ -212,7 +216,6 @@ LICENSE             MIT
 ## Contributors · 贡献者
 
 - **[TAOMA-06](https://github.com/TAOMA-06)** (maintainer · 维护者) — [taomahj834225@outlook.com](mailto:taomahj834225@outlook.com)
-- **[Cursor](https://cursor.com)** (AI-assisted development · AI 辅助开发)
 
 ## License · 许可
 

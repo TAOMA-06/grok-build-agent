@@ -51,17 +51,8 @@ apps/desktop/src-tauri/WixTools/
 .cache/
 .codegraph/
 
-# Local AI / vibe-coding scratch (do not re-commit)
-.cursor/
-.cursorrules
-.claude/
-.codex/
-.agents/
-.gemini/
+# Local Grok Build state
 .grok/
-/AGENTS.md
-/CLAUDE.md
-/GEMINI.md
 /PLAN.md
 /TODO.md
 /NOTES.md
