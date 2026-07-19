@@ -4,7 +4,9 @@ use super::connection::{
     connection_key_from_config, iso_now, normalize_workspace, spawn_connection, ConnectionInner,
 };
 use super::events::{emit_json, SharedEventBus, TauriEventBus};
-use super::{default_harness_rules, AcpError, AgentStatus, StartConfig};
+use super::{
+    default_harness_rules, resolve_harness_plugin_dir, AcpError, AgentStatus, StartConfig,
+};
 use crate::contracts::{ConnectionState, RuntimeSnapshot};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
@@ -402,7 +404,8 @@ impl RuntimePool {
             .map(|caps| caps.load_session)
             .unwrap_or(false);
         if can_load {
-            self.load_session_on(conn, session_id).await
+            self.load_session_on(conn, session_id, config.use_harness)
+                .await
         } else {
             self.open_session(conn, config).await
         }
@@ -481,6 +484,13 @@ impl RuntimePool {
                 meta["agentProfile"] = Value::String(profile);
             }
         }
+        // Session-scoped Grok plugin: skills/agents from the desktop harness package.
+        // Soft-fail when the path is missing (rules-only injection still applies).
+        if use_harness {
+            if let Some(dir) = resolve_harness_plugin_dir() {
+                meta["pluginDirs"] = json!([dir.to_string_lossy()]);
+            }
+        }
         if meta.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
             params["_meta"] = meta;
         }
@@ -511,6 +521,7 @@ impl RuntimePool {
         &self,
         conn: &Arc<ConnectionInner>,
         session_id: &str,
+        use_harness: bool,
     ) -> Result<(), AcpError> {
         let supports_load = conn
             .capabilities
@@ -527,16 +538,19 @@ impl RuntimePool {
         if session_id.is_empty() {
             return Err(AcpError::Message("session id is empty".into()));
         }
+        let mut params = json!({
+            "sessionId": session_id,
+            "cwd": conn.cwd,
+            "mcpServers": [],
+        });
+        // Re-attach session plugin dirs on resume when the harness is enabled.
+        if use_harness {
+            if let Some(dir) = resolve_harness_plugin_dir() {
+                params["_meta"] = json!({ "pluginDirs": [dir.to_string_lossy()] });
+            }
+        }
         let response = conn
-            .request(
-                "session/load",
-                json!({
-                    "sessionId": session_id,
-                    "cwd": conn.cwd,
-                    "mcpServers": [],
-                }),
-                Duration::from_secs(60),
-            )
+            .request("session/load", params, Duration::from_secs(60))
             .await
             .map_err(|e| AcpError::Message(format!("session/load failed: {e}")))?;
         update_session_capabilities(conn, session_id, &response);

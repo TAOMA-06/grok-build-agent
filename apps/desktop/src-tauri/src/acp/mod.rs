@@ -153,18 +153,193 @@ pub fn default_harness_rules() -> String {
 ## Verify skill (desktop digest)
 
 After substantial edits:
-1. Detect tooling from manifests (package.json, Cargo.toml, pyproject, go.mod, xcodeproj).
-2. Prefer project scripts (`npm test`, `npm run check`, `cargo test`, etc.).
+1. Prefer platform task-contract `Verify:` lines when present; else detect tooling from manifests (package.json, Cargo.toml, pyproject, go.mod, xcodeproj).
+2. Prefer argv-only project scripts (`npm test`, `npm run check`, `cargo test`, etc.) over shell/network wrappers.
 3. Run the tightest useful checks; if they fail, fix root cause and re-run.
-4. Report commands run, pass/fail, and remaining risks.
-5. Align with platform `Verify:` lines in the task contract when present.
+4. Report commands run, pass/fail evidence, and remaining risks.
+5. Do not claim done while declared platform verifications still fail.
 "#;
     format!("{agents}\n{verify}")
+}
+
+/// True when `path` looks like the desktop orchestrator harness plugin package.
+pub fn is_harness_plugin_dir(path: &std::path::Path) -> bool {
+    path.is_dir()
+        && path.join("plugin.json").is_file()
+        && path.join("AGENTS.md").is_file()
+        && path.join("skills").is_dir()
+}
+
+/// Resolve candidates in order; first valid harness directory wins.
+/// Used by production resolution and unit tests.
+pub fn resolve_harness_plugin_dir_from(
+    env_dir: Option<&str>,
+    candidates: &[std::path::PathBuf],
+) -> Option<std::path::PathBuf> {
+    if let Some(raw) = env_dir.map(str::trim).filter(|value| !value.is_empty()) {
+        let expanded = connection::shellexpand_home(raw);
+        let path = std::path::PathBuf::from(expanded);
+        if is_harness_plugin_dir(&path) {
+            return std::fs::canonicalize(&path).ok().or(Some(path));
+        }
+    }
+    for candidate in candidates {
+        if is_harness_plugin_dir(candidate) {
+            return std::fs::canonicalize(candidate)
+                .ok()
+                .or_else(|| Some(candidate.clone()));
+        }
+    }
+    None
+}
+
+/// Locate the on-disk harness plugin for session `_meta.pluginDirs`.
+///
+/// Order:
+/// 1. `GROK_BUILD_HARNESS_DIR`
+/// 2. Paths relative to the running executable (release app / agent-host layout)
+/// 3. Repo path from `CARGO_MANIFEST_DIR` (dev builds)
+pub fn resolve_harness_plugin_dir() -> Option<std::path::PathBuf> {
+    let env_dir = std::env::var("GROK_BUILD_HARNESS_DIR").ok();
+    let mut candidates = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            // Next to the binary (dev, or MacOS/ alongside externalBin).
+            candidates.push(parent.join("harness"));
+            // macOS .app: Contents/MacOS → Contents/Resources/harness
+            candidates.push(parent.join("../Resources/harness"));
+            // Some Tauri layouts nest under Resources/resources
+            candidates.push(parent.join("../Resources/resources/harness"));
+            // Agent Host LaunchAgent may live under Application Support with a sibling copy
+            candidates.push(parent.join("resources/harness"));
+        }
+    }
+    if let Some(manifest) = option_env!("CARGO_MANIFEST_DIR") {
+        candidates.push(std::path::PathBuf::from(manifest).join("../../../harness"));
+    }
+    resolve_harness_plugin_dir_from(env_dir.as_deref(), &candidates)
 }
 
 #[cfg(test)]
 pub fn handlers_is_permission_for_test(method: &str) -> bool {
     handlers::is_permission_method(method)
+}
+
+#[cfg(test)]
+mod harness_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn default_harness_rules_include_platform_and_scratch_guidance() {
+        let rules = default_harness_rules();
+        assert!(!rules.trim().is_empty());
+        assert!(
+            rules.contains("platform_task_contract"),
+            "rules must honor platform task contracts"
+        );
+        assert!(
+            rules.contains("Verify:"),
+            "rules must mention platform Verify lines"
+        );
+        assert!(
+            rules.contains(".grok/scratch/"),
+            "rules must keep handoff files workspace-local"
+        );
+        assert!(
+            rules.contains("wait_commands_or_subagents")
+                || rules.contains("get_command_or_subagent_output"),
+            "rules must name modern wait/output helpers"
+        );
+        assert!(
+            rules.contains("0.2.103"),
+            "rules should advertise current CLI alignment"
+        );
+        assert!(
+            rules.contains("Verify skill (desktop digest)"),
+            "desktop verify digest must be appended"
+        );
+        assert!(
+            !rules.contains("$TMPDIR/grok-"),
+            "rules must not recommend outside-workspace TMPDIR handoffs"
+        );
+    }
+
+    #[test]
+    fn resolve_harness_prefers_env_override() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("gb-harness-env-{nonce}"));
+        let other = std::env::temp_dir().join(format!("gb-harness-other-{nonce}"));
+        std::fs::create_dir_all(root.join("skills")).unwrap();
+        std::fs::write(root.join("plugin.json"), r#"{"name":"t"}"#).unwrap();
+        std::fs::write(root.join("AGENTS.md"), "# t\n").unwrap();
+        std::fs::create_dir_all(other.join("skills")).unwrap();
+        std::fs::write(other.join("plugin.json"), r#"{"name":"o"}"#).unwrap();
+        std::fs::write(other.join("AGENTS.md"), "# o\n").unwrap();
+
+        let resolved = resolve_harness_plugin_dir_from(
+            Some(root.to_str().unwrap()),
+            &[other.clone()],
+        )
+        .expect("env harness dir");
+        assert_eq!(
+            std::fs::canonicalize(&root).unwrap(),
+            resolved
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&other);
+    }
+
+    #[test]
+    fn resolve_harness_uses_first_valid_candidate() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let missing = std::env::temp_dir().join(format!("gb-harness-missing-{nonce}"));
+        let valid = std::env::temp_dir().join(format!("gb-harness-valid-{nonce}"));
+        std::fs::create_dir_all(valid.join("skills")).unwrap();
+        std::fs::write(valid.join("plugin.json"), r#"{"name":"t"}"#).unwrap();
+        std::fs::write(valid.join("AGENTS.md"), "# t\n").unwrap();
+
+        let resolved =
+            resolve_harness_plugin_dir_from(None, &[missing, valid.clone()]).expect("candidate");
+        assert_eq!(std::fs::canonicalize(&valid).unwrap(), resolved);
+
+        let _ = std::fs::remove_dir_all(&valid);
+    }
+
+    #[test]
+    fn resolve_harness_rejects_incomplete_package() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let incomplete = std::env::temp_dir().join(format!("gb-harness-incomplete-{nonce}"));
+        std::fs::create_dir_all(&incomplete).unwrap();
+        std::fs::write(incomplete.join("plugin.json"), r#"{"name":"t"}"#).unwrap();
+        // Missing AGENTS.md and skills/
+        assert!(resolve_harness_plugin_dir_from(None, &[incomplete.clone()]).is_none());
+        let _ = std::fs::remove_dir_all(&incomplete);
+    }
+
+    #[test]
+    fn repo_harness_package_is_valid() {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../harness");
+        assert!(
+            is_harness_plugin_dir(&repo),
+            "repo harness/ must remain a valid plugin package at {}",
+            repo.display()
+        );
+        assert!(
+            resolve_harness_plugin_dir_from(None, &[repo.clone()]).is_some(),
+            "repo harness must resolve"
+        );
+    }
 }
 
 #[cfg(test)]

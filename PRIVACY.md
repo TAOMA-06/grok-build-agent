@@ -13,7 +13,7 @@ New installations enable three complementary privacy controls by default:
 | **Privacy Mode** | Grok / xAI account | **On** | Coding session data is not used to train or improve the product (`/privacy opt-out` / `codingDataRetentionOptOut`) |
 | **Private Chat** | This desktop app | **Off** (durable coding) | When on, task history, drafts, contracts, and verification stay out of local durable storage |
 | **Privacy Shield (Strict)** | Local outbound prompts | **On** | Redact common secrets and block high-risk attachment names before send |
-| **Orchestrator harness** | Session rules | **On** | Injects plan/explore/verify guidance for first-class agent behavior |
+| **Orchestrator harness** | Session rules + plugin | **On** | Injects plan/explore/handoff/verify rules and loads harness skills/agents via session `pluginDirs` when the package path resolves |
 
 ### Grok Privacy Mode (account-level)
 

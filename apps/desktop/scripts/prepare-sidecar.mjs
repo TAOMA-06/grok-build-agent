@@ -1,16 +1,32 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriDir = resolve(desktopDir, "src-tauri");
 const binaryDir = resolve(tauriDir, "binaries");
+const repoHarness = resolve(desktopDir, "../../harness");
 const target = process.env.TAURI_ENV_TARGET_TRIPLE || execFileSync("rustc", ["--print", "host-tuple"], { encoding: "utf8" }).trim();
 const profile = process.env.TAURI_ENV_DEBUG === "true" ? "debug" : "release";
 const cargoArgs = profile === "release" ? ["build", "--release"] : ["build"];
 
 mkdirSync(binaryDir, { recursive: true });
+
+// Stage harness plugin next to the Agent Host binary for session pluginDirs resolution.
+if (existsSync(resolve(repoHarness, "plugin.json"))) {
+  const stagedHarness = resolve(binaryDir, "harness");
+  rmSync(stagedHarness, { recursive: true, force: true });
+  cpSync(repoHarness, stagedHarness, { recursive: true });
+}
 
 function buildFor(targetTriple) {
   execFileSync("cargo", [...cargoArgs, "--bin", "grok-build-agent-host", "--target", targetTriple], {

@@ -11,10 +11,10 @@ when-to-use: commit, ship, open PR, create pull request
 ## Steps
 
 1. Inspect status and diffs (`git status`, `git diff`, `git log -5 --oneline`).
-2. Summarize what changed and why.
-3. Draft a conventional commit message.
-4. Stage relevant files (never secrets). Commit.
-5. If asked for a PR: push (with user confirmation if needed) and open with `gh pr create` when available.
+2. Summarize what changed and why (user-facing, not file laundry lists).
+3. Draft a conventional commit message (complete sentences when multi-line body is useful).
+4. Stage relevant files (never secrets, never `.env` / credentials). Commit.
+5. If asked for a PR: confirm before push when shared remotes are involved; open with `gh pr create` when available.
 6. Report commit hash and PR URL.
 
 ## Rules
@@ -23,3 +23,5 @@ when-to-use: commit, ship, open PR, create pull request
 - Never force-push to main/master.
 - Never skip hooks unless the user explicitly requests it.
 - Prefer sequential git commands on the same repo (avoid index.lock races).
+- Prefer HEREDOC for commit messages so formatting is preserved.
+- Confirm before actions visible to others (push, PR create/comment) unless the user already authorized that exact action.
