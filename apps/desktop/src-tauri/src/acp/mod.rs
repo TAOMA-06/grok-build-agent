@@ -247,11 +247,20 @@ mod harness_tests {
             "rules must keep handoff files workspace-local"
         );
         assert!(
+            rules.contains("wait_commands_or_subagents")
+                || rules.contains("get_command_or_subagent_output"),
+            "rules must name modern wait/output helpers"
+        );
+        assert!(
+            rules.contains("0.2.103"),
+            "rules should advertise current CLI alignment"
+        );
+        assert!(
             rules.contains("Verify skill (desktop digest)"),
             "desktop verify digest must be appended"
         );
         assert!(
-            !rules.contains("$TMPDIR"),
+            !rules.contains("$TMPDIR/grok-"),
             "rules must not recommend outside-workspace TMPDIR handoffs"
         );
     }

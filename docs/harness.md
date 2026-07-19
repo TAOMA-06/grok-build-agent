@@ -1,6 +1,6 @@
 # Power harness
 
-The harness makes Grok Build **use** its strengths instead of only exposing them in the UI. It tracks Grok CLI **0.2.99–0.2.101** and Desktop platform contracts (task focus, durable verification, privacy).
+The harness makes Grok Build **use** its strengths instead of only exposing them in the UI. It tracks Grok CLI **0.2.103** (and 0.2.99+) and Desktop platform contracts (task focus, durable verification, privacy).
 
 ## What it contains
 
@@ -70,9 +70,12 @@ Grok’s bundled `/design` and `/execute-plan` remain the heavy DAG pipelines; t
 |---------|------------------|
 | Subagent personas + I/O contracts | `personas/*.toml` with inputs/outputs and capability defaults |
 | Roles | `roles/*.toml` for explore/plan/implementer/reviewer |
-| Plan mode plan file | Decision table + orchestrator plan sections |
+| Optional per-worker `model` (0.2.98+) | Documented in AGENTS / orchestrate; omit to inherit parent |
+| `wait_commands_or_subagents` | Named in AGENTS + orchestrate skill |
+| Plan mode plan file | Session plan / `.grok/plan.md` conventions |
 | Goal mode / durable tasks | Honor platform contract Goal/Acceptance |
 | Background + monitor | AGENTS background section; orchestrate waits |
 | Prompt cache efficiency | Short stable `AGENTS.md` + digest-only verify injection |
 | Privacy / Private Chat | No exfil guidance; argv-only verify preference |
 | Auto verification gate | Definition of done requires real `Verify:` evidence |
+| Grok 4.5 in model catalog | Surface via CLI catalog; Desktop default remains `grok-build` unless user/settings choose otherwise |

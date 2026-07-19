@@ -11,8 +11,9 @@ when-to-use: review loop, implement and review, quality pass, implementer review
 
 You coordinate only. Implementation and review happen in subagents.
 
-**Load path note:** Desktop “Orchestrator harness” injects `AGENTS.md` only. This skill
-runs when Grok discovers it via plugin install or `.grok/skills/review-loop/`.
+**Load path note:** Desktop “Orchestrator harness” injects `AGENTS.md` (+ verify digest)
+always, and loads this skill when the harness package resolves via session `pluginDirs`
+or when installed under `.grok/skills/review-loop/`.
 
 ## Setup
 
