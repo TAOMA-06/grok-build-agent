@@ -12,7 +12,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionRuntime } from "../../store";
 import type { WorkspaceRecord } from "../../types";
 import { t } from "../../i18n";
-import missionRocketUrl from "../../assets/mission-rocket.jpg";
+import { RocketMark } from "./RocketLineArt";
 
 function requiresAttention(session: SessionRuntime): boolean {
   return session.summary.runState === "awaiting_permission" || session.summary.attentionRequired === true;
@@ -77,7 +77,7 @@ export function ProjectSidebar({
     <aside className="gb-sidebar">
       <div className="gb-window-drag" data-tauri-drag-region>
         <div className="gb-brand-mark">
-          <img src={missionRocketUrl} alt="" />
+          <RocketMark />
         </div>
         <span className="gb-brand-name">
           <strong>grok build desktop</strong>

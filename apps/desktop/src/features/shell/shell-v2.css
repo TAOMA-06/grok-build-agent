@@ -1,0 +1,1121 @@
+/* Swiss Modern Engineering — final visual layer.
+   Clean, restrained, grid-aware. No sci-fi chrome. */
+
+/* ── Kill Mission Control atmosphere ─────────────────────────────────────── */
+
+.gb-app {
+  background: var(--gb-bg) !important;
+  grid-template-columns: 248px minmax(0, 1fr);
+}
+
+.gb-app::before,
+.gb-app::after,
+.gb-thread-view::before,
+.gb-thread-view::after {
+  display: none !important;
+  content: none !important;
+  background: none !important;
+  animation: none !important;
+}
+
+.gb-launch-trajectory,
+.gb-launch-scan,
+.gb-launch-coordinate,
+.gb-launch-status {
+  display: none !important;
+}
+
+/* ── Transitions ─────────────────────────────────────────────────────────── */
+
+.gb-app button,
+.gb-app .gb-project,
+.gb-app .gb-thread-row,
+.gb-app .gb-footer-action,
+.gb-app .gb-new-thread,
+.gb-app .gb-header-button,
+.gb-app .gb-icon-button,
+.gb-app .gb-composer-select,
+.gb-app .gb-send,
+.gb-settings-dialog button,
+.gb-command-actions button,
+.gb-suggestion-row button {
+  transition:
+    background var(--gb-ease),
+    border-color var(--gb-ease),
+    color var(--gb-ease),
+    box-shadow var(--gb-ease),
+    opacity var(--gb-ease);
+}
+
+.gb-app :focus-visible {
+  outline: 2px solid var(--gb-accent);
+  outline-offset: 2px;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+
+.gb-sidebar {
+  color: var(--gb-text);
+  border-right: 1px solid var(--gb-border);
+  background: var(--gb-sidebar);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.gb-window-drag {
+  height: 56px;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--gb-border);
+}
+
+.gb-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  border: 1px solid var(--gb-border-strong);
+  border-radius: var(--gb-radius-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--gb-text);
+}
+
+.gb-brand-mark img {
+  display: none;
+}
+
+.gb-rocket-mark {
+  width: 28px;
+  height: 28px;
+  color: var(--gb-text);
+}
+
+.gb-rocket-mark-frame {
+  stroke: var(--gb-border-strong);
+  fill: transparent;
+}
+
+.gb-brand-name {
+  display: grid;
+  gap: 2px;
+  line-height: 1.15;
+}
+
+.gb-brand-name strong {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.gb-brand-name small {
+  color: var(--gb-faint);
+  font: 9px/1.2 var(--gb-mono);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.gb-sidebar-actions {
+  gap: 8px;
+  padding: 12px 10px;
+}
+
+.gb-new-thread {
+  height: 34px;
+  border: 1px solid var(--gb-border-strong);
+  border-radius: var(--gb-radius-sm);
+  color: var(--gb-text);
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 550;
+  box-shadow: none;
+}
+
+.gb-new-thread:hover {
+  border-color: var(--gb-accent);
+  background: var(--gb-hover);
+  box-shadow: none;
+}
+
+.gb-dashboard-link {
+  min-height: 30px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-sm);
+  color: var(--gb-muted);
+  background: transparent;
+  font: 500 10px var(--gb-font);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.gb-dashboard-link:hover {
+  color: var(--gb-text);
+  border-color: var(--gb-border-strong);
+  background: var(--gb-hover);
+}
+
+.gb-search {
+  height: 32px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-sm);
+  background: var(--gb-raised);
+}
+
+.gb-search:focus-within {
+  border-color: var(--gb-accent);
+  background: var(--gb-surface);
+  box-shadow: none;
+}
+
+.gb-section-toggle {
+  color: var(--gb-faint);
+  font: 600 10px var(--gb-font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gb-project,
+.gb-thread-row,
+.gb-footer-action {
+  border-radius: var(--gb-radius-sm);
+}
+
+.gb-project {
+  height: 32px;
+  font-size: 12.5px;
+}
+
+.gb-project:hover {
+  color: var(--gb-text);
+  background: var(--gb-hover);
+}
+
+.gb-project.active {
+  color: var(--gb-text);
+  background: var(--gb-accent-dim);
+  box-shadow: inset 2px 0 0 var(--gb-accent);
+}
+
+.gb-thread-row {
+  min-height: 48px;
+  border: 0;
+  border-radius: var(--gb-radius-sm);
+}
+
+.gb-thread-row:hover {
+  background: var(--gb-hover);
+  border-color: transparent;
+}
+
+.gb-thread-row.active {
+  background: var(--gb-accent-dim);
+  border-color: transparent;
+  box-shadow: inset 2px 0 0 var(--gb-accent);
+}
+
+.gb-thread-copy strong {
+  font-size: 12.5px;
+  font-weight: 550;
+}
+
+.gb-status-dot.running {
+  background: var(--gb-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gb-accent) 25%, transparent);
+  animation: none;
+}
+
+.gb-status-dot.idle {
+  background: var(--gb-success);
+}
+
+.gb-sidebar-footer {
+  border-top: 1px solid var(--gb-border);
+  background: transparent;
+  padding: 8px;
+}
+
+.gb-footer-action:hover {
+  color: var(--gb-text);
+  background: var(--gb-hover);
+}
+
+/* ── Thread workspace ────────────────────────────────────────────────────── */
+
+.gb-thread-view {
+  background: var(--gb-bg) !important;
+  color: var(--gb-text);
+  backdrop-filter: none;
+}
+
+.gb-thread-view.is-empty {
+  grid-template-rows: 52px minmax(0, 1fr);
+}
+
+.gb-thread-header {
+  height: 52px;
+  border-bottom: 1px solid var(--gb-border);
+  background: var(--gb-bg);
+  backdrop-filter: none;
+  box-shadow: none;
+  padding: 0 16px;
+}
+
+.gb-thread-heading strong {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.gb-thread-heading span {
+  color: var(--gb-faint);
+  font-size: 11px;
+}
+
+.gb-run-pill {
+  height: 26px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-sm);
+  background: transparent;
+  font: 500 11px var(--gb-font);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.gb-run-pill.running {
+  color: var(--gb-accent);
+  border-color: color-mix(in srgb, var(--gb-accent) 40%, var(--gb-border));
+  background: var(--gb-accent-dim);
+  box-shadow: none;
+}
+
+.gb-header-button,
+.gb-icon-button {
+  border-radius: var(--gb-radius-sm);
+}
+
+.gb-header-button:hover,
+.gb-header-button.active,
+.gb-icon-button:hover {
+  border-color: var(--gb-border-strong);
+  background: var(--gb-raised);
+}
+
+/* ── Empty layout (compact stack — fixes homepage void) ──────────────────── */
+
+.gb-empty-layout {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 24px 24px 28px;
+  overflow: auto;
+}
+
+.gb-empty-stack {
+  display: flex;
+  width: min(480px, 100%);
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.gb-line-art {
+  display: grid;
+  place-items: center;
+  width: min(220px, 56vw);
+  color: var(--gb-line);
+}
+
+.gb-line-art-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  aspect-ratio: 240 / 200;
+}
+
+.gb-empty-copy {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.gb-empty-copy h1,
+.gb-empty-stack h1 {
+  margin: 0;
+  max-width: 16ch;
+  color: var(--gb-text);
+  font-size: clamp(22px, 2.8vw, 28px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  text-wrap: balance;
+  text-shadow: none;
+}
+
+.gb-empty-copy p,
+.gb-empty-stack p {
+  margin: 0;
+  max-width: 36ch;
+  color: var(--gb-muted);
+  font-size: 13px;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.gb-suggestion-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.gb-suggestion-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  min-width: 0;
+  padding: 0 14px;
+  border: 1px solid var(--gb-border-strong);
+  border-radius: var(--gb-radius-sm);
+  color: var(--gb-text);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+.gb-suggestion-row button::before {
+  content: none !important;
+  display: none !important;
+}
+
+.gb-suggestion-row button:hover {
+  border-color: var(--gb-accent);
+  color: var(--gb-text);
+  background: var(--gb-hover);
+  transform: none;
+  box-shadow: none;
+}
+
+/* Composer in empty state: in document flow, not absolute */
+.gb-empty-layout .gb-composer-dock,
+.gb-composer-dock.is-empty {
+  position: static !important;
+  left: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  width: min(560px, 100%) !important;
+  margin: 0;
+  padding: 0;
+  background: transparent !important;
+  filter: none;
+}
+
+/* ── Composer (single chrome — shell only, never nested double borders) ─── */
+
+.gb-composer-dock {
+  z-index: 4;
+  width: min(800px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 0 0 14px;
+  background: linear-gradient(transparent, var(--gb-bg) 40%);
+}
+
+/* Outer shell is the ONLY bordered surface */
+.gb-composer-shell {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--gb-border-strong) !important;
+  border-radius: var(--gb-radius-md) !important;
+  color: var(--gb-text);
+  background: var(--gb-surface) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18) !important;
+  backdrop-filter: none !important;
+}
+
+.gb-composer-shell::before {
+  display: none !important;
+  content: none !important;
+}
+
+.gb-composer-shell:focus-within {
+  border-color: var(--gb-accent) !important;
+  box-shadow: 0 0 0 2px var(--gb-accent-dim), 0 8px 24px rgba(0, 0, 0, 0.18) !important;
+}
+
+/* Mode accent: left edge only — no full-shell recolor, no second ring */
+.gb-composer-shell.plan,
+.gb-composer-shell.plan:focus-within {
+  border-color: var(--gb-border-strong) !important;
+  border-left: 2px solid var(--gb-accent) !important;
+  background: var(--gb-surface) !important;
+}
+
+.gb-composer-shell.goal,
+.gb-composer-shell.goal:focus-within {
+  border-color: var(--gb-border-strong) !important;
+  border-left: 2px solid var(--gb-accent) !important;
+  background: var(--gb-surface) !important;
+}
+
+.gb-composer-shell.plan:focus-within,
+.gb-composer-shell.goal:focus-within {
+  box-shadow: 0 0 0 2px var(--gb-accent-dim), 0 8px 24px rgba(0, 0, 0, 0.18) !important;
+}
+
+/* Inner composer: transparent — kill every border/shadow/outline from shell.css layers */
+.gb-composer-shell .gb-composer,
+.gb-composer-shell .gb-composer:focus-within,
+.gb-composer-shell .gb-composer:focus,
+:root[data-theme="dark"] .gb-composer-shell .gb-composer,
+:root[data-theme="dark"] .gb-composer-shell .gb-composer:focus-within,
+:root[data-theme="light"] .gb-composer-shell .gb-composer,
+:root[data-theme="light"] .gb-composer-shell .gb-composer:focus-within,
+:root[data-theme="light"] .gb-thread-view .gb-composer-shell .gb-composer {
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+.gb-composer textarea {
+  min-height: 48px;
+  padding: 12px 14px 6px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  outline: none !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  background: transparent;
+  color: var(--gb-text);
+}
+
+.gb-composer textarea:focus,
+.gb-composer textarea:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border: 0 !important;
+}
+
+.gb-composer-shell .gb-composer-select:focus-visible,
+.gb-composer-shell .gb-icon-button:focus-visible,
+.gb-composer-shell .gb-send:focus-visible {
+  outline: 2px solid var(--gb-accent);
+  outline-offset: 1px;
+}
+
+.gb-mode-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 0;
+  border: 0 !important;
+  border-bottom: 0 !important;
+  color: var(--gb-muted);
+  background: transparent !important;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  box-shadow: none !important;
+}
+
+.gb-mode-status.goal,
+.gb-mode-status.plan {
+  color: var(--gb-muted);
+}
+
+.gb-mode-status-actions button {
+  padding: 3px 8px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-sm);
+  color: var(--gb-muted);
+  background: transparent;
+  font-size: 10px;
+}
+
+.gb-mode-status-actions button:hover {
+  color: var(--gb-text);
+  border-color: var(--gb-border-strong);
+  background: var(--gb-raised);
+}
+
+.gb-composer-footer {
+  padding: 2px 8px 8px;
+}
+
+.gb-composer-select,
+.gb-icon-button.composer,
+.gb-context-meter {
+  height: 28px;
+  border-radius: var(--gb-radius-sm);
+  font-family: var(--gb-mono);
+  font-size: 10px;
+  border: 1px solid var(--gb-border);
+  background: transparent;
+  box-shadow: none;
+}
+
+.gb-composer-select:hover,
+.gb-composer-select[data-state="open"] {
+  border-color: var(--gb-border-strong);
+  background: var(--gb-raised);
+}
+
+.gb-composer-select.mode.plan,
+.gb-composer-shell.plan .gb-composer-select.mode.plan,
+.gb-composer-select.mode.goal,
+.gb-composer-shell.goal .gb-composer-select.mode.goal {
+  color: var(--gb-accent);
+  border-color: color-mix(in srgb, var(--gb-accent) 45%, var(--gb-border));
+  background: var(--gb-accent-dim);
+}
+
+.gb-send {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--gb-radius-sm);
+  border: 1px solid var(--gb-border);
+  background: var(--gb-raised);
+  color: var(--gb-faint);
+  box-shadow: none;
+}
+
+.gb-send.ready:not(:disabled) {
+  color: var(--gb-accent-ink);
+  border-color: var(--gb-accent);
+  background: var(--gb-accent);
+  box-shadow: none;
+}
+
+.gb-send.ready:not(:disabled):hover {
+  background: var(--gb-accent-strong);
+  transform: none;
+  box-shadow: none;
+}
+
+.gb-send.stop {
+  color: #fff;
+  border-color: var(--gb-danger);
+  background: color-mix(in srgb, var(--gb-danger) 85%, #000);
+}
+
+.gb-composer.is-launching .gb-send.ready::after {
+  display: none !important;
+}
+
+.gb-composer-note {
+  padding-top: 8px;
+  color: var(--gb-faint);
+  font: 10px var(--gb-font);
+  letter-spacing: 0;
+  text-align: center;
+}
+
+/* ── Timeline ────────────────────────────────────────────────────────────── */
+
+.gb-thread-scroll {
+  background: var(--gb-bg) !important;
+}
+
+.gb-thread-column {
+  width: min(800px, 100%);
+  padding: 24px clamp(16px, 3vw, 32px) 48px;
+}
+
+.gb-thread-view :is(.gb-reasoning, .gb-activity, .gb-plan-card, .gb-system-message, .gb-permission-card) {
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-md);
+  background: var(--gb-surface);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.gb-thread-view .gb-plan-card {
+  border-left: 2px solid var(--gb-ion);
+  background: var(--gb-surface);
+}
+
+.gb-thread-view .gb-permission-card {
+  border-left: 2px solid var(--gb-accent);
+  background: var(--gb-surface);
+}
+
+.gb-thread-view .gb-user-prompt,
+.gb-thread-view .gb-markdown {
+  text-shadow: none;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+
+.gb-button {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--gb-border-strong);
+  border-radius: var(--gb-radius-sm);
+  background: transparent;
+  color: var(--gb-text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.gb-button:hover {
+  background: var(--gb-raised);
+  border-color: var(--gb-border-strong);
+}
+
+.gb-button.primary {
+  border-color: var(--gb-accent);
+  color: var(--gb-accent-ink);
+  background: var(--gb-accent);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.gb-button.primary:hover {
+  background: var(--gb-accent-strong);
+}
+
+.gb-button.danger {
+  border-color: var(--gb-danger);
+  color: #fff;
+  background: var(--gb-danger);
+}
+
+.gb-button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--gb-muted);
+}
+
+/* ── Settings (clean deck, theme-aware) ──────────────────────────────────── */
+
+.gb-settings-dialog {
+  width: min(800px, calc(100vw - 48px));
+  height: min(620px, calc(100vh - 48px));
+  border: 1px solid var(--gb-border-strong);
+  border-radius: var(--gb-radius-md);
+  color: var(--gb-text);
+  background: var(--gb-panel);
+  box-shadow: var(--gb-glass-shadow);
+  backdrop-filter: none;
+  overflow: hidden;
+}
+
+.gb-settings-head {
+  border-bottom: 1px solid var(--gb-border);
+  background: transparent;
+  padding: 0 16px 0 20px;
+}
+
+.gb-settings-head::after {
+  content: none !important;
+}
+
+.gb-settings-tabs > [role="tablist"] {
+  gap: 2px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--gb-border);
+  background: var(--gb-raised);
+}
+
+.gb-settings-tabs [role="tab"] {
+  height: 34px;
+  border: 0;
+  border-radius: var(--gb-radius-sm);
+  color: var(--gb-faint);
+  font: 500 12px var(--gb-font);
+  letter-spacing: 0;
+}
+
+.gb-settings-tabs [role="tab"]:hover {
+  color: var(--gb-text);
+  background: var(--gb-hover);
+}
+
+.gb-settings-tabs [role="tab"][data-state="active"] {
+  color: var(--gb-text);
+  border: 0;
+  background: var(--gb-accent-dim);
+  box-shadow: inset 2px 0 0 var(--gb-accent);
+}
+
+.gb-settings-content {
+  color: var(--gb-text);
+  background: var(--gb-panel);
+  padding: 20px 24px;
+}
+
+.gb-settings-content h3 {
+  margin: 0 0 12px;
+  color: var(--gb-text);
+  font: 600 11px var(--gb-font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.gb-settings-content h3::before {
+  content: none !important;
+}
+
+.gb-settings-panel {
+  display: grid;
+  margin-bottom: 16px;
+  padding: 4px 14px 8px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-md);
+  background: var(--gb-raised);
+}
+
+.gb-settings-panel > h3 {
+  margin-top: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--gb-border);
+}
+
+.gb-settings-content label {
+  min-height: 52px;
+  border-bottom: 1px solid var(--gb-border);
+}
+
+.gb-settings-content label:last-of-type {
+  border-bottom: 0;
+}
+
+.gb-settings-content select,
+.gb-settings-content input[type="text"],
+.gb-settings-content input:not([type]) {
+  min-width: 160px;
+  height: 30px;
+  border: 1px solid var(--gb-border-strong);
+  border-radius: var(--gb-radius-sm);
+  color: var(--gb-text);
+  background: var(--gb-bg);
+  font-size: 12px;
+}
+
+.gb-settings-footer {
+  border-top: 1px solid var(--gb-border);
+  background: var(--gb-raised);
+}
+
+/* ── Command palette ─────────────────────────────────────────────────────── */
+
+.gb-command-palette {
+  top: 18%;
+  width: min(520px, calc(100vw - 40px));
+  padding: 16px;
+  border: 1px solid var(--gb-border-strong);
+  border-radius: var(--gb-radius-md);
+  background: var(--gb-panel);
+  box-shadow: var(--gb-glass-shadow);
+  backdrop-filter: none;
+  color: var(--gb-text);
+}
+
+.gb-command-search {
+  height: 36px;
+  margin-bottom: 10px;
+  border: 1px solid var(--gb-border-strong);
+  border-radius: var(--gb-radius-sm);
+  background: var(--gb-raised);
+  font-size: 13px;
+}
+
+.gb-command-search:focus {
+  border-color: var(--gb-accent);
+  box-shadow: none;
+}
+
+.gb-command-actions button {
+  min-height: 40px;
+  border: 0;
+  border-radius: var(--gb-radius-sm);
+  border-left: 2px solid transparent;
+}
+
+.gb-command-actions button:hover,
+.gb-command-actions button:focus-visible {
+  background: var(--gb-hover);
+  border-left-color: var(--gb-accent);
+  box-shadow: none;
+  outline: none;
+}
+
+.gb-command-actions code {
+  color: var(--gb-accent);
+  font: 600 11px var(--gb-mono);
+}
+
+.gb-command-actions button i {
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-sm);
+  padding: 2px 6px;
+  font: 500 9px var(--gb-mono);
+  letter-spacing: 0.04em;
+  background: transparent;
+}
+
+/* ── Dialogs / drawer ────────────────────────────────────────────────────── */
+
+.gb-dialog-overlay {
+  background: rgba(8, 10, 12, 0.62);
+  backdrop-filter: blur(2px);
+}
+
+.gb-confirm-dialog,
+.gb-decision-dialog,
+.gb-transcript-dialog,
+.gb-dropdown,
+.gb-command-menu {
+  border: 1px solid var(--gb-border-strong);
+  border-radius: var(--gb-radius-md);
+  background: var(--gb-panel);
+  box-shadow: var(--gb-glass-shadow);
+  backdrop-filter: none;
+  color: var(--gb-text);
+}
+
+.gb-drawer {
+  border-left: 1px solid var(--gb-border);
+  background: var(--gb-panel);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+/* ── Flight deck (quiet) ─────────────────────────────────────────────────── */
+
+.gb-flight-deck {
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-md);
+  background: var(--gb-surface);
+  box-shadow: none;
+}
+
+.gb-flight-deck-rail {
+  background: var(--gb-raised);
+  border-right: 1px solid var(--gb-border);
+  color: var(--gb-muted);
+}
+
+.gb-flight-deck-rail::after {
+  animation: none;
+  background: var(--gb-accent);
+  opacity: 0.5;
+}
+
+/* ── Bootstrap ───────────────────────────────────────────────────────────── */
+
+.gb-bootstrap {
+  background: var(--gb-bg);
+}
+
+.gb-bootstrap-card {
+  border: 1px solid var(--gb-border-strong);
+  border-radius: var(--gb-radius-md);
+  background: var(--gb-panel);
+  box-shadow: var(--gb-glass-shadow);
+}
+
+.gb-bootstrap-primary {
+  border-radius: var(--gb-radius-sm);
+  background: var(--gb-accent);
+  color: var(--gb-accent-ink);
+  box-shadow: none;
+}
+
+/* ── Light theme surfaces (white + green) ────────────────────────────────── */
+
+:root[data-theme="light"] .gb-app {
+  background: var(--gb-bg) !important;
+}
+
+:root[data-theme="light"] .gb-sidebar {
+  background: var(--gb-sidebar);
+  border-right-color: var(--gb-border);
+  color: var(--gb-text);
+}
+
+:root[data-theme="light"] .gb-thread-view {
+  color: var(--gb-text);
+  background: var(--gb-bg) !important;
+}
+
+:root[data-theme="light"] .gb-thread-header {
+  background: var(--gb-bg);
+  border-bottom-color: var(--gb-border);
+  color: var(--gb-text);
+}
+
+:root[data-theme="light"] .gb-composer-shell {
+  box-shadow: 0 8px 24px rgba(18, 40, 28, 0.08) !important;
+}
+
+:root[data-theme="light"] .gb-composer-shell:focus-within,
+:root[data-theme="light"] .gb-composer-shell.plan:focus-within,
+:root[data-theme="light"] .gb-composer-shell.goal:focus-within {
+  box-shadow: 0 0 0 2px var(--gb-accent-dim), 0 8px 24px rgba(18, 40, 28, 0.1) !important;
+}
+
+:root[data-theme="light"] .gb-line-art {
+  color: var(--gb-line);
+}
+
+:root[data-theme="light"] .gb-new-thread:hover,
+:root[data-theme="light"] .gb-project.active,
+:root[data-theme="light"] .gb-thread-row.active {
+  background: var(--gb-accent-dim);
+}
+
+:root[data-theme="light"] .gb-search {
+  background: rgba(255, 255, 255, 0.7);
+}
+
+:root[data-theme="light"] .gb-search:focus-within {
+  background: #fff;
+}
+
+/* Neutralize old Mission Control light overrides that force dark thread chrome */
+:root[data-theme="light"] .gb-thread-view .gb-composer-shell,
+:root[data-theme="light"] .gb-thread-view .gb-composer-shell.plan,
+:root[data-theme="light"] .gb-thread-view .gb-composer-shell.goal,
+:root[data-theme="light"] .gb-thread-view .gb-composer {
+  color: var(--gb-text);
+  border-color: var(--gb-border-strong) !important;
+  background: var(--gb-surface) !important;
+  box-shadow: 0 8px 24px rgba(18, 40, 28, 0.08) !important;
+}
+
+:root[data-theme="light"] .gb-thread-view .gb-composer-shell .gb-composer,
+:root[data-theme="light"] .gb-thread-view .gb-composer-shell .gb-composer:focus-within {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .gb-app,
+  .gb-app.drawer-open {
+    grid-template-columns: 160px minmax(0, 1fr);
+  }
+
+  .gb-empty-layout {
+    justify-content: flex-start;
+    padding-top: 32px;
+    gap: 16px;
+  }
+
+  .gb-empty-copy h1 {
+    font-size: 22px;
+  }
+
+  .gb-suggestion-row {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .gb-empty-layout .gb-composer-dock {
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .gb-app,
+  .gb-app.drawer-open {
+    grid-template-columns: 1fr;
+  }
+
+  .gb-sidebar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gb-app * {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Final conflict resolution (wins over legacy shell.css layers) ───────── */
+
+/* One border only: shell. Never paint .gb-composer when nested. */
+.gb-composer-shell .gb-composer,
+.gb-composer-shell .gb-composer:hover,
+.gb-composer-shell .gb-composer:focus,
+.gb-composer-shell .gb-composer:focus-within,
+.gb-composer-shell .gb-composer:active,
+.gb-app .gb-composer-shell .gb-composer,
+.gb-app .gb-composer-shell .gb-composer:focus-within,
+:root[data-theme="dark"] .gb-composer-shell .gb-composer,
+:root[data-theme="dark"] .gb-composer-shell .gb-composer:focus-within,
+:root[data-theme="light"] .gb-composer-shell .gb-composer,
+:root[data-theme="light"] .gb-composer-shell .gb-composer:focus-within,
+:root[data-theme="light"] .gb-thread-view .gb-composer-shell .gb-composer,
+:root[data-theme="light"] .gb-thread-view .gb-composer-shell .gb-composer:focus-within {
+  border: 0 !important;
+  border-width: 0 !important;
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+}
+
+.gb-composer-shell textarea,
+.gb-composer-shell textarea:focus,
+.gb-composer-shell textarea:focus-visible {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Shell is the single chrome surface */
+.gb-app .gb-composer-shell {
+  border: 1px solid var(--gb-border-strong) !important;
+  border-radius: var(--gb-radius-md) !important;
+  background: var(--gb-surface) !important;
+}
+
+.gb-app .gb-composer-shell:focus-within {
+  border-color: var(--gb-accent) !important;
+  box-shadow: 0 0 0 2px var(--gb-accent-dim) !important;
+}
+
+.gb-app .gb-composer-shell.plan,
+.gb-app .gb-composer-shell.goal {
+  border-left-width: 2px !important;
+  border-left-color: var(--gb-accent) !important;
+}
+
+/* Timeline cards follow tokens (no forced deep-space panel) */
+.gb-thread-view :is(.gb-reasoning, .gb-activity, .gb-plan-card, .gb-system-message, .gb-permission-card) {
+  border: 1px solid var(--gb-border) !important;
+  background: var(--gb-surface) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  text-shadow: none !important;
+}
+
+.gb-thread-view .gb-user-prompt,
+.gb-thread-view .gb-markdown {
+  text-shadow: none !important;
+}
+
+.gb-thread-scroll:not(.empty) {
+  background: transparent !important;
+}

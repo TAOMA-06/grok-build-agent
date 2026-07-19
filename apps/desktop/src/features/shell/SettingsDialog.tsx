@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import { useEffect } from "react";
 import { McpManager } from "../mcp/McpManager";
 import { applyLocalePreference, t } from "../../i18n";
+import { GbButton } from "../../components/ui/GbButton";
 import { normalizeSettings } from "../../contracts";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore } from "../../store";
@@ -158,17 +159,23 @@ export function SettingsDialog({
             </Tabs.List>
             <div className="gb-settings-content">
               <Tabs.Content value="general">
-                <h3>{t.appearance}</h3>
-                <label><span>{t.theme}<small>{t.themeHint}</small></span><select value={draft.theme} onChange={(event) => patch({ theme: event.target.value })}><option value="dark">{t.themeDark}</option><option value="light">{t.themeLight}</option><option value="system">{t.themeSystem}</option></select></label>
-                <label><span>{t.language}<small>{t.languageHint}</small></span><select aria-label={t.language} value={draft.locale} onChange={(event) => applyImmediately({ locale: event.target.value as Settings["locale"] })}><option value="system">{t.languageSystem}</option><option value="en">{t.languageEnglish}</option><option value="zh-CN">{t.languageChinese}</option></select></label>
-                <h3 className="gb-settings-heading-icon"><Ghost size={15} /> {t.codingDataPrivacy}</h3>
-                <label className="gb-switch-row"><span>{t.codingDataPrivacy}<small>{t.codingDataPrivacyHint}</small></span><input aria-label={t.codingDataPrivacy} type="checkbox" checked={draft.codingDataPrivacy} onChange={(event) => applyCodingDataPrivacy(event.target.checked)} /></label>
-                <p className="gb-settings-copy">{draft.codingDataPrivacy ? t.codingDataPrivacyOn : t.codingDataPrivacyOff}</p>
-                <p className="gb-settings-copy">{t.codingDataPrivacyBoundary}</p>
-                <h3 className="gb-settings-heading-icon"><Ghost size={15} /> {t.privateChat}</h3>
-                <label className="gb-switch-row"><span>{t.privateChat}<small>{t.privateChatHint}</small></span><input aria-label={t.privateChat} type="checkbox" checked={draft.privateChat} onChange={(event) => applyImmediately({ privateChat: event.target.checked })} /></label>
-                <p className="gb-settings-copy">{draft.privateChat ? t.privateChatOn : t.privateChatOff}</p>
-                <p className="gb-settings-copy">{t.privateChatServiceBoundary}</p>
+                <section className="gb-settings-panel">
+                  <h3>{t.appearance}</h3>
+                  <label><span>{t.theme}<small>{t.themeHint}</small></span><select value={draft.theme} onChange={(event) => patch({ theme: event.target.value })}><option value="dark">{t.themeDark}</option><option value="light">{t.themeLight}</option><option value="system">{t.themeSystem}</option></select></label>
+                  <label><span>{t.language}<small>{t.languageHint}</small></span><select aria-label={t.language} value={draft.locale} onChange={(event) => applyImmediately({ locale: event.target.value as Settings["locale"] })}><option value="system">{t.languageSystem}</option><option value="en">{t.languageEnglish}</option><option value="zh-CN">{t.languageChinese}</option></select></label>
+                </section>
+                <section className="gb-settings-panel">
+                  <h3 className="gb-settings-heading-icon"><Ghost size={15} /> {t.codingDataPrivacy}</h3>
+                  <label className="gb-switch-row"><span>{t.codingDataPrivacy}<small>{t.codingDataPrivacyHint}</small></span><input aria-label={t.codingDataPrivacy} type="checkbox" checked={draft.codingDataPrivacy} onChange={(event) => applyCodingDataPrivacy(event.target.checked)} /></label>
+                  <p className="gb-settings-copy">{draft.codingDataPrivacy ? t.codingDataPrivacyOn : t.codingDataPrivacyOff}</p>
+                  <p className="gb-settings-copy">{t.codingDataPrivacyBoundary}</p>
+                </section>
+                <section className="gb-settings-panel">
+                  <h3 className="gb-settings-heading-icon"><Ghost size={15} /> {t.privateChat}</h3>
+                  <label className="gb-switch-row"><span>{t.privateChat}<small>{t.privateChatHint}</small></span><input aria-label={t.privateChat} type="checkbox" checked={draft.privateChat} onChange={(event) => applyImmediately({ privateChat: event.target.checked })} /></label>
+                  <p className="gb-settings-copy">{draft.privateChat ? t.privateChatOn : t.privateChatOff}</p>
+                  <p className="gb-settings-copy">{t.privateChatServiceBoundary}</p>
+                </section>
               </Tabs.Content>
               <Tabs.Content value="permissions">
                 <div className="gb-settings-section-head"><h3>{t.permissions}</h3><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => void policyRulesQuery.refetch()}><RefreshCw size={14} /></button></div>
@@ -188,19 +195,24 @@ export function SettingsDialog({
                 </div>
               </Tabs.Content>
               <Tabs.Content value="agent">
-                <h3>{t.newTasks}</h3>
-                <label><span>{t.defaultModel}<small>{t.defaultModelHint}</small></span><select value={draft.model} onChange={(event) => patch({ model: event.target.value })}>{!modelsQuery.data?.some((model) => model.id === draft.model) && <option value={draft.model}>{draft.model}</option>}{modelsQuery.data?.map((model) => <option value={model.id} key={model.id}>{model.name}</option>)}</select></label>
-                <label><span>{t.defaultReasoningEffort}<small>{t.defaultReasoningEffortHint}</small></span><select value={draft.defaultReasoningEffort} onChange={(event) => patch({ defaultReasoningEffort: event.target.value })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
-                <label><span>{t.defaultMode}<small>{t.defaultModeHint}</small></span><select value={draft.defaultMode} onChange={(event) => patch({ defaultMode: event.target.value as Settings["defaultMode"] })}><option value="agent">{t.modeAgent}</option><option value="plan">{t.modePlan}</option><option value="goal">{t.modeGoal}</option></select></label>
-                <label><span>{t.focusMode}<small>{t.focusModeHint}</small></span><select value={draft.focusMode} onChange={(event) => patch({ focusMode: event.target.value as Settings["focusMode"] })}><option value="economy">{t.focusEconomy} · {t.focusEconomyHint}</option><option value="balanced">{t.focusBalanced} · {t.focusBalancedHint}</option></select></label>
-                <label className="gb-switch-row"><span>{t.privacyShield}<small>{t.privacyShieldHint}</small></span><input aria-label={t.privacyShield} type="checkbox" checked={draft.privacyMode === "strict"} onChange={(event) => patch({ privacyMode: event.target.checked ? "strict" : "standard" })} /></label>
-                <p className="gb-settings-copy">{draft.privacyMode === "strict" ? t.privacyStrict : t.privacyStandard}</p>
-                <p className="gb-settings-copy">{t.privacyServiceBoundary}</p>
-                <label className="gb-switch-row"><span>{t.useHarness}<small>{t.useHarnessHint}</small></span><input aria-label={t.useHarness} type="checkbox" checked={draft.useHarness} onChange={(event) => patch({ useHarness: event.target.checked })} /></label>
-                <p className="gb-settings-copy">{draft.useHarness ? t.useHarnessOn : t.useHarnessOff}</p>
-                <label><span>{t.permissions}<small>{t.permissionsHint}</small></span><select value={draft.permissionPolicy} onChange={(event) => patch({ permissionPolicy: event.target.value as Settings["permissionPolicy"] })}><option value="workspace_edit">{t.permissionWorkspace}</option><option value="ask_all">{t.permissionAsk}</option><option value="full_auto">{t.permissionAuto}</option></select></label>
-                <label className="gb-switch-row"><span>{t.keepCliUpdated}<small>{t.keepCliUpdatedHint}</small></span><input type="checkbox" checked={draft.autoUpdateCli} onChange={(event) => patch({ autoUpdateCli: event.target.checked })} /></label>
-                <details className="gb-advanced-settings"><summary>{t.advanced}</summary><label><span>{t.cliPathOverride}<small>{t.cliPathHint}</small></span><input value={draft.cliPathOverride} onChange={(event) => patch({ cliPathOverride: event.target.value, grokPath: event.target.value })} placeholder={t.autoDetect} /></label></details>
+                <section className="gb-settings-panel">
+                  <h3>{t.newTasks}</h3>
+                  <label><span>{t.defaultModel}<small>{t.defaultModelHint}</small></span><select value={draft.model} onChange={(event) => patch({ model: event.target.value })}>{!modelsQuery.data?.some((model) => model.id === draft.model) && <option value={draft.model}>{draft.model}</option>}{modelsQuery.data?.map((model) => <option value={model.id} key={model.id}>{model.name}</option>)}</select></label>
+                  <label><span>{t.defaultReasoningEffort}<small>{t.defaultReasoningEffortHint}</small></span><select value={draft.defaultReasoningEffort} onChange={(event) => patch({ defaultReasoningEffort: event.target.value })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+                  <label><span>{t.defaultMode}<small>{t.defaultModeHint}</small></span><select value={draft.defaultMode} onChange={(event) => patch({ defaultMode: event.target.value as Settings["defaultMode"] })}><option value="agent">{t.modeAgent}</option><option value="plan">{t.modePlan}</option><option value="goal">{t.modeGoal}</option></select></label>
+                  <label><span>{t.focusMode}<small>{t.focusModeHint}</small></span><select value={draft.focusMode} onChange={(event) => patch({ focusMode: event.target.value as Settings["focusMode"] })}><option value="economy">{t.focusEconomy} · {t.focusEconomyHint}</option><option value="balanced">{t.focusBalanced} · {t.focusBalancedHint}</option></select></label>
+                </section>
+                <section className="gb-settings-panel">
+                  <h3>{t.privacyShield}</h3>
+                  <label className="gb-switch-row"><span>{t.privacyShield}<small>{t.privacyShieldHint}</small></span><input aria-label={t.privacyShield} type="checkbox" checked={draft.privacyMode === "strict"} onChange={(event) => patch({ privacyMode: event.target.checked ? "strict" : "standard" })} /></label>
+                  <p className="gb-settings-copy">{draft.privacyMode === "strict" ? t.privacyStrict : t.privacyStandard}</p>
+                  <p className="gb-settings-copy">{t.privacyServiceBoundary}</p>
+                  <label className="gb-switch-row"><span>{t.useHarness}<small>{t.useHarnessHint}</small></span><input aria-label={t.useHarness} type="checkbox" checked={draft.useHarness} onChange={(event) => patch({ useHarness: event.target.checked })} /></label>
+                  <p className="gb-settings-copy">{draft.useHarness ? t.useHarnessOn : t.useHarnessOff}</p>
+                  <label><span>{t.permissions}<small>{t.permissionsHint}</small></span><select value={draft.permissionPolicy} onChange={(event) => patch({ permissionPolicy: event.target.value as Settings["permissionPolicy"] })}><option value="workspace_edit">{t.permissionWorkspace}</option><option value="ask_all">{t.permissionAsk}</option><option value="full_auto">{t.permissionAuto}</option></select></label>
+                  <label className="gb-switch-row"><span>{t.keepCliUpdated}<small>{t.keepCliUpdatedHint}</small></span><input type="checkbox" checked={draft.autoUpdateCli} onChange={(event) => patch({ autoUpdateCli: event.target.checked })} /></label>
+                  <details className="gb-advanced-settings"><summary>{t.advanced}</summary><label><span>{t.cliPathOverride}<small>{t.cliPathHint}</small></span><input value={draft.cliPathOverride} onChange={(event) => patch({ cliPathOverride: event.target.value, grokPath: event.target.value })} placeholder={t.autoDetect} /></label></details>
+                </section>
               </Tabs.Content>
               <Tabs.Content value="extensions">
                 <div className="gb-settings-section-head"><h3>{t.extensions}</h3><button type="button" className="gb-icon-button" aria-label={t.refreshExtensions} onClick={() => void capabilitiesQuery.refetch()}><RefreshCw size={14} /></button></div>
@@ -306,7 +318,11 @@ export function SettingsDialog({
               </Tabs.Content>
             </div>
           </Tabs.Root>
-          <div className="gb-settings-footer">{saveError && <span className="gb-settings-save-error" role="alert">{saveError}</span>}<button type="button" className="gb-button" onClick={() => onOpenChange(false)}>{t.cancel}</button><button type="button" className="gb-button primary" disabled={saving} onClick={() => void save()}>{saving ? t.saving : t.saveChanges}</button></div>
+          <div className="gb-settings-footer">
+            {saveError && <span className="gb-settings-save-error" role="alert">{saveError}</span>}
+            <GbButton onClick={() => onOpenChange(false)}>{t.cancel}</GbButton>
+            <GbButton variant="primary" disabled={saving} onClick={() => void save()}>{saving ? t.saving : t.saveChanges}</GbButton>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

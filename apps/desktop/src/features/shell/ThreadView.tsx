@@ -19,22 +19,11 @@ import { useEffect, useRef, useState } from "react";
 import type { ComposerAttachment, ModeSwitchResult, SelectableModel, ServerRequest, TaskMode } from "../../types";
 import type { SessionRuntime } from "../../store";
 import { CommandComposer } from "./CommandComposer";
+import { EmptyTaskState } from "./EmptyTaskState";
 import { ExecutionFlightDeck } from "./ExecutionFlightDeck";
 import { Timeline } from "./Timeline";
 import { t } from "../../i18n";
 import { useAppStore } from "../../store";
-import missionRocketUrl from "../../assets/mission-rocket.jpg";
-
-function LaunchTrajectory() {
-  return (
-    <div className="gb-launch-trajectory" aria-hidden>
-      <img src={missionRocketUrl} alt="" />
-      <div className="gb-launch-scan" />
-      <span className="gb-launch-coordinate">LC-01 · 28.5°N</span>
-      <span className="gb-launch-status">ORBITAL LINK · READY</span>
-    </div>
-  );
-}
 
 function PermissionCard({
   request,
@@ -161,10 +150,52 @@ export function ThreadView({
   const executionRoot = session?.summary.executionRoot || session?.summary.worktreePath || session?.summary.workspaceRoot;
   const changesVisible = Boolean(session && (session.tools.length > 0 || session.summary.worktreePath));
   const visibleMode = session?.summary.mode ?? session?.modeState.currentMode ?? "agent";
+  const isEmpty = !session?.blocks.length;
+  const isNewTask = !session;
+
+  const composer = (
+    <div className={`gb-composer-dock${isEmpty ? " is-empty" : ""}`}>
+      <div
+        className={`gb-composer-shell${visibleMode === "plan" ? " plan" : ""}${
+          visibleMode === "goal" ? " goal" : ""
+        }`}
+      >
+        {visibleMode === "goal" && session?.summary.mode === "goal" && (
+          <div className="gb-mode-status goal has-actions" role="status">
+            <Flag size={12} strokeWidth={2} aria-hidden className="gb-mode-status-icon" />
+            <span className="gb-mode-status-label">{session.busy ? t.goalActive : t.goalMode}</span>
+            <div className="gb-mode-status-actions">
+              <button type="button" onClick={() => void onSend("/goal status", [], "goal")}>{t.status}</button>
+              <button type="button" onClick={() => void onSend(session.busy ? "/goal pause" : "/goal resume", [], "goal")}>{session.busy ? t.pause : t.resume}</button>
+              <button type="button" onClick={() => void onSend("/goal clear", [], "goal")}>{t.clear}</button>
+            </div>
+          </div>
+        )}
+        <CommandComposer
+          models={models}
+          busy={session?.busy ?? false}
+          connecting={connecting}
+          onSend={onSend}
+          onCancel={onCancel}
+          onChooseModel={onChooseModel}
+          onChooseEffort={onChooseEffort}
+          onChooseMode={onChooseMode}
+          onLocalCommand={onLocalCommand}
+        />
+      </div>
+      {session?.failedSubmission && (
+        <div className="gb-send-failure" role="alert">
+          <span>{session.failedSubmission.error}</span>
+          <button type="button" onClick={() => void onRetryFailed()}>{t.retry}</button>
+        </div>
+      )}
+      <div className="gb-composer-note">{t.safetyNote}</div>
+    </div>
+  );
 
   return (
     <>
-    <main className={`gb-thread-view${session?.busy || connecting ? " is-running" : ""}${session?.blocks.length ? "" : " is-empty"}`}>
+    <main className={`gb-thread-view${session?.busy || connecting ? " is-running" : ""}${isEmpty ? " is-empty" : ""}`}>
       <header className="gb-thread-header" data-tauri-drag-region>
         {session ? (
           <>
@@ -193,96 +224,56 @@ export function ThreadView({
         ) : <div className="gb-thread-heading new"><strong>{t.newTask}</strong><span>{workspaceName || t.chooseProject}</span></div>}
       </header>
 
-      <div ref={threadScrollRef} className={session?.blocks.length ? "gb-thread-scroll" : "gb-thread-scroll empty"}>
-        {findOpen && (
-          <div className="gb-find-bar">
-            <Search size={14} />
-            <input autoFocus value={findQuery} onChange={(event) => setFindQuery(event.target.value)} placeholder={t.commands.find} />
-            <span>{findQuery ? session?.blocks.filter((block) => "text" in block && String(block.text).toLowerCase().includes(findQuery.toLowerCase())).length ?? 0 : 0}</span>
-            <button type="button" aria-label={t.cancel} onClick={() => setFindOpen(false)}><X size={14} /></button>
-          </div>
-        )}
-        {session && !session.privateChat && <ExecutionFlightDeck session={session} />}
-        {session?.blocks.length ? (
-          <div className="gb-thread-column">
-            <Timeline
-              blocks={session.blocks}
-              busy={Boolean(session.busy)}
-              planActionsEnabled={Boolean(pendingPlanApproval)}
-              onPlanAction={(action) => {
-                if (pendingPlanApproval) {
-                  void onPlanDecision(action).then(() => {
-                    if (action === "revise") {
-                      useAppStore.getState().setSessionDraft(session.summary.sessionId, t.planFeedbackDraft);
-                      window.dispatchEvent(new Event("grok:focus-composer"));
-                    }
-                  });
-                  return;
-                }
-                if (action === "approve") {
-                  void onChooseMode("agent").then((result) => {
-                    if (result.kind !== "unsupported") void onSend(t.planApprovedControl, [], "agent");
-                  });
-                } else {
-                  useAppStore.getState().setSessionDraft(session.summary.sessionId, t.planFeedbackDraft);
-                  window.dispatchEvent(new Event("grok:focus-composer"));
-                }
-              }}
-            />
-            {pendingPermission && (
-              <PermissionCard request={pendingPermission} options={permissionOptions} onAnswer={onAnswerPermission} />
-            )}
-          </div>
-        ) : (
-          <div className="gb-empty-thread">
-            <LaunchTrajectory />
-            <h1>{t.emptyTitle}</h1>
-            <p>{t.emptyDescription}</p>
-            <div className="gb-suggestion-row">
-              <button type="button" onClick={() => void onSend(t.explainProjectPrompt, [], "agent")}>{t.explainProject}</button>
-              <button type="button" onClick={() => void onSend(t.reviewChangesPrompt, [], "agent")}>{t.reviewChanges}</button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className={session?.blocks.length ? "gb-composer-dock" : "gb-composer-dock hero"}>
-        <div
-          className={`gb-composer-shell${visibleMode === "plan" ? " plan" : ""}${
-            visibleMode === "goal" ? " goal" : ""
-          }`}
-        >
-          {visibleMode === "goal" && session?.summary.mode === "goal" && (
-            <div className="gb-mode-status goal has-actions" role="status">
-              <Flag size={12} strokeWidth={2} aria-hidden className="gb-mode-status-icon" />
-              <span className="gb-mode-status-label">{session.busy ? t.goalActive : t.goalMode}</span>
-              <div className="gb-mode-status-actions">
-                <button type="button" onClick={() => void onSend("/goal status", [], "goal")}>{t.status}</button>
-                <button type="button" onClick={() => void onSend(session.busy ? "/goal pause" : "/goal resume", [], "goal")}>{session.busy ? t.pause : t.resume}</button>
-                <button type="button" onClick={() => void onSend("/goal clear", [], "goal")}>{t.clear}</button>
-              </div>
-            </div>
-          )}
-          <CommandComposer
-            models={models}
-            busy={session?.busy ?? false}
-            connecting={connecting}
-            onSend={onSend}
-            onCancel={onCancel}
-            onChooseModel={onChooseModel}
-            onChooseEffort={onChooseEffort}
-            onChooseMode={onChooseMode}
-            onLocalCommand={onLocalCommand}
-          />
+      {isEmpty ? (
+        <div className="gb-empty-layout">
+          {session && !session.privateChat && <ExecutionFlightDeck session={session} />}
+          {isNewTask && <EmptyTaskState onSuggest={(prompt, mode) => void onSend(prompt, [], mode)} />}
+          {composer}
         </div>
-        {session?.failedSubmission && (
-          <div className="gb-send-failure" role="alert">
-            <span>{session.failedSubmission.error}</span>
-            <button type="button" onClick={() => void onRetryFailed()}>{t.retry}</button>
+      ) : (
+        <>
+          <div ref={threadScrollRef} className="gb-thread-scroll">
+            {findOpen && (
+              <div className="gb-find-bar">
+                <Search size={14} />
+                <input autoFocus value={findQuery} onChange={(event) => setFindQuery(event.target.value)} placeholder={t.commands.find} />
+                <span>{findQuery ? session?.blocks.filter((block) => "text" in block && String(block.text).toLowerCase().includes(findQuery.toLowerCase())).length ?? 0 : 0}</span>
+                <button type="button" aria-label={t.cancel} onClick={() => setFindOpen(false)}><X size={14} /></button>
+              </div>
+            )}
+            <div className="gb-thread-column">
+              <Timeline
+                blocks={session!.blocks}
+                busy={Boolean(session?.busy)}
+                planActionsEnabled={Boolean(pendingPlanApproval)}
+                onPlanAction={(action) => {
+                  if (pendingPlanApproval) {
+                    void onPlanDecision(action).then(() => {
+                      if (action === "revise" && session) {
+                        useAppStore.getState().setSessionDraft(session.summary.sessionId, t.planFeedbackDraft);
+                        window.dispatchEvent(new Event("grok:focus-composer"));
+                      }
+                    });
+                    return;
+                  }
+                  if (action === "approve") {
+                    void onChooseMode("agent").then((result) => {
+                      if (result.kind !== "unsupported") void onSend(t.planApprovedControl, [], "agent");
+                    });
+                  } else if (session) {
+                    useAppStore.getState().setSessionDraft(session.summary.sessionId, t.planFeedbackDraft);
+                    window.dispatchEvent(new Event("grok:focus-composer"));
+                  }
+                }}
+              />
+              {pendingPermission && (
+                <PermissionCard request={pendingPermission} options={permissionOptions} onAnswer={onAnswerPermission} />
+              )}
+            </div>
           </div>
-        )}
-        <div className="gb-composer-note">{t.safetyNote}</div>
-      </div>
+          {composer}
+        </>
+      )}
     </main>
     <Dialog.Root open={renameOpen} onOpenChange={setRenameOpen}>
       <Dialog.Portal><Dialog.Overlay className="gb-dialog-overlay" /><Dialog.Content className="gb-confirm-dialog"><Dialog.Title>{t.renameTask}</Dialog.Title><Dialog.Description>{t.renameTaskHint}</Dialog.Description><input className="gb-dialog-input" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} autoFocus /><div className="gb-confirm-actions"><Dialog.Close asChild><button type="button" className="gb-button">{t.cancel}</button></Dialog.Close><button type="button" className="gb-button primary" disabled={!titleDraft.trim()} onClick={() => { void onRename(titleDraft.trim()); setRenameOpen(false); }}>{t.save}</button></div></Dialog.Content></Dialog.Portal>

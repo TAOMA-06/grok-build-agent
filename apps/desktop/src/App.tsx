@@ -8,6 +8,8 @@ import { useDesktopBridge } from "./platform/DesktopBridge";
 import { useAppStore } from "./store";
 import type { BootstrapState } from "./types";
 import "./App.css";
+import "./features/shell/shell.css";
+import "./features/shell/shell-v2.css";
 
 export default function App() {
   useTranslation();

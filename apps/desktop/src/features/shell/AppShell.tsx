@@ -14,7 +14,6 @@ import { SettingsDialog, type SettingsTab } from "./SettingsDialog";
 import { ThreadView } from "./ThreadView";
 import { useDesktopController, type DirtyPolicy } from "./useDesktopController";
 import { buildCommandCatalog } from "./commands";
-import "./shell.css";
 
 export function AppShell() {
   const bridge = useDesktopBridge();
