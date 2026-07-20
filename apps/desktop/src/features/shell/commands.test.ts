@@ -56,6 +56,29 @@ describe("slash command catalog", () => {
     expect(parseSlashCommand("/project:plan", catalog)?.descriptor.source).toBe("skill");
   });
 
+  it("exposes /summarize as an alias for /recap", () => {
+    const catalog = buildCommandCatalog([], []);
+    expect(parseSlashCommand("/summarize", catalog)?.descriptor).toMatchObject({
+      name: "/recap",
+      source: "documented",
+      execution: "acp",
+      available: true,
+    });
+    expect(parseSlashCommand("/recap", catalog)?.descriptor.name).toBe("/recap");
+  });
+
+  it("keeps /summarize aliased when live ACP only advertises /recap", () => {
+    const catalog = buildCommandCatalog([
+      { name: "/recap", description: "Session summary", input: null },
+    ], []);
+    expect(parseSlashCommand("/summarize", catalog)?.descriptor).toMatchObject({
+      name: "/recap",
+      source: "acp",
+      execution: "acp",
+      available: true,
+    });
+  });
+
   it("marks TUI-only commands unavailable instead of treating them as prompts", () => {
     const catalog = buildCommandCatalog([], []);
     expect(parseSlashCommand("/share", catalog)?.descriptor).toMatchObject({ available: false, execution: "unsupported" });

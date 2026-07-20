@@ -66,6 +66,8 @@ const DOCUMENTED_ACP_COMMANDS: CommandDescriptor[] = [
   { name: "/always-approve", aliases: [], descriptionKey: "always-approve", category: "settings", source: "documented", execution: "acp", available: true },
   { name: "/context", aliases: [], descriptionKey: "context", category: "context", source: "documented", execution: "acp", available: true },
   { name: "/session-info", aliases: [], descriptionKey: "session-info", category: "session", source: "documented", execution: "acp", available: true },
+  // Grok Build 0.2.105+: /summarize is an alias for on-demand session summary.
+  { name: "/recap", aliases: ["/summarize"], descriptionKey: "recap", category: "context", source: "documented", execution: "acp", available: true },
 ];
 
 const DOCUMENTED_UNSUPPORTED = [
@@ -132,6 +134,26 @@ export function buildCommandCatalog(
   if (!catalog.has("/mem") && catalog.has("/memory")) {
     const memory = catalog.get("/memory")!;
     catalog.set("/memory", { ...memory, aliases: [...memory.aliases, "/mem"] });
+  }
+  // Keep /summarize ↔ /recap aliases even when live ACP advertises only one name.
+  if (catalog.has("/recap") && catalog.has("/summarize")) {
+    const recap = catalog.get("/recap")!;
+    catalog.set("/recap", {
+      ...recap,
+      aliases: [...new Set([...recap.aliases, "/summarize"])],
+    });
+    catalog.delete("/summarize");
+  } else if (catalog.has("/recap")) {
+    const recap = catalog.get("/recap")!;
+    if (!recap.aliases.includes("/summarize")) {
+      catalog.set("/recap", { ...recap, aliases: [...recap.aliases, "/summarize"] });
+    }
+  } else if (catalog.has("/summarize")) {
+    const summarize = catalog.get("/summarize")!;
+    catalog.set("/summarize", {
+      ...summarize,
+      aliases: [...new Set([...summarize.aliases, "/recap"])],
+    });
   }
   for (const name of DOCUMENTED_UNSUPPORTED) {
     if (!catalog.has(name)) catalog.set(name, unsupported(name));

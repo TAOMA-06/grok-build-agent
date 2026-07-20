@@ -460,6 +460,7 @@ export const zhCN: Translation = {
     "always-approve": "由 Grok 管理当前任务的审批行为",
     context: "显示当前上下文使用情况",
     "session-info": "显示当前 Grok 会话信息",
+    recap: "按需总结当前 Grok 会话",
     quit: "退出 Grok Build 桌面端",
     help: "浏览命令和键盘快捷键",
     home: "返回新任务页面",

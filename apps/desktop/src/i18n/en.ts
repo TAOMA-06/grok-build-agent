@@ -457,6 +457,7 @@ const enValues = {
     "always-approve": "Let Grok manage approval behavior for this session",
     context: "Show current context usage",
     "session-info": "Show information about the current Grok session",
+    recap: "Summarize the current Grok session on demand",
     quit: "Quit Grok Build Desktop",
     help: "Browse commands and keyboard shortcuts",
     home: "Return to the new-task screen",

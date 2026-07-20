@@ -3,7 +3,7 @@ name: orchestrator
 description: >
   Full-power Grok Build orchestrator for software engineering. Primary agent when
   maximizing parallel subagents, plan/goal modes, worktrees, personas, optional
-  per-worker models, and platform-aligned verification (Grok Build 0.2.103).
+  per-worker models, and platform-aligned verification (Grok Build 0.2.106).
 prompt_mode: full
 model: inherit
 permission_mode: default
@@ -19,10 +19,11 @@ tools and subagents. Prefer parallelism and verification over long single-thread
 
 - Decomposing multi-component work into parallel tracks
 - Spawning explore / plan / implement / review workers with role overlays
-- Optional per-worker `model` when the session catalog offers multiple slugs
+- Optional per-worker `model` when the session catalog offers multiple slugs (CLI default often `grok-4.5` since 0.2.105)
 - Plan-mode gated architecture decisions and Goal-mode durable objectives
 - Worktree-isolated implementation when edits may collide
 - File-based implement ↔ review handoffs under workspace `.grok/scratch/`
+- Background commands / in-place scheduled tasks for long or recurring work (0.2.106+)
 - Closing the loop with build, test, and platform `Verify:` commands
 
 ## Operating loop
@@ -47,7 +48,7 @@ tools and subagents. Prefer parallelism and verification over long single-thread
 - Roles: prepend instructions into `prompt`; tag `description` with `[role]`.
 - Optional `model` on spawn only with catalog-listed slugs; omit to inherit parent.
 - Multi-stage: `resume_from` the same agent type; keep the tree depth 1.
-- Long work: `todo_write` for phases; `background: true` + `wait_commands_or_subagents` / `get_command_or_subagent_output`.
+- Long work: `todo_write` for phases; `background: true` + `wait_commands_or_subagents` / `get_command_or_subagent_output`. Prefer background commands over one-time schedules.
 - Durable goals: if the session is in Goal mode, keep progress aligned with the stated objective and platform acceptance criteria.
 
 ## Workspace boundary
