@@ -6,6 +6,7 @@ mod connection;
 mod events;
 mod fs_guard;
 mod handlers;
+mod plan_guard;
 mod pool;
 pub(crate) mod terminal_host;
 
@@ -59,6 +60,9 @@ pub struct StartConfig {
     #[serde(default)]
     pub reasoning_effort: Option<String>,
     pub always_approve: bool,
+    /// Host terminal policy: only pure inspection tools auto-allow when true.
+    #[serde(default)]
+    pub strict_terminal: bool,
     pub cwd: String,
     /// Optional extra system rules (harness overlay).
     pub rules: Option<String>,
@@ -148,18 +152,28 @@ pub fn probe_grok(configured: Option<&str>) -> GrokProbe {
 
 pub fn default_harness_rules() -> String {
     let agents = include_str!("../../../../../harness/AGENTS.md").trim();
-    // Keep verify guidance short so harness injection stays cache-friendly.
-    let verify = r#"
+    // Keep digests short so harness injection stays cache-friendly.
+    let digests = r#"
 ## Verify skill (desktop digest)
 
 After substantial edits:
 1. Prefer platform task-contract `Verify:` lines when present; else detect tooling from manifests (package.json, Cargo.toml, pyproject, go.mod, xcodeproj).
-2. Prefer argv-only project scripts (`npm test`, `npm run check`, `cargo test`, etc.) over shell/network wrappers.
-3. Run the tightest useful checks; if they fail, fix root cause and re-run.
-4. Report commands run, pass/fail evidence, and remaining risks.
-5. Do not claim done while declared platform verifications still fail.
+2. Prefer argv-only project scripts (`npm test`, `npm run check`, `cargo test`, etc.) over shell/network wrappers. Desktop auto-verify never starts a shell.
+3. Run the tightest useful checks; if they fail, fix root cause and re-run the **same** commands.
+4. Report commands run, pass/fail evidence, and remaining risks. Quote exit status; do not invent green results.
+5. Do not claim done while declared platform verifications still fail or were not run.
+6. If a Verify command needs confirmation (network/shell), stop and ask rather than bypassing policy.
+
+## Role overlays (desktop digest)
+
+Personas/roles may not be native-resolved unless copied into `.grok/personas` / `.grok/roles`. Always embed role rules in worker `prompt` and tag `description` with `[explore]` / `[plan]` / `[implementer]` / `[reviewer]`.
+
+- explore/plan: read-only; no product edits; no force-push / reset --hard.
+- implementer: smallest change; match style; prefer argv-only checks; no nested subagents; handoffs under `.grok/scratch/<id>/`.
+- reviewer: structured notes only (bug|suggestion|nit + file:line); do not fix unless asked.
+- Prefer narrow capability; never assume `all` / unrestricted tools for workers.
 "#;
-    format!("{agents}\n{verify}")
+    format!("{agents}\n{digests}")
 }
 
 /// True when `path` looks like the desktop orchestrator harness plugin package.
@@ -370,6 +384,7 @@ mod tests {
             model: None,
             reasoning_effort: None,
             always_approve: false,
+            strict_terminal: false,
             cwd: cwd.to_string_lossy().into(),
             rules: None,
             agent_profile: None,
@@ -521,5 +536,49 @@ mod tests {
             .map(|s| s.success())
             .unwrap_or(false);
         assert!(!still_alive, "child pid {pid} still alive after stop");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stop_kills_agent_process_group_descendants() {
+        let mock = mock_agent_path();
+        let ws = temp_workspace("process-group");
+        let pool = RuntimePool::new();
+        let mut config = start_cfg(&ws, &mock);
+        config.model = Some("spawn-child".into());
+
+        let status = pool
+            .start_with_bus(noop_bus(), config)
+            .await
+            .expect("start");
+        let parent_pid = pool
+            .snapshot()
+            .connections
+            .iter()
+            .find(|connection| connection.connection_id == status.connection_id.clone().unwrap())
+            .and_then(|connection| connection.pid)
+            .expect("parent pid");
+        let child_path = ws.join(".mock_acp_child_pid");
+        for _ in 0..20 {
+            if child_path.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let child_pid = std::fs::read_to_string(&child_path)
+            .expect("mock child pid file")
+            .trim()
+            .parse::<u32>()
+            .expect("valid mock child pid");
+
+        let parent_group = unsafe { libc::getpgid(parent_pid as libc::pid_t) };
+        let child_group = unsafe { libc::getpgid(child_pid as libc::pid_t) };
+        assert_eq!(parent_group, parent_pid as libc::pid_t);
+        assert_eq!(child_group, parent_group);
+
+        pool.stop_all().await.expect("stop all");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let child_alive = unsafe { libc::kill(child_pid as libc::pid_t, 0) == 0 };
+        assert!(!child_alive, "descendant pid {child_pid} survived stop");
     }
 }

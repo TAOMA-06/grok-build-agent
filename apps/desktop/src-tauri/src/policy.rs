@@ -1,4 +1,10 @@
 //! Fail-closed policy classification shared by terminal and future Tool Gateway calls.
+//!
+//! Design (goal: safer agent defaults):
+//! - Known inspection / project-check argv → AllowOnce inside the workspace.
+//! - Shells, interpreters, package-script runners, network, containers, and
+//!   destructive tools → RequireConfirmation (or Deny for sensitive paths).
+//! - Unknown programs default to confirmation rather than silent allow.
 
 use crate::platform::{ActionEffect, ActionRequest, PolicyDecision, PolicyDecisionKind, RiskLevel};
 use std::path::{Component, Path, PathBuf};
@@ -12,28 +18,70 @@ pub fn classify_terminal_action(
     args: &[String],
     secret_refs: Vec<String>,
 ) -> ActionRequest {
+    classify_terminal_action_with_options(
+        request_id,
+        workspace_id,
+        task_id,
+        session_id,
+        command,
+        args,
+        secret_refs,
+        false,
+    )
+}
+
+pub fn classify_terminal_action_with_options(
+    request_id: String,
+    workspace_id: String,
+    task_id: String,
+    session_id: String,
+    command: &str,
+    args: &[String],
+    secret_refs: Vec<String>,
+    strict_terminal: bool,
+) -> ActionRequest {
     let program = program_name(command);
     let paths = classify_terminal_paths(Path::new(&workspace_id), args);
     let mut effect = ActionEffect::Execute;
     let mut risk = RiskLevel::Low;
 
-    if is_shell_wrapper(&program, args) || is_inline_interpreter(&program, args) {
+    if is_shell_program(&program)
+        || is_interpreter_invocation(&program, args)
+        || is_command_wrapper(&program)
+        || is_script_package_runner(&program, args)
+        || is_build_orchestrator(&program)
+    {
         risk = RiskLevel::High;
     }
     if is_network_program(&program)
         || is_git_network_operation(&program, args)
         || is_package_install(&program, args)
+        || is_cloud_cli(&program)
     {
         effect = ActionEffect::Network;
         risk = RiskLevel::High;
     }
-    if is_external_side_effect(&program, args) {
+    if is_external_side_effect(&program, args) || is_container_or_orchestrator(&program) {
         effect = ActionEffect::ExternalSideEffect;
         risk = RiskLevel::Critical;
     }
-    if is_destructive_git(&program, args) || is_destructive_filesystem_command(&program) {
+    if is_destructive_git(&program, args)
+        || is_destructive_filesystem_command(&program)
+        || is_privilege_escalation(&program)
+    {
         effect = ActionEffect::Destructive;
         risk = RiskLevel::Critical;
+    }
+
+    // Known-safe project checks stay low risk even when the program name is
+    // shared with higher-risk package tooling (e.g. cargo test vs cargo install).
+    // Strict terminal mode only auto-allows pure inspection tools.
+    if is_known_safe_project_check(&program, args, strict_terminal) {
+        risk = RiskLevel::Low;
+        effect = ActionEffect::Execute;
+    } else if strict_terminal && matches!(risk, RiskLevel::Low) {
+        // Fail closed: anything that is not pure inspection needs a click.
+        risk = RiskLevel::High;
     }
 
     ActionRequest {
@@ -136,7 +184,36 @@ fn path_is_outside_workspace(path: &Path, workspace_root: &Path) -> bool {
     let root =
         std::fs::canonicalize(workspace_root).unwrap_or_else(|_| normalize_lexical(workspace_root));
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| normalize_lexical(path));
-    !path.starts_with(root)
+    !path.starts_with(&root)
+}
+
+/// Return true when `requested` falls under any task `allowed_paths` entry.
+/// Empty `allowed_paths` means unrestricted (caller decides).
+pub fn path_matches_allowed(
+    workspace_root: &Path,
+    requested: &str,
+    allowed_paths: &[String],
+) -> bool {
+    if allowed_paths.is_empty() {
+        return true;
+    }
+    let requested = normalize_task_path(workspace_root, requested);
+    allowed_paths.iter().any(|allowed| {
+        let allowed = normalize_task_path(workspace_root, allowed);
+        requested == allowed || requested.starts_with(&allowed)
+    })
+}
+
+fn normalize_task_path(workspace_root: &Path, raw: &str) -> PathBuf {
+    let expanded = crate::acp::shellexpand_home(raw.trim());
+    let path = PathBuf::from(&expanded);
+    let joined = if path.is_absolute() {
+        path
+    } else {
+        workspace_root.join(path)
+    };
+    let lexical = normalize_lexical(&joined);
+    std::fs::canonicalize(&lexical).unwrap_or(lexical)
 }
 
 /// Automatic verification never starts a shell or command wrapper. A declared
@@ -185,8 +262,27 @@ fn is_automatic_command_wrapper(program: &str) -> bool {
     )
 }
 
+fn is_command_wrapper(program: &str) -> bool {
+    is_automatic_command_wrapper(program)
+}
+
 pub fn evaluate(action: &ActionRequest) -> PolicyDecision {
+    evaluate_with_allowed_paths(action, &[])
+}
+
+/// Evaluate policy, optionally elevating risk when terminal paths leave the
+/// task's allowed modification scope (non-empty `allowed_paths` only).
+pub fn evaluate_with_allowed_paths(
+    action: &ActionRequest,
+    allowed_paths: &[String],
+) -> PolicyDecision {
     let workspace_root = Path::new(&action.workspace_id);
+    let outside_allowed = !allowed_paths.is_empty()
+        && action
+            .paths
+            .iter()
+            .any(|path| !path_matches_allowed(workspace_root, path, allowed_paths));
+
     let (decision, reason, second) = if action.paths.iter().any(|path| {
         let path = Path::new(path);
         is_sensitive_path(path) && path_is_outside_workspace(path, workspace_root)
@@ -206,6 +302,12 @@ pub fn evaluate(action: &ActionRequest) -> PolicyDecision {
             "Terminal path is outside the workspace and requires confirmation".into(),
             false,
         )
+    } else if outside_allowed {
+        (
+            PolicyDecisionKind::RequireConfirmation,
+            "Terminal path is outside the task allowed paths and requires confirmation".into(),
+            false,
+        )
     } else if matches!(action.risk, RiskLevel::Critical) {
         (
             PolicyDecisionKind::RequireConfirmation,
@@ -220,7 +322,8 @@ pub fn evaluate(action: &ActionRequest) -> PolicyDecision {
     {
         (
             PolicyDecisionKind::RequireConfirmation,
-            "Shell indirection, interpreter code, or network access requires confirmation".into(),
+            "Shell, interpreter, package script, network, or elevated tool requires confirmation"
+                .into(),
             false,
         )
     } else {
@@ -236,41 +339,263 @@ pub fn evaluate(action: &ActionRequest) -> PolicyDecision {
         decision,
         decided_at: crate::acp::iso_now(),
         reason,
-        matched_rule_ids: vec!["platform:default-fail-closed-v1".into()],
+        matched_rule_ids: vec!["platform:default-fail-closed-v2".into()],
         requires_second_confirmation: second,
     }
 }
 
-fn is_shell_wrapper(program: &str, args: &[String]) -> bool {
-    if !is_shell_program(program) {
+/// Interpreters can run arbitrary files without `-c`; treat any non-metadata
+/// invocation as high risk.
+fn is_interpreter_invocation(program: &str, args: &[String]) -> bool {
+    if !matches!(
+        program,
+        "python"
+            | "python3"
+            | "python2"
+            | "node"
+            | "nodejs"
+            | "ruby"
+            | "perl"
+            | "php"
+            | "lua"
+            | "deno"
+            | "bun"
+            | "osascript"
+            | "swift"
+            | "julia"
+            | "R"
+            | "r"
+            | "Rscript"
+    ) {
+        // `bun` is both a package manager and a JS runtime; package cases are
+        // covered separately. Treat bare `bun <file>` via package runner checks.
         return false;
     }
+    if args.is_empty() {
+        return true;
+    }
+    if args.iter().all(|arg| is_metadata_only_flag(arg)) {
+        return false;
+    }
+    true
+}
+
+fn is_metadata_only_flag(arg: &str) -> bool {
+    matches!(
+        arg,
+        "--version" | "-V" | "-v" | "--help" | "-h" | "version" | "help"
+    )
+}
+
+/// `npm run`, `yarn start`, etc. execute arbitrary project scripts.
+fn is_script_package_runner(program: &str, args: &[String]) -> bool {
+    let sub = args.first().map(String::as_str);
     match program {
-        "sh" | "bash" | "zsh" | "fish" => args.iter().any(|arg| {
-            arg.strip_prefix('-')
-                .is_some_and(|flags| flags.contains('c'))
-        }),
-        "cmd" | "cmd.exe" => args.iter().any(|arg| arg.eq_ignore_ascii_case("/c")),
-        "pwsh" | "powershell" => args
-            .iter()
-            .any(|arg| arg.eq_ignore_ascii_case("-command") || arg.eq_ignore_ascii_case("-c")),
+        "npm" | "pnpm" | "yarn" | "bun" => matches!(
+            sub,
+            Some("run" | "start" | "stop" | "restart" | "test" | "exec" | "dlx" | "x" | "create")
+        ),
+        "npx" => true,
         _ => false,
     }
 }
 
-fn is_inline_interpreter(program: &str, args: &[String]) -> bool {
+fn is_build_orchestrator(program: &str) -> bool {
     matches!(
         program,
-        "python" | "python3" | "node" | "ruby" | "perl" | "php"
-    ) && args
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "-c" | "-e" | "--eval"))
+        "make" | "gmake" | "cmake" | "ninja" | "bazel" | "buck" | "buck2" | "just" | "task"
+    )
+}
+
+fn is_privilege_escalation(program: &str) -> bool {
+    matches!(program, "sudo" | "doas" | "su" | "pkexec")
+}
+
+fn is_container_or_orchestrator(program: &str) -> bool {
+    matches!(
+        program,
+        "docker"
+            | "podman"
+            | "nerdctl"
+            | "kubectl"
+            | "helm"
+            | "minikube"
+            | "kind"
+            | "container"
+            | "lima"
+            | "colima"
+    )
+}
+
+fn is_cloud_cli(program: &str) -> bool {
+    matches!(
+        program,
+        "aws" | "gcloud" | "az" | "oci" | "flyctl" | "fly" | "vercel" | "netlify" | "heroku"
+    )
+}
+
+/// Project-local checks the agent should run freely inside the workspace.
+/// When `strict` is true, only pure inspection tools auto-allow (no test runners).
+fn is_known_safe_project_check(program: &str, args: &[String], strict: bool) -> bool {
+    let sub = args.first().map(String::as_str);
+    let pure_inspection = matches!(
+        program,
+        "rg" | "grep"
+            | "ag"
+            | "ack"
+            | "fd"
+            | "find"
+            | "ls"
+            | "cat"
+            | "head"
+            | "tail"
+            | "wc"
+            | "file"
+            | "which"
+            | "whereis"
+            | "pwd"
+            | "true"
+            | "false"
+            | "date"
+            | "uname"
+            | "stat"
+            | "diff"
+            | "cmp"
+            | "md5"
+            | "md5sum"
+            | "shasum"
+            | "sha256sum"
+            | "sort"
+            | "uniq"
+            | "cut"
+            | "tr"
+            | "echo"
+            | "printf"
+            | "basename"
+            | "dirname"
+            | "realpath"
+            | "readlink"
+            | "jq"
+            | "yq"
+            | "tree"
+            | "hexdump"
+            | "xxd"
+            | "nl"
+            | "tac"
+            | "less"
+            | "more"
+    ) || (program == "git"
+        && matches!(
+            sub,
+            Some(
+                "status"
+                    | "diff"
+                    | "log"
+                    | "show"
+                    | "branch"
+                    | "rev-parse"
+                    | "ls-files"
+                    | "blame"
+                    | "describe"
+            )
+        )
+        && !args.iter().any(|a| {
+            matches!(
+                a.as_str(),
+                "--hard" | "-D" | "--force" | "-f" | "--delete"
+            )
+        }));
+
+    if strict {
+        return pure_inspection
+            || (program == "cargo"
+                && matches!(sub, Some("tree" | "metadata" | "version" | "-V" | "--version")));
+    }
+
+    pure_inspection
+        || match program {
+            "cargo" => matches!(
+                sub,
+                Some(
+                    "test"
+                        | "check"
+                        | "clippy"
+                        | "build"
+                        | "fmt"
+                        | "tree"
+                        | "metadata"
+                        | "nextest"
+                )
+            ) && !args.iter().any(|a| a == "--" || a.starts_with("--eval")),
+            "git" => matches!(sub, Some("tag" | "remote" | "config"))
+                && !args.iter().any(|a| {
+                    matches!(
+                        a.as_str(),
+                        "--hard" | "-D" | "--force" | "-f" | "--delete"
+                    )
+                }),
+            "rustc" | "rustfmt" | "clippy-driver" => args.iter().all(|a| {
+                is_metadata_only_flag(a)
+                    || a.starts_with("--print")
+                    || a == "--version"
+                    || a == "-V"
+            }),
+            "tsc" | "eslint" | "prettier" | "vitest" | "jest" | "mocha" | "pytest" | "pyright"
+            | "mypy" | "ruff" | "black" | "go" => match program {
+                "go" => matches!(sub, Some("test" | "vet" | "fmt" | "list" | "env" | "version")),
+                "vitest" | "jest" | "mocha" | "pytest" => true,
+                "tsc" | "eslint" | "prettier" | "pyright" | "mypy" | "ruff" | "black" => true,
+                _ => false,
+            },
+            "swift" => matches!(sub, Some("test" | "build" | "package"))
+                || args.iter().any(|a| a == "--version" || a == "-version"),
+            "xcodebuild" => args
+                .iter()
+                .all(|a| matches!(a.as_str(), "-version" | "-showsdks" | "-list" | "-help")),
+            "npm" | "pnpm" | "yarn" => matches!(
+                sub,
+                Some("test" | "ls" | "list" | "view" | "outdated" | "pack" | "explain" | "why")
+            ),
+            _ => false,
+        }
+}
+
+/// Review/summary handoff artifacts must stay under workspace `.grok/scratch/`.
+pub fn handoff_write_allowed(path: &str) -> bool {
+    let normalized = path.replace('\\', "/").to_ascii_lowercase();
+    let file_name = Path::new(&normalized)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    let is_handoff = matches!(file_name, "summary.md" | "review.md");
+    if !is_handoff {
+        return true;
+    }
+    normalized.contains("/.grok/scratch/") || normalized.starts_with(".grok/scratch/")
 }
 
 fn is_network_program(program: &str) -> bool {
     matches!(
         program,
-        "curl" | "wget" | "ssh" | "scp" | "sftp" | "rsync" | "nc" | "netcat"
+        "curl"
+            | "wget"
+            | "http"
+            | "httpie"
+            | "aria2c"
+            | "ssh"
+            | "scp"
+            | "sftp"
+            | "rsync"
+            | "nc"
+            | "netcat"
+            | "ncat"
+            | "socat"
+            | "ftp"
+            | "telnet"
+            | "fetch"
+            | "axel"
+            | "lftp"
+            | "smbclient"
     )
 }
 
@@ -278,7 +603,7 @@ fn is_git_network_operation(program: &str, args: &[String]) -> bool {
     program == "git"
         && matches!(
             args.first().map(String::as_str),
-            Some("clone" | "fetch" | "pull" | "ls-remote" | "submodule")
+            Some("clone" | "fetch" | "pull" | "ls-remote" | "submodule" | "push")
         )
 }
 
@@ -294,6 +619,7 @@ fn is_package_install(program: &str, args: &[String]) -> bool {
         }
         "cargo" => matches!(subcommand, Some("install" | "add" | "update")),
         "go" => matches!(subcommand, Some("get" | "install")),
+        "brew" | "apt" | "apt-get" | "yum" | "dnf" | "pacman" | "apk" => true,
         _ => false,
     }
 }
@@ -301,7 +627,17 @@ fn is_package_install(program: &str, args: &[String]) -> bool {
 fn is_external_side_effect(program: &str, args: &[String]) -> bool {
     (program == "npm" && args.first().map(String::as_str) == Some("publish"))
         || (program == "cargo" && args.first().map(String::as_str) == Some("publish"))
-        || (program == "gh" && matches!(args.first().map(String::as_str), Some("pr" | "release")))
+        || (program == "gh"
+            && matches!(
+                args.first().map(String::as_str),
+                Some("pr" | "release" | "workflow" | "api" | "gist")
+            ))
+        || (program == "git"
+            && args.first().map(String::as_str) == Some("push")
+            && args
+                .iter()
+                .any(|a| matches!(a.as_str(), "--force" | "-f" | "--force-with-lease")))
+        || matches!(program, "open" | "xdg-open" | "gio")
 }
 
 fn is_destructive_git(program: &str, args: &[String]) -> bool {
@@ -313,6 +649,7 @@ fn is_destructive_git(program: &str, args: &[String]) -> bool {
         Some("reset") => args.iter().any(|arg| arg == "--hard"),
         Some("branch") => args.iter().any(|arg| arg == "-D"),
         Some("checkout" | "restore") => args.iter().any(|arg| arg == "--"),
+        Some("rebase" | "filter-branch" | "filter-repo") => true,
         _ => false,
     }
 }
@@ -320,7 +657,16 @@ fn is_destructive_git(program: &str, args: &[String]) -> bool {
 fn is_destructive_filesystem_command(program: &str) -> bool {
     matches!(
         program,
-        "rm" | "rmdir" | "unlink" | "dd" | "truncate" | "shred"
+        "rm" | "rmdir"
+            | "unlink"
+            | "dd"
+            | "truncate"
+            | "shred"
+            | "chmod"
+            | "chown"
+            | "chgrp"
+            | "mv"
+            | "wipefs"
     ) || program.starts_with("mkfs")
 }
 
@@ -366,6 +712,14 @@ mod tests {
     fn allows_argv_only_local_command() {
         let decision = evaluate(&action("cargo", &["test"]));
         assert_eq!(decision.decision, PolicyDecisionKind::AllowOnce);
+        assert_eq!(
+            evaluate(&action("git", &["status"])).decision,
+            PolicyDecisionKind::AllowOnce
+        );
+        assert_eq!(
+            evaluate(&action("rg", &["TODO", "src"])).decision,
+            PolicyDecisionKind::AllowOnce
+        );
     }
 
     #[test]
@@ -402,6 +756,29 @@ mod tests {
     }
 
     #[test]
+    fn script_and_interpreter_runners_require_confirmation() {
+        for request in [
+            action("bash", &["./hack.sh"]),
+            action("zsh", &["script.zsh"]),
+            action("python3", &["evil.py"]),
+            action("node", &["tool.js"]),
+            action("npm", &["run", "build"]),
+            action("npx", &["eslint", "."]),
+            action("make", &["all"]),
+            action("docker", &["run", "alpine"]),
+            action("osascript", &["-e", "display dialog \"x\""]),
+            action("sudo", &["id"]),
+        ] {
+            assert_eq!(
+                evaluate(&request).decision,
+                PolicyDecisionKind::RequireConfirmation,
+                "expected confirmation for {:?}",
+                request.argv
+            );
+        }
+    }
+
+    #[test]
     fn terminal_paths_are_checked_before_an_argv_only_command_is_allowed() {
         for request in [
             action("cat", &["/Users/example/.ssh/id_rsa"]),
@@ -419,5 +796,81 @@ mod tests {
             evaluate(&action("cat", &["src/main.rs"])).decision,
             PolicyDecisionKind::AllowOnce
         );
+    }
+
+    #[test]
+    fn allowed_paths_elevate_out_of_scope_terminal_paths() {
+        let request = action("cat", &["other/module.rs"]);
+        let decision = evaluate_with_allowed_paths(&request, &["apps/desktop".into()]);
+        assert_eq!(decision.decision, PolicyDecisionKind::RequireConfirmation);
+        assert!(decision.reason.contains("allowed paths"));
+
+        let in_scope = action("cat", &["apps/desktop/src/main.rs"]);
+        let decision = evaluate_with_allowed_paths(&in_scope, &["apps/desktop".into()]);
+        assert_eq!(decision.decision, PolicyDecisionKind::AllowOnce);
+    }
+
+    #[test]
+    fn path_matches_allowed_handles_relative_prefixes() {
+        let root = Path::new("/workspace");
+        assert!(path_matches_allowed(
+            root,
+            "apps/desktop/src/a.rs",
+            &["apps/desktop".into()]
+        ));
+        assert!(!path_matches_allowed(
+            root,
+            "apps/desktop-evil/a.rs",
+            &["apps/desktop".into()]
+        ));
+        assert!(!path_matches_allowed(
+            root,
+            "other/a.rs",
+            &["apps/desktop".into()]
+        ));
+    }
+
+    #[test]
+    fn strict_terminal_requires_confirmation_for_project_tests() {
+        let open = classify_terminal_action_with_options(
+            "r1".into(),
+            "/workspace".into(),
+            "t1".into(),
+            "s1".into(),
+            "cargo",
+            &["test".into()],
+            vec![],
+            false,
+        );
+        assert_eq!(evaluate(&open).decision, PolicyDecisionKind::AllowOnce);
+
+        let strict = classify_terminal_action_with_options(
+            "r1".into(),
+            "/workspace".into(),
+            "t1".into(),
+            "s1".into(),
+            "cargo",
+            &["test".into()],
+            vec![],
+            true,
+        );
+        assert_eq!(
+            evaluate(&strict).decision,
+            PolicyDecisionKind::RequireConfirmation
+        );
+        assert_eq!(
+            evaluate(&action("rg", &["TODO"])).decision,
+            PolicyDecisionKind::AllowOnce
+        );
+    }
+
+    #[test]
+    fn handoff_writes_must_stay_under_scratch() {
+        assert!(handoff_write_allowed(".grok/scratch/abc/summary.md"));
+        assert!(handoff_write_allowed("/ws/.grok/scratch/run/review.md"));
+        assert!(handoff_write_allowed("src/main.rs"));
+        assert!(!handoff_write_allowed("summary.md"));
+        assert!(!handoff_write_allowed("/tmp/review.md"));
+        assert!(!handoff_write_allowed(".grok/summary.md"));
     }
 }

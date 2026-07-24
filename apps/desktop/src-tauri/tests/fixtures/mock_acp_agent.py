@@ -8,6 +8,8 @@ Speaks newline-delimited JSON-RPC. Accepts argv shaped like:
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -185,7 +187,14 @@ def handle(req: dict) -> bool:
 
 def main() -> int:
     # Consume argv; no shell command construction.
-    _ = sys.argv[1:]
+    argv = sys.argv[1:]
+    # Opt-in descendant used by Rust lifecycle tests. It deliberately does not
+    # share the protocol stream, so only process-group cancellation can remove
+    # it when the mock ACP parent is stopped.
+    if "--model" in argv and argv[argv.index("--model") + 1:argv.index("--model") + 2] == ["spawn-child"]:
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        with open(os.path.join(os.getcwd(), ".mock_acp_child_pid"), "w", encoding="utf-8") as pid_file:
+            pid_file.write(str(child.pid))
     while True:
         line = read_line()
         if line is None:

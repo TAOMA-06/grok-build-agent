@@ -18,12 +18,38 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { ComposerAttachment, ModeSwitchResult, SelectableModel, ServerRequest, TaskMode } from "../../types";
 import type { SessionRuntime } from "../../store";
+import { classifyPermissionCategory, type PermissionRiskCategory } from "../../contracts/permission";
 import { CommandComposer } from "./CommandComposer";
 import { EmptyTaskState } from "./EmptyTaskState";
 import { ExecutionFlightDeck } from "./ExecutionFlightDeck";
 import { Timeline } from "./Timeline";
 import { t } from "../../i18n";
 import { useAppStore } from "../../store";
+
+function permissionCategoryLabel(category: PermissionRiskCategory): string {
+  switch (category) {
+    case "shell":
+      return t.permissionCategoryShell;
+    case "interpreter":
+      return t.permissionCategoryInterpreter;
+    case "network":
+      return t.permissionCategoryNetwork;
+    case "package":
+      return t.permissionCategoryPackage;
+    case "container":
+      return t.permissionCategoryContainer;
+    case "destructive":
+      return t.permissionCategoryDestructive;
+    case "path_scope":
+      return t.permissionCategoryPathScope;
+    case "sensitive":
+      return t.permissionCategorySensitive;
+    case "elevated":
+      return t.permissionCategoryElevated;
+    default:
+      return t.permissionCategoryGeneric;
+  }
+}
 
 function PermissionCard({
   request,
@@ -41,7 +67,11 @@ function PermissionCard({
   const action = params.action && typeof params.action === "object"
     ? params.action as Record<string, unknown>
     : undefined;
-  const title = String(tool?.title ?? tool?.kind ?? action?.tool ?? params.description ?? t.protectedAction);
+  const category = classifyPermissionCategory(params);
+  const hostReason = typeof params.description === "string" ? params.description : null;
+  const secondConfirm = params.requiresSecondConfirmation === true
+    || params.requires_second_confirmation === true;
+  const title = String(tool?.title ?? tool?.kind ?? action?.tool ?? hostReason ?? t.protectedAction);
   const detail = String(
     (Array.isArray(action?.argv) ? action.argv.join(" ") : undefined) ??
     (tool?.rawInput as Record<string, unknown> | undefined)?.path ??
@@ -50,13 +80,16 @@ function PermissionCard({
     request.method,
   );
   return (
-    <section className="gb-permission-card">
+    <section className="gb-permission-card" data-category={category}>
       <div className="gb-permission-icon"><ShieldAlert size={18} /></div>
       <div className="gb-permission-copy">
         <strong>{t.permissionNeeded}</strong>
+        <span className="gb-permission-category">{permissionCategoryLabel(category)}</span>
         <span>{title}</span>
         <code>{detail}</code>
-        {action && <small>{String(action.risk ?? "unknown")} · {String(action.effect ?? "execute")} · {String(action.workspaceId ?? "")}</small>}
+        {hostReason && <small>{t.permissionHostReason}: {hostReason}</small>}
+        {action && <small>{String(action.risk ?? "unknown")} · {String(action.effect ?? "execute")}</small>}
+        {secondConfirm && <small className="gb-permission-second">{t.permissionSecondConfirm}</small>}
       </div>
       <div className="gb-permission-actions">
         {options.filter((option) => !option.kind?.startsWith("reject")).map((option) => (
@@ -205,6 +238,11 @@ export function ThreadView({
             </div>
             <div className="gb-thread-header-actions">
               <span className={`gb-run-pill ${session.busy ? "running" : session.summary.runState}`} role="status" aria-live="polite"><CircleDot size={12} />{session.busy ? t.grokWorking : t.runState[session.summary.runState] ?? session.summary.runState}</span>
+              {session.summary.mode === "plan" && (
+                <span className="gb-plan-pill" title={t.planModeBannerDetail}>
+                  <ShieldAlert size={12} /> {t.modePlan}
+                </span>
+              )}
               {session.privateChat && <span className="gb-private-chat-pill" title={t.privateChatLocalOnly}><Ghost size={12} /> {t.privateChatActive}</span>}
               {executionRoot && <button type="button" className="gb-header-button" onClick={() => void onOpenPath(executionRoot)}><ExternalLink size={14} /> {t.open}</button>}
               <button type="button" className={drawerOpen ? "gb-header-button active" : "gb-header-button"} onClick={onToggleDrawer}><FileCode2 size={14} /> {t.changes}{changesVisible && <span className="gb-change-dot" />}</button>

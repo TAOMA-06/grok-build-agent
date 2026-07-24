@@ -28,8 +28,9 @@ Rules:
 """
 
 # Persona-level defaults — MUST appear before [[inputs]]/[[outputs]] arrays.
+# Prefer execute over "all" so workers do not inherit unrestricted tool authority.
 default_fork_context = true
-default_capability_mode = "all"
+default_capability_mode = "execute"
 default_isolation = "none"
 
 [[inputs]]

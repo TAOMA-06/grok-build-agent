@@ -25,6 +25,12 @@ pub trait EventBus: Send + Sync + 'static {
     ) -> Result<(), crate::acp::AcpError> {
         Ok(())
     }
+
+    /// Task-level allowed modification paths for terminal policy elevation.
+    /// Empty means unrestricted. Default: no scope (empty).
+    fn task_allowed_paths(&self, _session_id: &str) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 pub type SharedEventBus = Arc<dyn EventBus>;

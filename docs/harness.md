@@ -28,7 +28,7 @@ session/new → params._meta.pluginDirs   // absolute path to harness/ when reso
 |-----------|---------------------------|
 | `AGENTS.md` + verify digest | Always (via `_meta.rules`) |
 | `skills/*`, `agents/*` | When harness path resolves → `_meta.pluginDirs` (Grok session plugin) |
-| `personas/*`, `roles/*` | Not part of plugin convention; copy into `.grok/personas` / `.grok/roles` for TUI native resolution |
+| `personas/*`, `roles/*` | Not part of plugin convention; copy into `.grok/personas` / `.grok/roles` for TUI native resolution. Desktop still injects a short role digest via `_meta.rules` so workers get narrow capability guidance without the copy step. |
 
 **Path resolution** (`GROK_BUILD_HARNESS_DIR` override, then executable-relative, then repo `harness/` for dev). Release bundles stage harness under `Resources/harness` and next to the Agent Host binary. If resolution fails, Desktop soft-falls back to **rules-only** injection (no session crash).
 
@@ -78,7 +78,8 @@ Grok’s bundled `/design` and `/execute-plan` remain the heavy DAG pipelines; t
 | Plan mode plan file | Session plan / `.grok/plan.md` conventions |
 | Goal mode / durable tasks | Honor platform contract Goal/Acceptance |
 | Background + monitor | AGENTS background section; orchestrate waits |
-| Prompt cache efficiency | Short stable `AGENTS.md` + digest-only verify injection |
+| Prompt cache efficiency | Short stable `AGENTS.md` + digest-only verify/role injection |
+| Host terminal policy (fail-closed v2) | Shells, interpreters, `npm run`, containers, network CLIs require confirmation; plan mode is inspection-only |
 | Privacy / Private Chat | No exfil guidance; argv-only verify preference |
 | Auto verification gate | Definition of done requires real `Verify:` evidence |
 | Grok 4.5 in model catalog | Surface via CLI catalog; Desktop default remains `grok-build` unless user/settings choose otherwise |

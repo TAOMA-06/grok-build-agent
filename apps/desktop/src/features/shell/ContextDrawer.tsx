@@ -445,6 +445,10 @@ export function ContextDrawer({
             <label>Constraints, one per line<textarea value={taskConstraints} onChange={(event) => setTaskConstraints(event.target.value)} /></label>
             <label>Acceptance criteria, one per line<textarea value={taskAcceptance} onChange={(event) => setTaskAcceptance(event.target.value)} /></label>
             <label>Allowed paths, one per line<textarea value={taskAllowedPaths} onChange={(event) => setTaskAllowedPaths(event.target.value)} /></label>
+            <div className={taskAllowedPaths.trim() ? "gb-apply-status ready" : "gb-apply-status"}>
+              <strong>{taskAllowedPaths.trim() ? t.allowedPathsActive : t.allowedPathsUnrestricted}</strong>
+              <span>{t.allowedPathsHint}</span>
+            </div>
             <label>Verification commands, one per line<textarea value={taskVerification} onChange={(event) => setTaskVerification(event.target.value)} /></label>
             <button type="button" className="gb-review-button" disabled={taskSaving} onClick={() => void saveTaskDefinition()}>{taskSaving ? t.saving : t.saveChanges}</button>
           </div>
@@ -458,8 +462,11 @@ export function ContextDrawer({
         {!privateChat && <Tabs.Content value="verification" className="gb-drawer-content">
           <div className="gb-drawer-toolbar"><span>Completion gate</span><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => { void verificationQuery.refetch(); void completionQuery.refetch(); }}><RefreshCw size={14} /></button></div>
           {!taskQuery.data && <div className="gb-drawer-empty">Save the task contract to enable platform verification.</div>}
+          {(taskQuery.data?.verificationCommands.length ?? 0) > 0 && completionQuery.data && !completionQuery.data.ready && (
+            <div className="gb-apply-status blocked"><strong>{t.verificationRequiredBanner}</strong><span>{t.completionGateBlocked}</span></div>
+          )}
           {taskQuery.data?.verificationCommands.map((command) => <div className="gb-drawer-activity" key={command}><div><strong>{command}</strong><small>Required verification</small></div><div><button type="button" className="gb-review-button" disabled={verificationRunning !== null} onClick={() => void executeVerification(command)}>{verificationRunning === command ? "Running…" : "Run"}</button><button type="button" className="gb-icon-button" title="Not run" onClick={() => void recordVerification(command, "not_run")}>–</button><button type="button" className="gb-icon-button" title="Blocked" onClick={() => void recordVerification(command, "blocked")}>!</button></div></div>)}
-          {completionQuery.data && <div className={completionQuery.data.ready ? "gb-apply-status ready" : "gb-apply-status blocked"}><strong>{completionQuery.data.ready ? "Ready to complete" : "Verification required"}</strong><span>{completionQuery.data.blockers.join(" · ") || "No unresolved platform blockers."}</span></div>}
+          {completionQuery.data && <div className={completionQuery.data.ready ? "gb-apply-status ready" : "gb-apply-status blocked"}><strong>{completionQuery.data.ready ? t.completionGateReady : t.completionGateBlocked}</strong><span>{completionQuery.data.blockers.join(" · ") || "No unresolved platform blockers."}</span></div>}
           {completionQuery.data?.ready && taskQuery.data?.state === "verifying" && <button type="button" className="gb-review-button" onClick={() => void bridge.completeTask(taskId).then(() => { void taskQuery.refetch(); void completionQuery.refetch(); })}>Mark task completed</button>}
           {verificationQuery.data?.map((result) => <div className="gb-drawer-activity" key={result.verificationId}><span className={`gb-status-dot ${result.status === "passed" ? "idle" : "running"}`} /><div><strong>{result.command}</strong><small>{result.status}{result.summary ? ` · ${result.summary}` : ""}</small></div></div>)}
         </Tabs.Content>}

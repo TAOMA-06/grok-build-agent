@@ -117,6 +117,7 @@ pub fn is_write_method(method: &str) -> bool {
         method,
         "runtime.start"
             | "runtime.stop"
+            | "host.shutdown"
             | "session.create"
             | "session.resume"
             | "session.prompt"
@@ -263,6 +264,12 @@ mod tests {
         terminal_input.meta = None;
         assert!(matches!(
             authorize(&terminal_input, "secret"),
+            Err(HostRpcError::MissingWriteMetadata)
+        ));
+        let mut shutdown = request("host.shutdown");
+        shutdown.meta = None;
+        assert!(matches!(
+            authorize(&shutdown, "secret"),
             Err(HostRpcError::MissingWriteMetadata)
         ));
     }

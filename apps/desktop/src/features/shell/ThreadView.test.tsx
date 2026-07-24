@@ -89,4 +89,69 @@ describe("ThreadView", () => {
     expect(screen.getByTestId("empty-task-state")).toBeInTheDocument();
     expect(screen.queryByTestId("execution-flight-deck")).not.toBeInTheDocument();
   });
+
+  it("shows a plan-mode pill when the active task is planning", () => {
+    render(
+      <ThreadView
+        {...props}
+        session={{
+          ...recoveredSession,
+          summary: { ...recoveredSession.summary, mode: "plan" },
+          modeState: {
+            currentMode: "plan",
+            availableModes: [],
+            liveSwitchSupported: false,
+            source: "desktop",
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("Plan")).toBeInTheDocument();
+  });
+
+  it("classifies host permission prompts with a category and reason", () => {
+    render(
+      <ThreadView
+        {...props}
+        session={{
+          ...recoveredSession,
+          // Non-empty transcript so the permission card mounts in the thread column.
+          blocks: [
+            {
+              id: "u1",
+              type: "user",
+              text: "run a shell check",
+            },
+          ],
+        }}
+        pendingPermission={{
+          jsonrpc: "2.0",
+          id: "platform:r1",
+          method: "session/request_permission",
+          params: {
+            description:
+              "Shell, interpreter, package script, network, or elevated tool requires confirmation",
+            action: {
+              argv: ["bash", "./hack.sh"],
+              risk: "high",
+              effect: "execute",
+              tool: "terminal.create",
+            },
+            requiresSecondConfirmation: false,
+            options: [
+              { optionId: "platform:allow-once", name: "Allow once", kind: "allow_once" },
+              { optionId: "platform:deny", name: "Deny", kind: "reject_once" },
+            ],
+          },
+        }}
+        permissionOptions={[
+          { optionId: "platform:allow-once", name: "Allow once", kind: "allow_once" },
+          { optionId: "platform:deny", name: "Deny", kind: "reject_once" },
+        ]}
+      />,
+    );
+    expect(screen.getByText(/Shell or script execution|Shell 或脚本执行/)).toBeInTheDocument();
+    expect(screen.getByText(/bash \.\/hack\.sh/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeInTheDocument();
+  });
 });

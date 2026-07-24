@@ -91,6 +91,10 @@ Never put secrets in handoff files. Prefer ignoring `.grok/scratch/` in git when
 - Never force-push, never `reset --hard`, never skip hooks unless the user insists.
 - Confirm before destructive or hard-to-reverse shared actions (push, drop data, etc.).
 - Match existing project patterns; prefer editing existing files; do not create docs the user did not ask for.
+- Desktop Host treats shells (`bash`/`zsh` scripts), interpreters (`python`/`node` files), `npm run`, containers, and network CLIs as **confirmation-required**. Prefer `cargo test` / `git status` / `rg` style argv checks.
+- Plan mode is inspection-only on the Host: no product FS writes, no package scripts, no PTY input until the plan is approved.
+- Honor task contract `Allowed path` lists. Keep handoffs under workspace `.grok/scratch/<id>/` only — Host denies writing `summary.md` / `review.md` outside that tree.
+- Desktop **Strict terminal** setting (when on) only auto-allows pure inspection tools; `cargo test` / `npm test` need confirmation.
 
 ## Skills
 

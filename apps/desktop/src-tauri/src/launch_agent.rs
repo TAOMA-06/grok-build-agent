@@ -161,7 +161,7 @@ fn install_and_kickstart(executable: &Path) -> Result<(), LaunchAgentError> {
            <key>HOME</key><string>{}</string>\n\
            <key>PATH</key><string>{}/.grok/bin:{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>\n\
          </dict>\n\
-         <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n\
+         <key>RunAtLoad</key><false/><key>KeepAlive</key><false/>\n\
          </dict></plist>\n",
         xml_escape(&executable.to_string_lossy()),
         xml_escape(&home.to_string_lossy()),

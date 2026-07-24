@@ -228,6 +228,7 @@ export function useDesktopController(
           reasoningEffort: resolveRuntimeEffort(state, summary),
           alwaysApprove: permissionAlwaysApprove(policy),
           useHarness: state.settings.useHarness,
+          strictTerminal: state.settings.strictTerminal,
           sandbox: summary.sandbox ?? state.settings.sandbox,
           privacyMode: state.settings.privacyMode,
           privateChat: isPrivateChatSession(state, sessionId),
@@ -548,13 +549,17 @@ export function useDesktopController(
     const state = useAppStore.getState();
     const sessionId = state.activeSessionId;
     if (!sessionId) return;
-    const summary = state.sessions[sessionId]?.summary;
-    const connectionIsLive = Boolean(
-      state.status.running
-      && state.status.connectionId
-      && summary?.connectionId
-      && state.status.connectionId === summary.connectionId,
-    );
+    const session = state.sessions[sessionId];
+    const summary = session?.summary;
+    // Only trust live host status for cancel IPC. Summary may still hold a
+    // stale connectionId from a previous run while reconnect is in flight.
+    const liveConnectionId = state.status.running
+      ? (state.status.connectionId ?? null)
+      : null;
+    const liveRemoteSessionId = state.status.running
+      ? (state.status.sessionId ?? summary?.remoteSessionId ?? null)
+      : null;
+    const connectionIsLive = Boolean(liveConnectionId && liveRemoteSessionId);
     const promptInFlight = (promptInFlightBySessionRef.current.get(sessionId) ?? 0) > 0;
     const busyAt = sendBusyAtBySessionRef.current.get(sessionId);
     const busyFor = busyAt == null
@@ -562,6 +567,8 @@ export function useDesktopController(
       : performance.now() - busyAt;
     // Match Stop arming: ignore cancel that arrives before Stop is clickable,
     // unless a live prompt/connection already makes cancel meaningful.
+    // (Busy-but-reconnecting without a live host is NOT enough — that would
+    // abort an in-flight startAgent with a stale cancelPrompt.)
     if (!promptInFlight && !connectionIsLive && busyFor < STOP_ARM_MS) {
       return;
     }
@@ -569,7 +576,6 @@ export function useDesktopController(
     cancelEpochRef.current += 1;
     sendBusyAtBySessionRef.current.delete(sessionId);
     submissionsInFlightBySessionRef.current.delete(sessionId);
-    const shouldCancelPrompt = promptInFlight || connectionIsLive;
 
     // Clear busy/connecting immediately so Stop never leaves the UI stuck,
     // even when cancel IPC fails (e.g. stale host returning `{}` as unit).
@@ -586,23 +592,51 @@ export function useDesktopController(
       });
     }
 
-    // Skip cancelPrompt when nothing is live/in-flight — a Send→Stop race with
-    // stale connection ids otherwise surfaces "agent is not running".
-    if (!shouldCancelPrompt || !summary?.connectionId || !summary.remoteSessionId) {
-      promptInFlightBySessionRef.current.delete(sessionId);
-      return;
+    // Soft cancel (ACP session/cancel) when the host reports a live session,
+    // then always hard-stop the runtime so a non-cooperative agent cannot keep
+    // running after the operator pressed Stop.
+    let cancelError: string | null = null;
+    if (connectionIsLive && liveConnectionId && liveRemoteSessionId) {
+      try {
+        await bridge.cancelPrompt(liveConnectionId, liveRemoteSessionId);
+      } catch (error) {
+        const reason = String(error);
+        if (!/not running|NotRunning/i.test(reason)) {
+          cancelError = reason;
+        }
+      }
     }
     try {
-      await bridge.cancelPrompt(summary.connectionId, summary.remoteSessionId);
+      await bridge.stopAgent();
+      useAppStore.getState().setStatus({
+        running: false,
+        connectionId: null,
+        sessionId: null,
+      });
+      // Stale connection ids must not be reused after a hard stop.
+      if (summary) {
+        useAppStore.getState().updateSummary(sessionId, {
+          connectionId: null,
+          remoteSessionId: null,
+        });
+      }
     } catch (error) {
       const reason = String(error);
-      if (/not running|NotRunning/i.test(reason)) return;
-      state.addBlock(sessionId, {
-        id: crypto.randomUUID(),
-        type: "system",
-        level: "warn",
-        text: translate("cancelFailed", { reason }),
-      });
+      if (cancelError) {
+        useAppStore.getState().addBlock(sessionId, {
+          id: crypto.randomUUID(),
+          type: "system",
+          level: "warn",
+          text: translate("cancelFailed", { reason: cancelError }),
+        });
+      } else if (!/not running|NotRunning/i.test(reason)) {
+        useAppStore.getState().addBlock(sessionId, {
+          id: crypto.randomUUID(),
+          type: "system",
+          level: "warn",
+          text: translate("cancelFailed", { reason }),
+        });
+      }
     } finally {
       promptInFlightBySessionRef.current.delete(sessionId);
     }
@@ -624,6 +658,7 @@ export function useDesktopController(
           summary.permissionPolicy ?? state.settings.permissionPolicy,
         ),
         useHarness: state.settings.useHarness,
+        strictTerminal: state.settings.strictTerminal,
         sandbox: summary.sandbox ?? state.settings.sandbox,
         privacyMode: state.settings.privacyMode,
         privateChat: isPrivateChatSession(state, sessionId),

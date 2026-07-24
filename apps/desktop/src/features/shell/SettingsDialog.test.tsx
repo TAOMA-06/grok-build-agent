@@ -8,7 +8,7 @@ import { mockDesktopBridge } from "../../platform/mockBridge";
 import { defaultSettings, useAppStore } from "../../store";
 import { SettingsDialog } from "./SettingsDialog";
 
-function renderDialog(bridge: DesktopBridge) {
+function renderDialog(bridge: DesktopBridge, initialTab?: "general" | "agent" | "permissions") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function LocaleObserver({ children }: { children: ReactNode }) {
     useTranslation();
@@ -18,7 +18,7 @@ function renderDialog(bridge: DesktopBridge) {
     <QueryClientProvider client={client}>
       <DesktopBridgeContext.Provider value={bridge}>
         <LocaleObserver>
-          <SettingsDialog open onOpenChange={vi.fn()} />
+          <SettingsDialog open onOpenChange={vi.fn()} initialTab={initialTab} />
         </LocaleObserver>
       </DesktopBridgeContext.Provider>
     </QueryClientProvider>,
@@ -74,6 +74,35 @@ describe("SettingsDialog", () => {
     await waitFor(() => {
       expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ codingDataPrivacy: false }));
       expect(setCodingDataPrivacy).toHaveBeenCalledWith(false);
+    });
+  });
+
+  it("warns when Full auto is selected and persists strict terminal policy", async () => {
+    applyLocalePreference("en");
+    useAppStore.setState({
+      settings: { ...defaultSettings(), locale: "en", privacyMode: "strict" },
+    });
+    const saveSettings = vi.fn().mockResolvedValue(undefined);
+    renderDialog({ ...mockDesktopBridge, saveSettings }, "agent");
+
+    // Agent tab contains permission + strict-terminal controls.
+    const permissions = await screen.findByRole("combobox", { name: t.permissions });
+    fireEvent.change(permissions, { target: { value: "full_auto" } });
+
+    await waitFor(() => {
+      expect(saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ permissionPolicy: "full_auto" }),
+      );
+    });
+    expect(await screen.findByText(t.permissionPolicyFullAutoWarning)).toBeInTheDocument();
+
+    const strictTerminal = screen.getByRole("checkbox", { name: t.strictTerminal });
+    expect(strictTerminal).not.toBeChecked();
+    fireEvent.click(strictTerminal);
+    await waitFor(() => {
+      expect(saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ strictTerminal: true }),
+      );
     });
   });
 });

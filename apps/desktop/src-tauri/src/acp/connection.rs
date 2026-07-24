@@ -183,16 +183,18 @@ impl ConnectionInner {
         *self.stopping.lock() = true;
         self.fail_all_pending(AcpError::NotRunning);
         self.terminals.release_all().await;
+        // Every Grok child is spawned as its own process-group leader. Killing
+        // the group, rather than only the CLI parent, also terminates MCP and
+        // build-tool descendants that would otherwise be adopted by launchd.
+        #[cfg(unix)]
+        if self.pid > 0 {
+            unsafe {
+                libc::kill(-(self.pid as libc::pid_t), libc::SIGKILL);
+            }
+        }
         {
             let mut child = self.child.lock();
             let _ = child.start_kill();
-        }
-        // Belt-and-suspenders: ensure the process group is gone on Unix.
-        #[cfg(unix)]
-        if self.pid > 0 {
-            let _ = std::process::Command::new("kill")
-                .args(["-9", &self.pid.to_string()])
-                .status();
         }
         // Poll without holding the mutex across await (Send requirement).
         for _ in 0..30 {
@@ -293,6 +295,7 @@ pub fn connection_key_from_config(config: &StartConfig, workspace: PathBuf) -> C
             crate::platform::PrivacyMode::Standard => "standard".into(),
         },
         private_chat: config.private_chat,
+        strict_terminal: config.strict_terminal,
     }
 }
 
@@ -441,6 +444,19 @@ pub async fn spawn_connection(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+
+    // Keep the Grok CLI and every process it launches in an isolated group.
+    // `kill_child` can then reliably cancel a non-cooperative tool invocation
+    // without signalling the Agent Host that launched it.
+    #[cfg(unix)]
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setpgid(0, 0) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
 
     if let Some(path) = std::env::var_os("PATH") {
         let mut entries = Vec::new();

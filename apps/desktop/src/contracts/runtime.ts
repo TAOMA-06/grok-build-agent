@@ -39,6 +39,8 @@ export type ConnectionKey = {
   privacyMode?: import("./settings").PrivacyMode;
   /** Private sessions must not share a process or event bus with durable sessions. */
   privateChat?: boolean;
+  /** Host terminal policy: only pure inspection tools auto-allow when true. */
+  strictTerminal?: boolean;
 };
 
 export type ConnectionId = string;
@@ -116,6 +118,8 @@ export type StartConfig = {
   resumeSessionId?: string | null;
   /** Keep this desktop session out of durable Host persistence. */
   privateChat?: boolean;
+  /** Host terminal policy strictness for this runtime process. */
+  strictTerminal?: boolean;
 };
 
 /** Process-level status (legacy single-runtime + pool-compatible). */
@@ -169,7 +173,8 @@ export function connectionKeyString(key: ConnectionKey): string {
   const model = key.modelId?.trim() || "default";
   const effort = key.reasoningEffort?.trim() || "default";
   const privacy = key.privacyMode === "standard" ? "standard" : "strict";
-  return `${key.workspaceRoot}::${key.sandbox}::${profile}::${privacy}::${key.alwaysApprove ? "approve" : "ask"}::${model}::${effort}::${key.privateChat ? "private" : "durable"}`;
+  const terminal = key.strictTerminal ? "strict-term" : "open-term";
+  return `${key.workspaceRoot}::${key.sandbox}::${profile}::${privacy}::${key.alwaysApprove ? "approve" : "ask"}::${model}::${effort}::${key.privateChat ? "private" : "durable"}::${terminal}`;
 }
 
 export function emptyRuntimeSnapshot(now = new Date().toISOString()): RuntimeSnapshot {

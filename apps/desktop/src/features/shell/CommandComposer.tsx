@@ -240,6 +240,8 @@ export function CommandComposer({
       setStopArmed(false);
       return;
     }
+    // Arm Stop quickly so the operator can interrupt; still briefly absorb
+    // double-click races from Send.
     const timer = window.setTimeout(() => setStopArmed(true), STOP_ARM_MS);
     return () => window.clearTimeout(timer);
   }, [busy, connecting]);
@@ -250,22 +252,11 @@ export function CommandComposer({
     return () => window.clearTimeout(timer);
   }, [launching]);
 
-  useEffect(() => {
-    const openModel = () => setModelOpen(true);
-    const openEffort = () => setEffortOpen(true);
-    const focusComposer = () => textareaRef.current?.focus();
-    window.addEventListener("grok:open-model", openModel);
-    window.addEventListener("grok:open-effort", openEffort);
-    window.addEventListener("grok:focus-composer", focusComposer);
-    return () => {
-      window.removeEventListener("grok:open-model", openModel);
-      window.removeEventListener("grok:open-effort", openEffort);
-      window.removeEventListener("grok:focus-composer", focusComposer);
-    };
-  }, []);
-
   function acceptAttachments(next: ComposerAttachment[]) {
-    const combined = [...attachments, ...next];
+    // Read latest attachments from the store so drop/paste/pickers never merge
+    // against a stale closure after rapid successive adds.
+    const current = useAppStore.getState().effectiveAttachments();
+    const combined = [...current, ...next];
     const blockedAttachment = settings.privacyMode === "strict"
       ? combined.find((attachment) => isSensitiveAttachmentName(attachment.name))
       : undefined;
@@ -289,6 +280,81 @@ export function CommandComposer({
     setAttachmentError(null);
     setEffectiveAttachments(combined);
   }
+
+  useEffect(() => {
+    const openModel = () => setModelOpen(true);
+    const openEffort = () => setEffortOpen(true);
+    const focusComposer = () => textareaRef.current?.focus();
+    const cancelIfBusy = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (!(busy || connecting || stopArmed)) return;
+      // Don't steal Escape from composer popovers / privacy review.
+      if (modelOpen || effortOpen || privacyReview) return;
+      event.preventDefault();
+      void onCancel();
+    };
+    window.addEventListener("grok:open-model", openModel);
+    window.addEventListener("grok:open-effort", openEffort);
+    window.addEventListener("grok:focus-composer", focusComposer);
+    window.addEventListener("keydown", cancelIfBusy);
+    return () => {
+      window.removeEventListener("grok:open-model", openModel);
+      window.removeEventListener("grok:open-effort", openEffort);
+      window.removeEventListener("grok:focus-composer", focusComposer);
+      window.removeEventListener("keydown", cancelIfBusy);
+    };
+  }, [busy, connecting, stopArmed, onCancel, modelOpen, effortOpen, privacyReview]);
+
+  // Tauri 2 disables HTML5 file drop by default (dragDropEnabled). Listen to
+  // native drag-drop paths and stage them the same way as the paperclip picker.
+  useEffect(() => {
+    // jsdom / unit tests have no Tauri IPC — skip the dynamic import entirely
+    // so vitest does not hang resolving @tauri-apps/api/webview.
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window) && !("__TAURI__" in window)) {
+      return;
+    }
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      try {
+        const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+        if (disposed) return;
+        unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+          if (event.payload.type !== "drop") return;
+          const paths = event.payload.paths ?? [];
+          if (!paths.length) return;
+          void (async () => {
+            const state = useAppStore.getState();
+            const privateChat = state.activeSessionId
+              ? Boolean(state.sessions[state.activeSessionId]?.privateChat)
+              : state.settings.privateChat;
+            const privacyMode = state.settings.privacyMode;
+            const blockedPath = privacyMode === "strict"
+              ? paths.find((path) => isSensitiveAttachmentName(path))
+              : undefined;
+            if (blockedPath) {
+              setAttachmentError(translate("privacyBlockedAttachment", {
+                name: blockedPath.split(/[\\/]/).pop() ?? blockedPath,
+              }));
+              return;
+            }
+            try {
+              const staged = await bridge.stageAttachments(paths, privateChat);
+              acceptAttachments(staged);
+            } catch (error) {
+              setAttachmentError(String(error));
+            }
+          })();
+        });
+      } catch {
+        // Browser / mock bridge: HTML5 onDrop still handles File objects.
+      }
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [bridge]);
 
   async function attachPaths() {
     const paths = await bridge.chooseFiles();
@@ -491,6 +557,12 @@ export function CommandComposer({
               void submit({ forceMessage: true });
             }}>{t.sendAsMessage}</button>
           )}
+        </div>
+      )}
+      {mode === "plan" && (
+        <div className="gb-composer-plan" role="status">
+          <span><ShieldAlert size={14} /><b>{t.planModeBanner}</b></span>
+          <p>{t.planModeBannerDetail}</p>
         </div>
       )}
       {privacyReview && (
@@ -780,7 +852,13 @@ export function CommandComposer({
             </button>
           )}
           {stopArmed && (
-            <button type="button" className="gb-send stop" aria-label={t.stopGrok} onClick={() => void onCancel()}>
+            <button
+              type="button"
+              className="gb-send stop"
+              aria-label={t.stopGrok}
+              title={t.stopGrok}
+              onClick={() => void onCancel()}
+            >
               <Square size={12} fill="currentColor" />
             </button>
           )}

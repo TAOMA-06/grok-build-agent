@@ -34,6 +34,7 @@ impl GrokAcpAdapter {
             model: config.model.clone(),
             reasoning_effort: None,
             always_approve: config.approval_policy == "full_auto",
+            strict_terminal: false,
             cwd: config.workspace_root.clone(),
             rules: config.rules.clone(),
             agent_profile: config.agent_profile.clone(),

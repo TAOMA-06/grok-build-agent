@@ -55,6 +55,9 @@ pub struct AppSettings {
     #[serde(default = "default_true")]
     pub auto_update_cli: bool,
     pub always_approve: bool,
+    /// Host terminal policy: only pure inspection tools auto-allow when true.
+    #[serde(default)]
+    pub strict_terminal: bool,
     #[serde(default = "default_legacy_use_harness")]
     pub use_harness: bool,
     #[serde(default)]
@@ -105,6 +108,8 @@ struct AppSettingsFile {
     #[serde(default = "default_true")]
     pub auto_update_cli: bool,
     pub always_approve: bool,
+    #[serde(default)]
+    pub strict_terminal: bool,
     #[serde(default = "default_legacy_use_harness")]
     pub use_harness: bool,
     #[serde(default)]
@@ -142,6 +147,7 @@ impl Default for AppSettings {
             permission_policy: default_permission_policy(),
             auto_update_cli: true,
             always_approve: false,
+            strict_terminal: false,
             use_harness: default_use_harness(),
             sandbox: SandboxMode::Workspace,
             cwd: String::new(),
@@ -292,6 +298,7 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
         permission_policy: file.permission_policy,
         auto_update_cli: file.auto_update_cli,
         always_approve: file.always_approve,
+        strict_terminal: file.strict_terminal,
         use_harness: file.use_harness,
         sandbox: file.sandbox,
         cwd: file.cwd,
@@ -328,6 +335,7 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), ConfigError> {
         permission_policy: settings.permission_policy.clone(),
         auto_update_cli: settings.auto_update_cli,
         always_approve: settings.always_approve,
+        strict_terminal: settings.strict_terminal,
         use_harness: settings.use_harness,
         sandbox: settings.sandbox,
         cwd: settings.cwd.clone(),
