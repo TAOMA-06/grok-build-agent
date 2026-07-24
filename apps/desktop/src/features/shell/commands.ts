@@ -140,10 +140,8 @@ export function buildCommandCatalog(
   // Keep /summarize ↔ /recap aliases even when live ACP advertises only one name.
   if (catalog.has("/recap") && catalog.has("/summarize")) {
     const recap = catalog.get("/recap")!;
-    catalog.set("/recap", {
-      ...recap,
-      aliases: [...new Set([...recap.aliases, "/summarize"])],
-    });
+    const aliases = Array.from(new Set([...recap.aliases, "/summarize"])) as Array<`/${string}`>;
+    catalog.set("/recap", { ...recap, aliases });
     catalog.delete("/summarize");
   } else if (catalog.has("/recap")) {
     const recap = catalog.get("/recap")!;
@@ -152,10 +150,8 @@ export function buildCommandCatalog(
     }
   } else if (catalog.has("/summarize")) {
     const summarize = catalog.get("/summarize")!;
-    catalog.set("/summarize", {
-      ...summarize,
-      aliases: [...new Set([...summarize.aliases, "/recap"])],
-    });
+    const aliases = Array.from(new Set([...summarize.aliases, "/recap"])) as Array<`/${string}`>;
+    catalog.set("/summarize", { ...summarize, aliases });
   }
   for (const name of DOCUMENTED_UNSUPPORTED) {
     if (!catalog.has(name)) catalog.set(name, unsupported(name));
