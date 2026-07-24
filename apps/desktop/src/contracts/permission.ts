@@ -94,6 +94,91 @@ export function isInternalServerMethod(method: string): boolean {
   return INTERNAL_SERVER_METHODS.has(method);
 }
 
+/** UI category for Host policy decisions (never invents option IDs). */
+export type PermissionRiskCategory =
+  | "shell"
+  | "interpreter"
+  | "network"
+  | "package"
+  | "container"
+  | "destructive"
+  | "path_scope"
+  | "sensitive"
+  | "elevated"
+  | "generic";
+
+/**
+ * Classify a platform ActionRequest / permission params for user-facing copy.
+ * Prefer Host `description` keywords, then argv/program heuristics.
+ */
+export function classifyPermissionCategory(params: unknown): PermissionRiskCategory {
+  if (!params || typeof params !== "object") return "generic";
+  const p = params as Record<string, unknown>;
+  const description = String(p.description ?? "").toLowerCase();
+  const action =
+    p.action && typeof p.action === "object"
+      ? (p.action as Record<string, unknown>)
+      : null;
+  const risk = String(action?.risk ?? "").toLowerCase();
+  const effect = String(action?.effect ?? "").toLowerCase();
+  const argv = Array.isArray(action?.argv)
+    ? action.argv.map((item) => String(item).toLowerCase())
+    : [];
+  const program = (argv[0] ?? "").split(/[/\\]/).pop() ?? "";
+
+  if (
+    description.includes("sensitive") ||
+    description.includes("allowed paths") ||
+    description.includes("outside the task")
+  ) {
+    if (description.includes("sensitive")) return "sensitive";
+    if (description.includes("allowed paths") || description.includes("outside the task")) {
+      return "path_scope";
+    }
+  }
+  if (description.includes("outside the workspace")) return "path_scope";
+  if (["docker", "podman", "kubectl", "helm", "nerdctl"].includes(program)) {
+    return "container";
+  }
+  if (
+    effect === "network" ||
+    ["curl", "wget", "ssh", "scp", "http", "httpie", "rsync", "nc", "netcat"].includes(program)
+  ) {
+    return "network";
+  }
+  if (
+    effect === "destructive" ||
+    risk === "critical" ||
+    ["rm", "sudo", "doas", "chmod", "chown", "dd", "shred"].includes(program)
+  ) {
+    return "destructive";
+  }
+  if (
+    ["npm", "pnpm", "yarn", "bun", "npx", "pip", "pip3", "cargo", "brew"].includes(program) &&
+    argv.some((part) =>
+      ["install", "i", "add", "run", "exec", "dlx", "publish", "update"].includes(part),
+    )
+  ) {
+    return "package";
+  }
+  if (
+    ["sh", "bash", "zsh", "fish", "dash", "pwsh", "powershell", "cmd"].includes(program)
+  ) {
+    return "shell";
+  }
+  if (
+    ["python", "python3", "node", "nodejs", "ruby", "perl", "php", "osascript", "deno"].includes(
+      program,
+    )
+  ) {
+    return "interpreter";
+  }
+  if (description.includes("shell") || description.includes("interpreter")) return "shell";
+  if (description.includes("network")) return "network";
+  if (risk === "high") return "elevated";
+  return "generic";
+}
+
 /**
  * Extract PermissionOption[] from ACP params without inventing IDs.
  * Returns empty array when options are missing (UI should show error, not defaults).

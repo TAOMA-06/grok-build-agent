@@ -68,7 +68,7 @@ describe("ConnectionKey model segment", () => {
         powerProfile: null,
         modelId: "grok-4.5",
       }),
-    ).toBe("/repo::workspace::off::strict::ask::grok-4.5::default::durable");
+    ).toBe("/repo::workspace::off::strict::ask::grok-4.5::default::durable::open-term");
     expect(
       connectionKeyString({
         workspaceRoot: "/repo",
@@ -76,7 +76,7 @@ describe("ConnectionKey model segment", () => {
         alwaysApprove: true,
         powerProfile: null,
       }),
-    ).toBe("/repo::workspace::off::strict::approve::default::default::durable");
+    ).toBe("/repo::workspace::off::strict::approve::default::default::durable::open-term");
     expect(
       connectionKeyString({
         workspaceRoot: "/repo",
@@ -86,7 +86,7 @@ describe("ConnectionKey model segment", () => {
         modelId: "grok-4.5",
         reasoningEffort: "high",
       }),
-    ).toBe("/repo::workspace::off::strict::ask::grok-4.5::high::durable");
+    ).toBe("/repo::workspace::off::strict::ask::grok-4.5::high::durable::open-term");
     expect(
       connectionKeyString({
         workspaceRoot: "/repo",
@@ -96,6 +96,16 @@ describe("ConnectionKey model segment", () => {
         modelId: "grok-4.5",
         privateChat: true,
       }),
-    ).toBe("/repo::workspace::off::strict::ask::grok-4.5::default::private");
+    ).toBe("/repo::workspace::off::strict::ask::grok-4.5::default::private::open-term");
+    expect(
+      connectionKeyString({
+        workspaceRoot: "/repo",
+        sandbox: "workspace",
+        alwaysApprove: false,
+        powerProfile: null,
+        modelId: "grok-4.5",
+        strictTerminal: true,
+      }),
+    ).toBe("/repo::workspace::off::strict::ask::grok-4.5::default::durable::strict-term");
   });
 });

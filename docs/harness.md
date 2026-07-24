@@ -1,6 +1,6 @@
 # Power harness
 
-The harness makes Grok Build **use** its strengths instead of only exposing them in the UI. It tracks Grok CLI **0.2.103** (and 0.2.99+) and Desktop platform contracts (task focus, durable verification, privacy).
+The harness makes Grok Build **use** its strengths instead of only exposing them in the UI. It tracks Grok CLI **0.2.106** (and 0.2.103+) and Desktop platform contracts (task focus, durable verification, privacy).
 
 ## What it contains
 
@@ -28,7 +28,7 @@ session/new → params._meta.pluginDirs   // absolute path to harness/ when reso
 |-----------|---------------------------|
 | `AGENTS.md` + verify digest | Always (via `_meta.rules`) |
 | `skills/*`, `agents/*` | When harness path resolves → `_meta.pluginDirs` (Grok session plugin) |
-| `personas/*`, `roles/*` | Not part of plugin convention; copy into `.grok/personas` / `.grok/roles` for TUI native resolution |
+| `personas/*`, `roles/*` | Not part of plugin convention; copy into `.grok/personas` / `.grok/roles` for TUI native resolution. Desktop still injects a short role digest via `_meta.rules` so workers get narrow capability guidance without the copy step. |
 
 **Path resolution** (`GROK_BUILD_HARNESS_DIR` override, then executable-relative, then repo `harness/` for dev). Release bundles stage harness under `Resources/harness` and next to the Agent Host binary. If resolution fails, Desktop soft-falls back to **rules-only** injection (no session crash).
 
@@ -71,11 +71,15 @@ Grok’s bundled `/design` and `/execute-plan` remain the heavy DAG pipelines; t
 | Subagent personas + I/O contracts | `personas/*.toml` with inputs/outputs and capability defaults |
 | Roles | `roles/*.toml` for explore/plan/implementer/reviewer |
 | Optional per-worker `model` (0.2.98+) | Documented in AGENTS / orchestrate; omit to inherit parent |
+| CLI default `grok-4.5` + high/medium/low effort (0.2.105+) | Follow live catalog; Desktop settings may still seed `grok-build` until the user/catalog chooses otherwise |
+| `/summarize` alias for `/recap` (0.2.105+) | Documented ACP command + Desktop catalog alias |
+| In-place scheduled tasks; one-time schedules retired (0.2.106+) | Prefer background commands; update schedules in place when recurring |
 | `wait_commands_or_subagents` | Named in AGENTS + orchestrate skill |
 | Plan mode plan file | Session plan / `.grok/plan.md` conventions |
 | Goal mode / durable tasks | Honor platform contract Goal/Acceptance |
 | Background + monitor | AGENTS background section; orchestrate waits |
-| Prompt cache efficiency | Short stable `AGENTS.md` + digest-only verify injection |
+| Prompt cache efficiency | Short stable `AGENTS.md` + digest-only verify/role injection |
+| Host terminal policy (fail-closed v2) | Shells, interpreters, `npm run`, containers, network CLIs require confirmation; plan mode is inspection-only |
 | Privacy / Private Chat | No exfil guidance; argv-only verify preference |
 | Auto verification gate | Definition of done requires real `Verify:` evidence |
 | Grok 4.5 in model catalog | Surface via CLI catalog; Desktop default remains `grok-build` unless user/settings choose otherwise |

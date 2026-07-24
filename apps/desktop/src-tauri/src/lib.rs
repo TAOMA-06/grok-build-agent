@@ -30,13 +30,48 @@ use git_ops::{
 use runtime::RuntimeHealth;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use std::fs::{File, OpenOptions};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tauri::Manager;
 use tauri::{Emitter, State};
 
 struct AppState {
     host: Arc<host_client::HostClient>,
     host_subscription_started: AtomicBool,
+    // Holding this file descriptor keeps the advisory macOS instance lock for
+    // the full lifetime of the desktop process.
+    _instance_lock: Option<File>,
+}
+
+fn acquire_instance_lock() -> Result<Option<File>, String> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+
+        let directory = config::config_dir_path().map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        let path = std::path::Path::new(&directory).join("desktop-instance.lock");
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(path)
+            .map_err(|error| error.to_string())?;
+        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if result == 0 {
+            return Ok(Some(file));
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            return Ok(None);
+        }
+        Err(error.to_string())
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(None)
+    }
 }
 
 fn rpc_meta(correlation_id: &str, idempotency_key: Option<String>) -> host_rpc::RpcMeta {
@@ -1644,6 +1679,13 @@ async fn cancel_prompt(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let instance_lock = acquire_instance_lock().expect("acquire desktop instance lock");
+    #[cfg(unix)]
+    if instance_lock.is_none() {
+        // Another Grok Build Desktop window is already responsible for the
+        // shared Agent Host. Do not create another UI/runtime owner.
+        return;
+    }
     let host = Arc::new(
         host_client::HostClient::load_default().expect("load authenticated Agent Host client"),
     );
@@ -1654,6 +1696,7 @@ pub fn run() {
         .manage(AppState {
             host,
             host_subscription_started: AtomicBool::new(false),
+            _instance_lock: instance_lock,
         })
         .invoke_handler(tauri::generate_handler![
             probe_grok,
@@ -1766,6 +1809,32 @@ pub fn run() {
             official_install_url,
             cancel_prompt,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Stop Grok children and tear down the LaunchAgent Host on quit so
+            // background processes do not keep running after the UI closes.
+            if let tauri::RunEvent::Exit = event {
+                let host = app_handle.state::<AppState>().host.clone();
+                let _ = tauri::async_runtime::block_on(async {
+                    // New Hosts stop every connection before exiting. Retain a
+                    // backward-compatible active-runtime stop for an older
+                    // already-running Host during an in-place upgrade.
+                    if host
+                        .request(
+                            "host.shutdown",
+                            serde_json::json!({}),
+                            Some(rpc_meta("host-shutdown", None)),
+                        )
+                        .await
+                        .is_err()
+                    {
+                        let _ = host
+                            .request("runtime.stop", serde_json::json!({}), None)
+                            .await;
+                    }
+                });
+                let _ = launch_agent::uninstall();
+            }
+        });
 }

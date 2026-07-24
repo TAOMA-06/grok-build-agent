@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPermissionPrompt,
+  classifyPermissionCategory,
   extractPermissionOptions,
   isInternalServerMethod,
   isPermissionMethod,
@@ -66,5 +67,30 @@ describe("permission contracts", () => {
     expect(
       buildPermissionPrompt({ request, connectionId: "c1" }),
     ).toBeNull();
+  });
+
+  it("classifies host policy actions for user-facing categories", () => {
+    expect(
+      classifyPermissionCategory({
+        description: "Shell, interpreter, package script, network, or elevated tool requires confirmation",
+        action: { argv: ["bash", "./hack.sh"], risk: "high", effect: "execute" },
+      }),
+    ).toBe("shell");
+    expect(
+      classifyPermissionCategory({
+        description: "Terminal path is outside the task allowed paths and requires confirmation",
+        action: { argv: ["cat", "other/file"], risk: "low", effect: "execute" },
+      }),
+    ).toBe("path_scope");
+    expect(
+      classifyPermissionCategory({
+        action: { argv: ["docker", "run", "alpine"], risk: "critical", effect: "external_side_effect" },
+      }),
+    ).toBe("container");
+    expect(
+      classifyPermissionCategory({
+        action: { argv: ["curl", "https://example.com"], risk: "high", effect: "network" },
+      }),
+    ).toBe("network");
   });
 });

@@ -207,9 +207,14 @@ export function SettingsDialog({
                   <label className="gb-switch-row"><span>{t.privacyShield}<small>{t.privacyShieldHint}</small></span><input aria-label={t.privacyShield} type="checkbox" checked={draft.privacyMode === "strict"} onChange={(event) => patch({ privacyMode: event.target.checked ? "strict" : "standard" })} /></label>
                   <p className="gb-settings-copy">{draft.privacyMode === "strict" ? t.privacyStrict : t.privacyStandard}</p>
                   <p className="gb-settings-copy">{t.privacyServiceBoundary}</p>
-                  <label className="gb-switch-row"><span>{t.useHarness}<small>{t.useHarnessHint}</small></span><input aria-label={t.useHarness} type="checkbox" checked={draft.useHarness} onChange={(event) => patch({ useHarness: event.target.checked })} /></label>
+                  <label className="gb-switch-row"><span>{t.useHarness}<small>{t.useHarnessHint}</small></span><input aria-label={t.useHarness} type="checkbox" checked={draft.useHarness} onChange={(event) => applyImmediately({ useHarness: event.target.checked })} /></label>
                   <p className="gb-settings-copy">{draft.useHarness ? t.useHarnessOn : t.useHarnessOff}</p>
-                  <label><span>{t.permissions}<small>{t.permissionsHint}</small></span><select value={draft.permissionPolicy} onChange={(event) => patch({ permissionPolicy: event.target.value as Settings["permissionPolicy"] })}><option value="workspace_edit">{t.permissionWorkspace}</option><option value="ask_all">{t.permissionAsk}</option><option value="full_auto">{t.permissionAuto}</option></select></label>
+                  <label><span>{t.permissions}<small>{t.permissionsHint}</small></span><select aria-label={t.permissions} value={draft.permissionPolicy} onChange={(event) => applyImmediately({ permissionPolicy: event.target.value as Settings["permissionPolicy"] })}><option value="workspace_edit">{t.permissionWorkspace}</option><option value="ask_all">{t.permissionAsk}</option><option value="full_auto">{t.permissionAuto}</option></select></label>
+                  {draft.permissionPolicy === "full_auto" && (
+                    <p className="gb-settings-warning" role="status">{t.permissionPolicyFullAutoWarning}</p>
+                  )}
+                  <label className="gb-switch-row"><span>{t.strictTerminal}<small>{t.strictTerminalHint}</small></span><input aria-label={t.strictTerminal} type="checkbox" checked={draft.strictTerminal} onChange={(event) => applyImmediately({ strictTerminal: event.target.checked })} /></label>
+                  <p className="gb-settings-copy">{draft.strictTerminal ? t.strictTerminalOn : t.strictTerminalOff}</p>
                   <label className="gb-switch-row"><span>{t.keepCliUpdated}<small>{t.keepCliUpdatedHint}</small></span><input type="checkbox" checked={draft.autoUpdateCli} onChange={(event) => patch({ autoUpdateCli: event.target.checked })} /></label>
                   <details className="gb-advanced-settings"><summary>{t.advanced}</summary><label><span>{t.cliPathOverride}<small>{t.cliPathHint}</small></span><input value={draft.cliPathOverride} onChange={(event) => patch({ cliPathOverride: event.target.value, grokPath: event.target.value })} placeholder={t.autoDetect} /></label></details>
                 </section>

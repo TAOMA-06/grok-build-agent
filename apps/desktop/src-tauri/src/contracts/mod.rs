@@ -51,6 +51,9 @@ pub struct ConnectionKey {
     /// Private sessions must not share an event bus with durable sessions.
     #[serde(default)]
     pub private_chat: bool,
+    /// Host terminal policy strictness is process-scoped.
+    #[serde(default)]
+    pub strict_terminal: bool,
 }
 
 fn default_connection_privacy_mode() -> String {
@@ -97,8 +100,13 @@ impl ConnectionKey {
         } else {
             "durable"
         };
+        let terminal = if self.strict_terminal {
+            "strict-term"
+        } else {
+            "open-term"
+        };
         format!(
-            "{}::{}::{}::{privacy}::{approval}::{model}::{effort}::{retention}",
+            "{}::{}::{}::{privacy}::{approval}::{model}::{effort}::{retention}::{terminal}",
             self.workspace_root, sandbox, profile,
         )
     }
@@ -797,10 +805,11 @@ mod tests {
             reasoning_effort: None,
             privacy_mode: "strict".into(),
             private_chat: false,
+            strict_terminal: false,
         };
         assert_eq!(
             key.key_string(),
-            "/Users/me/proj::workspace::off::strict::ask::default::default::durable"
+            "/Users/me/proj::workspace::off::strict::ask::default::default::durable::open-term"
         );
         let with_model = ConnectionKey {
             model_id: Some("grok-4.5".into()),
@@ -809,7 +818,7 @@ mod tests {
         };
         assert_eq!(
             with_model.key_string(),
-            "/Users/me/proj::workspace::off::strict::ask::grok-4.5::high::durable"
+            "/Users/me/proj::workspace::off::strict::ask::grok-4.5::high::durable::open-term"
         );
         let private = ConnectionKey {
             private_chat: true,
@@ -817,7 +826,7 @@ mod tests {
         };
         assert_eq!(
             private.key_string(),
-            "/Users/me/proj::workspace::off::strict::ask::grok-4.5::high::private"
+            "/Users/me/proj::workspace::off::strict::ask::grok-4.5::high::private::open-term"
         );
     }
 
@@ -835,6 +844,7 @@ mod tests {
                     reasoning_effort: None,
                     privacy_mode: "strict".into(),
                     private_chat: false,
+                    strict_terminal: false,
                 },
                 state: ConnectionState::Ready,
                 grok_path: Some("/usr/local/bin/grok".into()),

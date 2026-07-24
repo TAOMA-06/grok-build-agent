@@ -49,6 +49,11 @@ export type Settings = {
   permissionPolicy: "workspace_edit" | "ask_all" | "full_auto";
   autoUpdateCli: boolean;
   alwaysApprove: boolean;
+  /**
+   * When true, Host terminal policy only auto-allows pure inspection tools
+   * (rg/git status/etc.). Project checks like `cargo test` / `npm test` require confirmation.
+   */
+  strictTerminal: boolean;
   useHarness: boolean;
   sandbox: SandboxMode;
   cwd: string;
@@ -103,6 +108,7 @@ export function defaultSettings(): Settings {
     permissionPolicy: "workspace_edit",
     autoUpdateCli: true,
     alwaysApprove: false,
+    strictTerminal: false,
     useHarness: true,
     sandbox: "workspace",
     cwd: "",
@@ -143,6 +149,7 @@ export function normalizeSettings(settings: Settings): Settings {
   // Keep legacy installs on their existing behavior; new installs use the default
   // supplied by defaultSettings above.
   const useHarness = (settings as { useHarness?: boolean }).useHarness === true;
+  const strictTerminal = (settings as { strictTerminal?: boolean }).strictTerminal === true;
   if (
     settings.schemaVersion === 8 &&
     defaultReasoningEffort === settings.defaultReasoningEffort &&
@@ -151,7 +158,8 @@ export function normalizeSettings(settings: Settings): Settings {
     codingDataPrivacy === settings.codingDataPrivacy &&
     codingDataPrivacyConfigured === settings.codingDataPrivacyConfigured &&
     privateChat === settings.privateChat &&
-    useHarness === settings.useHarness
+    useHarness === settings.useHarness &&
+    strictTerminal === Boolean(settings.strictTerminal)
   ) return settings;
   return {
     ...settings,
@@ -163,5 +171,6 @@ export function normalizeSettings(settings: Settings): Settings {
     codingDataPrivacyConfigured,
     privateChat,
     useHarness,
+    strictTerminal,
   };
 }

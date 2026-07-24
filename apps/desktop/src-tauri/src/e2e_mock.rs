@@ -39,6 +39,7 @@ mod tests {
             model: None,
             reasoning_effort: None,
             always_approve: false,
+            strict_terminal: false,
             cwd: cwd.to_string_lossy().into(),
             rules: None,
             agent_profile: None,
