@@ -2896,6 +2896,106 @@ impl Database {
         )?;
         Ok(())
     }
+
+    pub fn list_jobs(
+        &self,
+        workspace_id: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, DbError> {
+        let conn = self.conn.lock();
+        let mut stmt = if workspace_id.is_some() {
+            conn.prepare(
+                "SELECT job_id, workspace_id, task_id, kind, schedule, state, idempotency_key,
+                        policy_json, next_run_at, created_at, updated_at
+                 FROM jobs WHERE workspace_id = ?1 ORDER BY updated_at DESC",
+            )?
+        } else {
+            conn.prepare(
+                "SELECT job_id, workspace_id, task_id, kind, schedule, state, idempotency_key,
+                        policy_json, next_run_at, created_at, updated_at
+                 FROM jobs ORDER BY updated_at DESC LIMIT 200",
+            )?
+        };
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<serde_json::Value> {
+            Ok(serde_json::json!({
+                "jobId": row.get::<_, String>(0)?,
+                "workspaceId": row.get::<_, String>(1)?,
+                "taskId": row.get::<_, Option<String>>(2)?,
+                "kind": row.get::<_, String>(3)?,
+                "schedule": row.get::<_, Option<String>>(4)?,
+                "state": row.get::<_, String>(5)?,
+                "idempotencyKey": row.get::<_, Option<String>>(6)?,
+                "policy": serde_json::from_str::<serde_json::Value>(
+                    &row.get::<_, String>(7).unwrap_or_else(|_| "{}".into())
+                ).unwrap_or_else(|_| serde_json::json!({})),
+                "nextRunAt": row.get::<_, Option<String>>(8)?,
+                "createdAt": row.get::<_, String>(9)?,
+                "updatedAt": row.get::<_, String>(10)?,
+            }))
+        };
+        let rows = if let Some(workspace_id) = workspace_id {
+            stmt.query_map(params![workspace_id], map_row)?
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            stmt.query_map([], map_row)?.collect::<Result<Vec<_>, _>>()?
+        };
+        Ok(rows)
+    }
+
+    pub fn upsert_job(
+        &self,
+        job_id: &str,
+        workspace_id: &str,
+        task_id: Option<&str>,
+        kind: &str,
+        schedule: Option<&str>,
+        state: &str,
+        idempotency_key: Option<&str>,
+        policy_json: &str,
+        next_run_at: Option<&str>,
+    ) -> Result<serde_json::Value, DbError> {
+        let now = iso_now();
+        self.conn.lock().execute(
+            "INSERT INTO jobs (
+               job_id, workspace_id, task_id, kind, schedule, state, idempotency_key,
+               policy_json, next_run_at, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
+             ON CONFLICT(job_id) DO UPDATE SET
+               workspace_id=excluded.workspace_id,
+               task_id=excluded.task_id,
+               kind=excluded.kind,
+               schedule=excluded.schedule,
+               state=excluded.state,
+               idempotency_key=excluded.idempotency_key,
+               policy_json=excluded.policy_json,
+               next_run_at=excluded.next_run_at,
+               updated_at=excluded.updated_at",
+            params![
+                job_id,
+                workspace_id,
+                task_id,
+                kind,
+                schedule,
+                state,
+                idempotency_key,
+                policy_json,
+                next_run_at,
+                now
+            ],
+        )?;
+        self.list_jobs(Some(workspace_id))?
+            .into_iter()
+            .find(|job| job.get("jobId").and_then(|v| v.as_str()) == Some(job_id))
+            .ok_or_else(|| DbError::Message("job upsert did not persist".into()))
+    }
+
+    pub fn cancel_job(&self, job_id: &str) -> Result<bool, DbError> {
+        let now = iso_now();
+        let changed = self.conn.lock().execute(
+            "UPDATE jobs SET state = 'cancelled', updated_at = ?1 WHERE job_id = ?2 AND state != 'cancelled'",
+            params![now, job_id],
+        )?;
+        Ok(changed > 0)
+    }
 }
 
 fn insert_platform_event(

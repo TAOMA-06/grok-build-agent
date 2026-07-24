@@ -49,6 +49,7 @@ mod tests {
             power_profile: None,
             resume_session_id: None,
             private_chat: false,
+            disallowed_tools: Vec::new(),
         }
     }
 

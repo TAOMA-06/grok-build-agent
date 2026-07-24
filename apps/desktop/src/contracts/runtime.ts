@@ -120,6 +120,8 @@ export type StartConfig = {
   privateChat?: boolean;
   /** Host terminal policy strictness for this runtime process. */
   strictTerminal?: boolean;
+  /** Built-in tools removed via `--disallowed-tools` at process spawn. */
+  disallowedTools?: string[];
 };
 
 /** Process-level status (legacy single-runtime + pool-compatible). */

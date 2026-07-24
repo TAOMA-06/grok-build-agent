@@ -226,6 +226,75 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
         .map(|_| {
             json!({})
         }),
+        "jobs.list" => state
+            .db
+            .list_jobs(request.params.get("workspaceId").and_then(Value::as_str))
+            .map_err(|error| error.to_string())
+            .map(Value::Array),
+        "jobs.upsert" => {
+            let job_id = request
+                .params
+                .get("jobId")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let workspace_id = request
+                .params
+                .get("workspaceId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if workspace_id.is_empty() {
+                Err("workspaceId is required".into())
+            } else {
+                let kind = request
+                    .params
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("agent_prompt");
+                let schedule = request.params.get("schedule").and_then(Value::as_str);
+                let state_name = request
+                    .params
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .unwrap_or("active");
+                let policy = request
+                    .params
+                    .get("policy")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                let policy_json = serde_json::to_string(&policy).unwrap_or_else(|_| "{}".into());
+                state
+                    .db
+                    .upsert_job(
+                        &job_id,
+                        workspace_id,
+                        request.params.get("taskId").and_then(Value::as_str),
+                        kind,
+                        schedule,
+                        state_name,
+                        request.params.get("idempotencyKey").and_then(Value::as_str),
+                        &policy_json,
+                        request.params.get("nextRunAt").and_then(Value::as_str),
+                    )
+                    .map_err(|error| error.to_string())
+            }
+        }
+        "jobs.cancel" => {
+            let job_id = request
+                .params
+                .get("jobId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if job_id.is_empty() {
+                Err("jobId is required".into())
+            } else {
+                state
+                    .db
+                    .cancel_job(job_id)
+                    .map_err(|error| error.to_string())
+                    .map(|changed| json!({ "cancelled": changed }))
+            }
+        },
         "secret.status" => serde_json::to_value(crate::secrets::status()).map_err(|error| error.to_string()),
         "secret.set" => {
             let key = request.params.get("apiKey").and_then(Value::as_str).unwrap_or_default();

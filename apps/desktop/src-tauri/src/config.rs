@@ -60,6 +60,15 @@ pub struct AppSettings {
     pub strict_terminal: bool,
     #[serde(default = "default_legacy_use_harness")]
     pub use_harness: bool,
+    /// Batch queued follow-ups into one model turn when the CLI supports it.
+    #[serde(default)]
+    pub combine_queued_prompts: bool,
+    /// Remove image generation tools from the spawned agent process.
+    #[serde(default)]
+    pub disable_image_tools: bool,
+    /// Remove video generation tools from the spawned agent process.
+    #[serde(default)]
+    pub disable_video_tools: bool,
     #[serde(default)]
     pub sandbox: SandboxMode,
     pub cwd: String,
@@ -112,6 +121,15 @@ struct AppSettingsFile {
     pub strict_terminal: bool,
     #[serde(default = "default_legacy_use_harness")]
     pub use_harness: bool,
+    /// Batch queued follow-ups into one model turn when the CLI supports it.
+    #[serde(default)]
+    pub combine_queued_prompts: bool,
+    /// Remove image generation tools from the spawned agent process.
+    #[serde(default)]
+    pub disable_image_tools: bool,
+    /// Remove video generation tools from the spawned agent process.
+    #[serde(default)]
+    pub disable_video_tools: bool,
     #[serde(default)]
     pub sandbox: SandboxMode,
     pub cwd: String,
@@ -136,7 +154,7 @@ impl Default for AppSettings {
             schema_version: settings_schema_version(),
             grok_path: String::new(),
             cli_path_override: String::new(),
-            model: "grok-build".into(),
+            model: "grok-4.5".into(),
             default_reasoning_effort: default_reasoning_effort(),
             focus_mode: default_focus_mode(),
             privacy_mode: default_privacy_mode(),
@@ -149,6 +167,9 @@ impl Default for AppSettings {
             always_approve: false,
             strict_terminal: false,
             use_harness: default_use_harness(),
+            combine_queued_prompts: false,
+            disable_image_tools: false,
+            disable_video_tools: false,
             sandbox: SandboxMode::Workspace,
             cwd: String::new(),
             onboarding_done: false,
@@ -167,7 +188,7 @@ fn default_locale() -> String {
 }
 
 fn settings_schema_version() -> u32 {
-    8
+    9
 }
 
 fn default_mode() -> String {
@@ -300,6 +321,9 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
         always_approve: file.always_approve,
         strict_terminal: file.strict_terminal,
         use_harness: file.use_harness,
+        combine_queued_prompts: file.combine_queued_prompts,
+        disable_image_tools: file.disable_image_tools,
+        disable_video_tools: file.disable_video_tools,
         sandbox: file.sandbox,
         cwd: file.cwd,
         onboarding_done: file.onboarding_done,
@@ -337,6 +361,9 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), ConfigError> {
         always_approve: settings.always_approve,
         strict_terminal: settings.strict_terminal,
         use_harness: settings.use_harness,
+        combine_queued_prompts: settings.combine_queued_prompts,
+        disable_image_tools: settings.disable_image_tools,
+        disable_video_tools: settings.disable_video_tools,
         sandbox: settings.sandbox,
         cwd: settings.cwd.clone(),
         onboarding_done: settings.onboarding_done,
@@ -373,7 +400,7 @@ mod tests {
             "theme": "dark"
         }))
         .unwrap();
-        assert_eq!(file.schema_version, 8);
+        assert_eq!(file.schema_version, 9);
         assert!(!file.compact_mode);
         assert!(!file.multiline_mode);
         assert!(!file.show_timestamps);

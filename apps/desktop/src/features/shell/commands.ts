@@ -68,11 +68,13 @@ const DOCUMENTED_ACP_COMMANDS: CommandDescriptor[] = [
   { name: "/session-info", aliases: [], descriptionKey: "session-info", category: "session", source: "documented", execution: "acp", available: true },
   // Grok Build 0.2.105+: /summarize is an alias for on-demand session summary.
   { name: "/recap", aliases: ["/summarize"], descriptionKey: "recap", category: "context", source: "documented", execution: "acp", available: true },
+  // Grok Build 0.2.109+: session token/cost usage.
+  { name: "/usage", aliases: [], descriptionKey: "usage", category: "context", source: "documented", execution: "acp", available: true },
 ];
 
 const DOCUMENTED_UNSUPPORTED = [
   "/share", "/btw", "/loop", "/queue", "/vim-mode", "/terminal-setup",
-  "/config-agents", "/personas", "/feedback", "/usage", "/privacy",
+  "/config-agents", "/personas", "/feedback", "/privacy",
 ] as const;
 
 const CAPABILITY_GATED = [
