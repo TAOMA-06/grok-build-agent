@@ -377,6 +377,8 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), ConfigError> {
     let path = config_path()?;
     let raw = serde_json::to_string_pretty(&file)?;
     fs::write(path, raw)?;
+    // Best-effort: keep Grok CLI UI setting aligned so ACP queue batching works.
+    let _ = crate::cli_bridge::sync_combine_queued_prompts(settings.combine_queued_prompts);
     Ok(())
 }
 

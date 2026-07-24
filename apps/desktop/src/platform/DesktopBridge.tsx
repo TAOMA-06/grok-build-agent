@@ -32,6 +32,8 @@ import type {
   WorkspaceEntry,
   WorkspacePreview,
   StoredPolicyRule,
+  HostJob,
+  HostJobUpsertInput,
   DoctorStatus,
   ProjectionRebuildReport,
   TaskDefinition,
@@ -166,6 +168,9 @@ export interface DesktopBridge {
   workspaceRead(workspaceRoot: string, path: string, privateChat?: boolean): Promise<WorkspacePreview>;
   listPolicyRules(workspaceId?: string | null): Promise<StoredPolicyRule[]>;
   deletePolicyRule(ruleId: string): Promise<void>;
+  listJobs(workspaceId?: string | null): Promise<HostJob[]>;
+  upsertJob(job: HostJobUpsertInput): Promise<HostJob>;
+  cancelJob(jobId: string): Promise<{ cancelled: boolean }>;
   doctorStatus(): Promise<DoctorStatus>;
   restartAgentHost(): Promise<void>;
   diagnosticBundlePreview(): Promise<string>;

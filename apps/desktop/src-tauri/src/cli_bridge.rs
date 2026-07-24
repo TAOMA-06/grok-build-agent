@@ -841,6 +841,78 @@ fn user_config_path() -> String {
         .into_owned()
 }
 
+/// Mirror Desktop `combineQueuedPrompts` into Grok's `[ui] combine_queued_prompts`
+/// so ACP-queued follow-ups batch into one model turn (CLI 0.2.109+).
+pub fn sync_combine_queued_prompts(enabled: bool) -> Result<(), CliBridgeError> {
+    let path = std::path::PathBuf::from(user_config_path());
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let next = upsert_toml_table_bool(&existing, "ui", "combine_queued_prompts", enabled);
+    if next == existing {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| CliBridgeError::Message(error.to_string()))?;
+    }
+    std::fs::write(&path, next).map_err(|error| CliBridgeError::Message(error.to_string()))?;
+    Ok(())
+}
+
+/// Insert or replace `key = true|false` under `[table]` in a TOML document.
+pub(crate) fn upsert_toml_table_bool(contents: &str, table: &str, key: &str, enabled: bool) -> String {
+    let header = format!("[{table}]");
+    let assignment = format!("{key} = {}", if enabled { "true" } else { "false" });
+    let lines: Vec<&str> = contents.lines().collect();
+    let mut out: Vec<String> = Vec::with_capacity(lines.len() + 2);
+    let mut i = 0;
+    let mut found_table = false;
+    while i < lines.len() {
+        let line = lines[i];
+        if line.trim() == header {
+            found_table = true;
+            out.push(line.to_string());
+            i += 1;
+            let mut wrote_key = false;
+            while i < lines.len() {
+                let body = lines[i];
+                let trimmed = body.trim();
+                if trimmed.starts_with('[') && !trimmed.starts_with("[[") {
+                    break;
+                }
+                if trimmed.starts_with(&format!("{key} "))
+                    || trimmed.starts_with(&format!("{key}="))
+                {
+                    if !wrote_key {
+                        out.push(assignment.clone());
+                        wrote_key = true;
+                    }
+                    i += 1;
+                    continue;
+                }
+                out.push(body.to_string());
+                i += 1;
+            }
+            if !wrote_key {
+                out.push(assignment.clone());
+            }
+            continue;
+        }
+        out.push(line.to_string());
+        i += 1;
+    }
+    if !found_table {
+        if !out.is_empty() && !out.last().map(|line| line.is_empty()).unwrap_or(true) {
+            out.push(String::new());
+        }
+        out.push(header);
+        out.push(assignment);
+    }
+    let mut result = out.join("\n");
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
 fn project_config_path(workspace: Option<&str>) -> Option<String> {
     let ws = workspace?.trim();
     if ws.is_empty() {
@@ -1983,5 +2055,23 @@ mod tests {
         assert_eq!(ids, vec!["grok-4.5", "grok-composer-2.5-fast"]);
         assert!(models.iter().any(|m| m.id == "grok-4.5" && m.is_default));
         assert!(!ids.contains(&"You"));
+    }
+
+    #[test]
+    fn upsert_toml_table_bool_creates_and_updates_ui_section() {
+        let created = upsert_toml_table_bool("", "ui", "combine_queued_prompts", true);
+        assert!(created.contains("[ui]"));
+        assert!(created.contains("combine_queued_prompts = true"));
+
+        let updated = upsert_toml_table_bool(
+            "[cli]\nauto_update = false\n\n[ui]\ncompact_mode = false\ncombine_queued_prompts = true\n",
+            "ui",
+            "combine_queued_prompts",
+            false,
+        );
+        assert!(updated.contains("combine_queued_prompts = false"));
+        assert!(!updated.contains("combine_queued_prompts = true"));
+        assert!(updated.contains("compact_mode = false"));
+        assert!(updated.contains("[cli]"));
     }
 }

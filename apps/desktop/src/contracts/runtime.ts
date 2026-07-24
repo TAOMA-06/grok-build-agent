@@ -122,6 +122,8 @@ export type StartConfig = {
   strictTerminal?: boolean;
   /** Built-in tools removed via `--disallowed-tools` at process spawn. */
   disallowedTools?: string[];
+  /** Sync Grok `[ui] combine_queued_prompts` when spawning (CLI 0.2.109+). */
+  combineQueuedPrompts?: boolean;
 };
 
 /** Process-level status (legacy single-runtime + pool-compatible). */

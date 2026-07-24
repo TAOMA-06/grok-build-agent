@@ -85,6 +85,9 @@ pub struct StartConfig {
     /// Built-in tools to strip via `--disallowed-tools` (e.g. image_gen).
     #[serde(default)]
     pub disallowed_tools: Vec<String>,
+    /// Mirror Desktop combine-queued preference into Grok `[ui]` at spawn time.
+    #[serde(default)]
+    pub combine_queued_prompts: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -398,6 +401,7 @@ mod tests {
             resume_session_id: None,
             private_chat: false,
             disallowed_tools: Vec::new(),
+            combine_queued_prompts: false,
         }
     }
 

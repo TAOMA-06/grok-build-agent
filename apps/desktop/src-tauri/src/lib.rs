@@ -631,6 +631,48 @@ async fn list_policy_rules(
 }
 
 #[tauri::command]
+async fn list_jobs(
+    state: State<'_, AppState>,
+    workspace_id: Option<String>,
+) -> Result<Value, acp::AcpError> {
+    host_request(
+        &state,
+        "jobs.list",
+        serde_json::json!({ "workspaceId": workspace_id }),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn upsert_job(
+    state: State<'_, AppState>,
+    job: Value,
+) -> Result<Value, acp::AcpError> {
+    host_request(
+        &state,
+        "jobs.upsert",
+        job,
+        Some(rpc_meta("jobs", None)),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn cancel_job(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> Result<Value, acp::AcpError> {
+    host_request(
+        &state,
+        "jobs.cancel",
+        serde_json::json!({ "jobId": job_id }),
+        Some(rpc_meta("jobs", None)),
+    )
+    .await
+}
+
+#[tauri::command]
 async fn delete_policy_rule(
     state: State<'_, AppState>,
     rule_id: String,
@@ -1737,6 +1779,9 @@ pub fn run() {
             respond_server_request,
             list_permission_requests,
             list_policy_rules,
+            list_jobs,
+            upsert_job,
+            cancel_job,
             delete_policy_rule,
             harness_rules,
             get_stderr_tail,

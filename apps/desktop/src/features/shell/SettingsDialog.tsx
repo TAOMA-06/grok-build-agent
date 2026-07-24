@@ -5,6 +5,7 @@ import { Bot, Ghost, Info, Puzzle, RefreshCw, Settings2, ShieldCheck, Stethoscop
 import { useRef, useState } from "react";
 import { useEffect } from "react";
 import { McpManager } from "../mcp/McpManager";
+import { HostJobsPanel } from "./HostJobsPanel";
 import { applyLocalePreference, t } from "../../i18n";
 import { GbButton } from "../../components/ui/GbButton";
 import { normalizeSettings } from "../../contracts";
@@ -221,6 +222,7 @@ export function SettingsDialog({
                   <label className="gb-switch-row"><span>{t.keepCliUpdated}<small>{t.keepCliUpdatedHint}</small></span><input type="checkbox" checked={draft.autoUpdateCli} onChange={(event) => patch({ autoUpdateCli: event.target.checked })} /></label>
                   <details className="gb-advanced-settings"><summary>{t.advanced}</summary><label><span>{t.cliPathOverride}<small>{t.cliPathHint}</small></span><input value={draft.cliPathOverride} onChange={(event) => patch({ cliPathOverride: event.target.value, grokPath: event.target.value })} placeholder={t.autoDetect} /></label></details>
                 </section>
+                <HostJobsPanel enabled={open && tab === "agent"} />
               </Tabs.Content>
               <Tabs.Content value="extensions">
                 <div className="gb-settings-section-head"><h3>{t.extensions}</h3><button type="button" className="gb-icon-button" aria-label={t.refreshExtensions} onClick={() => void capabilitiesQuery.refetch()}><RefreshCw size={14} /></button></div>

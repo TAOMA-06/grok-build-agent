@@ -481,6 +481,28 @@ export const mockDesktopBridge: DesktopBridge = {
     return [];
   },
   async deletePolicyRule() {},
+  async listJobs() {
+    return [];
+  },
+  async upsertJob(job) {
+    const now = new Date().toISOString();
+    return {
+      jobId: job.jobId ?? `job-${Date.now()}`,
+      workspaceId: job.workspaceId,
+      taskId: job.taskId ?? null,
+      kind: job.kind ?? "agent_prompt",
+      schedule: job.schedule ?? null,
+      state: job.state ?? "active",
+      idempotencyKey: job.idempotencyKey ?? null,
+      policy: job.policy ?? {},
+      nextRunAt: job.nextRunAt ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+  },
+  async cancelJob() {
+    return { cancelled: true };
+  },
   async doctorStatus() {
     return {
       host: "ok",

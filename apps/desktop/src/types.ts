@@ -111,6 +111,9 @@ export type {
   PermissionOptionKind,
   PermissionDecision,
   StoredPolicyRule,
+  HostJob,
+  HostJobUpsertInput,
+  HostJobState,
 } from "./contracts";
 
 export type {

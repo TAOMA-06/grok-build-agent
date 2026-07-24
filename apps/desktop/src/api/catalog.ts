@@ -208,6 +208,24 @@ export async function deletePolicyRule(ruleId: string): Promise<void> {
   await invoke("delete_policy_rule", { ruleId });
 }
 
+export async function listJobs(
+  workspaceId?: string | null,
+): Promise<import("../types").HostJob[]> {
+  return invoke("list_jobs", { workspaceId: workspaceId ?? null });
+}
+
+export async function upsertJob(
+  job: import("../types").HostJobUpsertInput,
+): Promise<import("../types").HostJob> {
+  return invoke("upsert_job", { job });
+}
+
+export async function cancelJob(
+  jobId: string,
+): Promise<{ cancelled: boolean }> {
+  return invoke("cancel_job", { jobId });
+}
+
 export async function doctorStatus(): Promise<import("../types").DoctorStatus> {
   return invoke("doctor_status");
 }

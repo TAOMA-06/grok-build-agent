@@ -228,7 +228,7 @@ export function ThreadView({
 
   return (
     <>
-    <main className={`gb-thread-view${session?.busy || connecting ? " is-running" : ""}${isEmpty ? " is-empty" : ""}`}>
+    <main className={`gb-thread-view${session?.busy || connecting ? " is-running" : ""}${isEmpty ? " is-empty" : " is-active-briefing"}`}>
       <header className="gb-thread-header" data-tauri-drag-region>
         {session ? (
           <>
@@ -244,12 +244,16 @@ export function ThreadView({
                 </span>
               )}
               {session.privateChat && <span className="gb-private-chat-pill" title={t.privateChatLocalOnly}><Ghost size={12} /> {t.privateChatActive}</span>}
-              {executionRoot && <button type="button" className="gb-header-button" onClick={() => void onOpenPath(executionRoot)}><ExternalLink size={14} /> {t.open}</button>}
               <button type="button" className={drawerOpen ? "gb-header-button active" : "gb-header-button"} onClick={onToggleDrawer}><FileCode2 size={14} /> {t.changes}{changesVisible && <span className="gb-change-dot" />}</button>
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger asChild><button type="button" className="gb-icon-button" aria-label={t.moreTaskActions}><MoreHorizontal size={17} /></button></DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content className="gb-dropdown compact" sideOffset={7} align="end">
+                    {executionRoot && (
+                      <DropdownMenu.Item onSelect={() => void onOpenPath(executionRoot)}>
+                        <ExternalLink size={14} /> {t.open}
+                      </DropdownMenu.Item>
+                    )}
                     <DropdownMenu.Item onSelect={() => setRenameOpen(true)}><Pencil size={14} /> {t.rename}</DropdownMenu.Item>
                     {!session.privateChat && <DropdownMenu.Item onSelect={() => void onArchive()}><Archive size={14} /> {session.summary.archived ? t.restore : t.archive}</DropdownMenu.Item>}
                     <DropdownMenu.Separator className="gb-dropdown-separator" />

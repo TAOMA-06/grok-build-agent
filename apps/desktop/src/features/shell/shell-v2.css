@@ -1432,3 +1432,36 @@
   }
 
 }
+
+/* Active thread: quieter chrome once work has started (Focused Briefing). */
+.gb-thread-view.is-active-briefing {
+  grid-template-rows: 50px minmax(0, 1fr) auto;
+}
+
+.gb-thread-view.is-active-briefing .gb-thread-header {
+  height: 50px;
+  padding: 0 16px 0 18px;
+  box-shadow: none;
+}
+
+.gb-thread-view.is-active-briefing .gb-thread-header::after {
+  opacity: 0.35;
+}
+
+.gb-thread-view.is-active-briefing .gb-thread-heading strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gb-thread-view.is-active-briefing .gb-run-pill {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.gb-thread-view.is-active-briefing .gb-run-pill.running {
+  color: var(--gb-accent);
+  background: color-mix(in srgb, var(--gb-accent) 12%, transparent);
+}

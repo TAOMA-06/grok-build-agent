@@ -441,6 +441,8 @@ pub async fn spawn_connection(
     if !config.disallowed_tools.is_empty() {
         cmd.arg("--disallowed-tools").arg(config.disallowed_tools.join(","));
     }
+    // Grok batches ACP-queued follow-ups when this UI setting is enabled.
+    let _ = crate::cli_bridge::sync_combine_queued_prompts(config.combine_queued_prompts);
     cmd.arg("stdio");
     cmd.current_dir(&workspace);
     cmd.stdin(Stdio::piped())

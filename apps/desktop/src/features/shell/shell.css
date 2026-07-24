@@ -3920,3 +3920,76 @@
     justify-content: center;
   }
 }
+
+/* ── Active Thread Focused Briefing ───────────────────────────────────────── */
+
+.gb-thread-view.is-active-briefing {
+  grid-template-rows: 48px minmax(0, 1fr) auto;
+}
+
+.gb-thread-view.is-active-briefing .gb-thread-header {
+  padding: 0 12px 0 18px;
+  border-bottom-color: color-mix(in srgb, var(--gb-glass-border) 70%, transparent);
+  background: color-mix(in srgb, var(--gb-panel) 72%, transparent);
+}
+
+.gb-thread-view.is-active-briefing .gb-thread-heading strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.gb-thread-view.is-active-briefing .gb-thread-heading span {
+  font-size: 10px;
+  opacity: 0.88;
+}
+
+.gb-thread-view.is-active-briefing .gb-run-pill {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--gb-muted);
+  font-size: 10.5px;
+  font-weight: 520;
+  box-shadow: none;
+}
+
+.gb-thread-view.is-active-briefing .gb-run-pill.running {
+  color: var(--gb-accent);
+  background: color-mix(in srgb, var(--gb-accent) 10%, transparent);
+}
+
+.gb-thread-view.is-active-briefing .gb-thread-scroll {
+  background: transparent;
+}
+
+.gb-thread-view.is-active-briefing .gb-thread-column {
+  width: min(760px, 100%);
+  padding: 20px clamp(16px, 3vw, 28px) 36px;
+}
+
+.gb-thread-view.is-active-briefing .gb-composer-dock {
+  padding-top: 6px;
+}
+
+.gb-thread-view.is-active-briefing .gb-composer-note {
+  opacity: 0.72;
+}
+
+.gb-host-jobs {
+  display: grid;
+  gap: 10px;
+}
+
+.gb-host-jobs textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.gb-host-jobs .gb-button.primary {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
