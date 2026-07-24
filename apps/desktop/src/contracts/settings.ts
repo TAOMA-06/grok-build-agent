@@ -16,7 +16,7 @@ export type PrivacyMode = "strict" | "standard";
 
 export type Settings = {
   /** Versioned renderer/host settings contract. */
-  schemaVersion: 8;
+  schemaVersion: 9;
   grokPath: string;
   /** Optional advanced override. Empty means use CLI discovery. */
   cliPathOverride: string;
@@ -55,6 +55,15 @@ export type Settings = {
    */
   strictTerminal: boolean;
   useHarness: boolean;
+  /**
+   * When true, Desktop asks Grok to batch queued follow-ups into one model turn
+   * (CLI `combine_queued_prompts`, 0.2.109+). Existing installs keep false until enabled.
+   */
+  combineQueuedPrompts: boolean;
+  /** Strip image generation tools/slash commands from the spawned CLI process. */
+  disableImageTools: boolean;
+  /** Strip video generation tools/slash commands from the spawned CLI process. */
+  disableVideoTools: boolean;
   sandbox: SandboxMode;
   cwd: string;
   onboardingDone: boolean;
@@ -94,10 +103,10 @@ export type OnboardingStep =
 
 export function defaultSettings(): Settings {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     grokPath: "",
     cliPathOverride: "",
-    model: "grok-build",
+    model: "grok-4.5",
     defaultReasoningEffort: "medium",
     focusMode: "balanced",
     privacyMode: "strict",
@@ -110,6 +119,9 @@ export function defaultSettings(): Settings {
     alwaysApprove: false,
     strictTerminal: false,
     useHarness: true,
+    combineQueuedPrompts: false,
+    disableImageTools: false,
+    disableVideoTools: false,
     sandbox: "workspace",
     cwd: "",
     onboardingDone: false,
@@ -150,8 +162,14 @@ export function normalizeSettings(settings: Settings): Settings {
   // supplied by defaultSettings above.
   const useHarness = (settings as { useHarness?: boolean }).useHarness === true;
   const strictTerminal = (settings as { strictTerminal?: boolean }).strictTerminal === true;
+  const combineQueuedPrompts =
+    (settings as { combineQueuedPrompts?: boolean }).combineQueuedPrompts === true;
+  const disableImageTools =
+    (settings as { disableImageTools?: boolean }).disableImageTools === true;
+  const disableVideoTools =
+    (settings as { disableVideoTools?: boolean }).disableVideoTools === true;
   if (
-    settings.schemaVersion === 8 &&
+    settings.schemaVersion === 9 &&
     defaultReasoningEffort === settings.defaultReasoningEffort &&
     focusMode === settings.focusMode &&
     privacyMode === settings.privacyMode &&
@@ -159,11 +177,14 @@ export function normalizeSettings(settings: Settings): Settings {
     codingDataPrivacyConfigured === settings.codingDataPrivacyConfigured &&
     privateChat === settings.privateChat &&
     useHarness === settings.useHarness &&
-    strictTerminal === Boolean(settings.strictTerminal)
+    strictTerminal === Boolean(settings.strictTerminal) &&
+    combineQueuedPrompts === Boolean(settings.combineQueuedPrompts) &&
+    disableImageTools === Boolean(settings.disableImageTools) &&
+    disableVideoTools === Boolean(settings.disableVideoTools)
   ) return settings;
   return {
     ...settings,
-    schemaVersion: 8,
+    schemaVersion: 9,
     defaultReasoningEffort,
     focusMode,
     privacyMode,
@@ -172,5 +193,8 @@ export function normalizeSettings(settings: Settings): Settings {
     privateChat,
     useHarness,
     strictTerminal,
+    combineQueuedPrompts,
+    disableImageTools,
+    disableVideoTools,
   };
 }

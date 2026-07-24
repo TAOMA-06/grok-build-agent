@@ -152,6 +152,8 @@ pub fn is_write_method(method: &str) -> bool {
             | "mcp.upsert"
             | "mcp.remove"
             | "settings.save"
+            | "jobs.upsert"
+            | "jobs.cancel"
             | "secret.set"
             | "secret.clear"
             | "plugin.install"

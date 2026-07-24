@@ -82,6 +82,9 @@ pub struct StartConfig {
     /// Keep desktop-local task data out of the durable Host catalog.
     #[serde(default)]
     pub private_chat: bool,
+    /// Built-in tools to strip via `--disallowed-tools` (e.g. image_gen).
+    #[serde(default)]
+    pub disallowed_tools: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,7 +269,7 @@ mod harness_tests {
             "rules must name modern wait/output helpers"
         );
         assert!(
-            rules.contains("0.2.106"),
+            rules.contains("0.2.111"),
             "rules should advertise current CLI alignment"
         );
         assert!(
@@ -394,6 +397,7 @@ mod tests {
             power_profile: None,
             resume_session_id: None,
             private_chat: false,
+            disallowed_tools: Vec::new(),
         }
     }
 

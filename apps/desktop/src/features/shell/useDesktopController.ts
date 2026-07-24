@@ -229,6 +229,10 @@ export function useDesktopController(
           alwaysApprove: permissionAlwaysApprove(policy),
           useHarness: state.settings.useHarness,
           strictTerminal: state.settings.strictTerminal,
+          disallowedTools: [
+            ...(state.settings.disableImageTools ? ["image_gen", "image_edit"] : []),
+            ...(state.settings.disableVideoTools ? ["image_to_video", "video_gen"] : []),
+          ],
           sandbox: summary.sandbox ?? state.settings.sandbox,
           privacyMode: state.settings.privacyMode,
           privateChat: isPrivateChatSession(state, sessionId),
@@ -659,6 +663,10 @@ export function useDesktopController(
         ),
         useHarness: state.settings.useHarness,
         strictTerminal: state.settings.strictTerminal,
+        disallowedTools: [
+          ...(state.settings.disableImageTools ? ["image_gen", "image_edit"] : []),
+          ...(state.settings.disableVideoTools ? ["image_to_video", "video_gen"] : []),
+        ],
         sandbox: summary.sandbox ?? state.settings.sandbox,
         privacyMode: state.settings.privacyMode,
         privateChat: isPrivateChatSession(state, sessionId),

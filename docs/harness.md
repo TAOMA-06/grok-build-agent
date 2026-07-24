@@ -1,6 +1,6 @@
 # Power harness
 
-The harness makes Grok Build **use** its strengths instead of only exposing them in the UI. It tracks Grok CLI **0.2.106** (and 0.2.103+) and Desktop platform contracts (task focus, durable verification, privacy).
+The harness makes Grok Build **use** its strengths instead of only exposing them in the UI. It tracks Grok CLI **0.2.111** (and 0.2.103+) and Desktop platform contracts (task focus, durable verification, privacy).
 
 ## What it contains
 
@@ -71,9 +71,13 @@ Grok’s bundled `/design` and `/execute-plan` remain the heavy DAG pipelines; t
 | Subagent personas + I/O contracts | `personas/*.toml` with inputs/outputs and capability defaults |
 | Roles | `roles/*.toml` for explore/plan/implementer/reviewer |
 | Optional per-worker `model` (0.2.98+) | Documented in AGENTS / orchestrate; omit to inherit parent |
-| CLI default `grok-4.5` + high/medium/low effort (0.2.105+) | Follow live catalog; Desktop settings may still seed `grok-build` until the user/catalog chooses otherwise |
+| CLI default `grok-4.5` + high/medium/low effort (0.2.105+) | Fresh Desktop installs default to `grok-4.5`; existing settings are preserved |
 | `/summarize` alias for `/recap` (0.2.105+) | Documented ACP command + Desktop catalog alias |
-| In-place scheduled tasks; one-time schedules retired (0.2.106+) | Prefer background commands; update schedules in place when recurring |
+| `/usage` token + cost (0.2.109+) | Documented ACP command in Desktop catalog |
+| Workflows enabled by default (0.2.111+) | AGENTS prefers advertised workflows when they match; otherwise spawn_subagent |
+| In-place scheduled tasks; one-time schedules retired (0.2.106+) | Prefer Host jobs + background commands; update schedules in place when recurring |
+| Host jobs CRUD | `jobs.list` / `jobs.upsert` / `jobs.cancel` on the Agent Host SQLite `jobs` table |
+| Disable image/video tools (0.2.111+) | Settings → `--disallowed-tools` at process spawn |
 | `wait_commands_or_subagents` | Named in AGENTS + orchestrate skill |
 | Plan mode plan file | Session plan / `.grok/plan.md` conventions |
 | Goal mode / durable tasks | Honor platform contract Goal/Acceptance |

@@ -48,6 +48,7 @@ impl GrokAcpAdapter {
             power_profile: None,
             resume_session_id: resume,
             private_chat: false,
+            disallowed_tools: Vec::new(),
         }
     }
 

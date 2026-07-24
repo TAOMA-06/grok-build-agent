@@ -57,7 +57,7 @@ Provider cache policy keeps the model and tool schema stable for the lifetime of
 
 ## Persistence
 
-Settings schema v8 stores user-facing defaults, compact/multiline/timestamp preferences, the system/English/Simplified Chinese locale, an optional strict-terminal Host policy flag, and an explicit account-privacy-preference marker so upgraded installs do not silently change an existing account setting. It migrates legacy `alwaysApprove`, `useHarness`, model and cwd fields. SQLite schema v4 keeps the v3 session projection for UI compatibility and adds the immutable control-plane event store, task/turn records, prompt dispatch journal, projection checkpoints, tool/permission/artifact/runtime/worktree/job/audit records, context manifests, memory candidates and blob references.
+Settings schema v9 stores user-facing defaults (including fresh-install `grok-4.5`), combine-queued-prompts and image/video tool stripping, compact/multiline/timestamp preferences, the system/English/Simplified Chinese locale, an optional strict-terminal Host policy flag, and an explicit account-privacy-preference marker so upgraded installs do not silently change an existing account setting. It migrates legacy `alwaysApprove`, `useHarness`, model and cwd fields. SQLite schema v4 keeps the v3 session projection for UI compatibility and adds the immutable control-plane event store, task/turn records, prompt dispatch journal, projection checkpoints, tool/permission/artifact/runtime/worktree/job/audit records, context manifests, memory candidates and blob references.
 
 Before a v1–v3 catalog is upgraded, WAL is checkpointed and a versioned backup is created next to the database. The former 200-row event cache is imported with `legacy_partial_history=1`; it is never presented as a complete transcript. New compatibility events are written to `platform_events` without trimming, with a deterministic dedupe key. Large structured event payloads are moved to the SHA-256 content-addressed blob store.
 
@@ -104,7 +104,7 @@ Task, Session, Turn, Tool Call and Permission snapshots are projected from the i
 
 The Context Manifest records the platform task contract, user instruction and attachments actually sent for each Turn. Task contracts are injected in a separate trusted partition; repository, MCP, web and attachment content is explicitly labelled untrusted data. Allowed modification paths are enforced again by the Host on ACP filesystem writes.
 
-Remaining release validation is environmental rather than an in-process fallback: real Grok authentication, signed/notarized installation on Intel and Apple Silicon Macs, and soak/chaos runs. Grok cannot attest direct network isolation, so Strict mode stays unavailable instead of presenting an unenforceable guarantee. Long-term Memory, Profiles, Job scheduling and additional Runtime adapters are outside coding-agent v1.
+Remaining release validation is environmental rather than an in-process fallback: real Grok authentication, signed/notarized installation on Intel and Apple Silicon Macs, and soak/chaos runs. Grok cannot attest direct network isolation, so Strict mode stays unavailable instead of presenting an unenforceable guarantee. Long-term Memory, Profiles, and additional Runtime adapters remain outside coding-agent v1. Host-owned agent jobs (durable recurring prompts) are supported as an opt-in Desktop control-plane feature on top of the existing `jobs` table.
 
 ## Capability discovery
 
@@ -126,5 +126,4 @@ The open-source v1 supports macOS 12+ and the official Grok CLI/ACP runtime. Win
 
 - Full IDE/LSP/debugger
 - Cloud execution or multi-tenant hosting
-- Scheduled automations
 - Replacing Grok's native Goal, Subagents, Skills, Plugins, Hooks, MCP or Memory

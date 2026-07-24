@@ -10,21 +10,21 @@ export function EmptyTaskState({
   onSuggest: (prompt: string, mode: TaskMode) => void;
 }) {
   return (
-    <Stagger className="gb-empty-stack" stagger={0.055} delayChildren={0.05}>
-      <StaggerItem>
-        <div className="gb-empty-orbit">
+    <Stagger className="gb-empty-stack gb-home-briefing" stagger={0.055} delayChildren={0.05}>
+      <StaggerItem className="gb-home-signature">
+        <div className="gb-empty-orbit" aria-hidden>
           <RocketLineArt />
         </div>
       </StaggerItem>
-      <StaggerItem>
+      <StaggerItem className="gb-home-copy">
         <div className="gb-empty-copy">
           <span className="gb-empty-overline">{t.newTask}</span>
           <h1>{t.emptyTitle}</h1>
           <p>{t.emptyDescription}</p>
         </div>
       </StaggerItem>
-      <StaggerItem>
-        <div className="gb-suggestion-row">
+      <StaggerItem className="gb-home-quick-actions">
+        <div className="gb-suggestion-row" aria-label={t.newTask}>
           <button type="button" className="gb-suggestion-card" onClick={() => onSuggest(t.explainProjectPrompt, "agent")}>
             <FileSearch size={16} aria-hidden />
             <span>{t.explainProject}</span>
