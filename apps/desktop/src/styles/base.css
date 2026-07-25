@@ -1,0 +1,80 @@
+/* Reset, focus, scrollbars, typography base */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--gb-font);
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--gb-text);
+  background: var(--gb-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--gb-accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--gb-accent-dim);
+  color: var(--gb-text);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--gb-border-strong) transparent;
+}
+
+a {
+  color: var(--gb-accent);
+}
+
+code,
+pre,
+kbd {
+  font-family: var(--gb-mono);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

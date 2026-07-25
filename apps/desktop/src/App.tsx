@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { BootstrapScreen } from "./features/shell/BootstrapScreen";
-import { AppShell } from "./features/shell/AppShell";
+import { AppWorkbench } from "./features/workbench/AppWorkbench";
 import { bootstrapStateFromHealth } from "./features/shell/bootstrap";
 import { normalizeSettings } from "./contracts";
 import { applyLocalePreference, t, useTranslation } from "./i18n";
 import { useDesktopBridge } from "./platform/DesktopBridge";
 import { useAppStore } from "./store";
 import type { BootstrapState } from "./types";
-import "./App.css";
-import "./features/shell/shell.css";
-import "./features/shell/shell-v2.css";
+import "./styles/tokens.css";
+import "./styles/base.css";
+import "./styles/components.css";
+import "./styles/workbench.css";
+import "./styles/chat.css";
+import "./styles/pages.css";
+import "./styles/settings-legacy.css";
 
 export default function App() {
   useTranslation();
@@ -89,5 +93,5 @@ export default function App() {
     return <BootstrapScreen state={bootstrap} onRefresh={refreshBootstrap} />;
   }
 
-  return <AppShell />;
+  return <AppWorkbench />;
 }

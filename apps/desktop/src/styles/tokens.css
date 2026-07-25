@@ -1,0 +1,91 @@
+/* Grok Build Desktop — design tokens (single source of truth).
+   Cursor / Claude Desktop: neutral surfaces, one accent. */
+
+:root {
+  color-scheme: dark;
+
+  --gb-bg: #0f0f0f;
+  --gb-sidebar: #141414;
+  --gb-panel: #171717;
+  --gb-surface: #1a1a1a;
+  --gb-raised: #222222;
+  --gb-hover: rgba(255, 255, 255, 0.06);
+  --gb-border: #2a2a2a;
+  --gb-border-strong: #3a3a3a;
+  --gb-text: #ececec;
+  --gb-muted: #8a8a8a;
+  --gb-faint: #5c5c5c;
+  --gb-accent: #3b82f6;
+  --gb-accent-strong: #60a5fa;
+  --gb-accent-dim: rgba(59, 130, 246, 0.14);
+  --gb-accent-ink: #ffffff;
+  --gb-success: #22c55e;
+  --gb-warning: #eab308;
+  --gb-danger: #ef4444;
+
+  --gb-font: "Geist Variable", "PingFang SC", "Helvetica Neue", system-ui, sans-serif;
+  --gb-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+
+  --gb-radius-sm: 6px;
+  --gb-radius-md: 8px;
+  --gb-radius-lg: 12px;
+
+  --gb-space-1: 4px;
+  --gb-space-2: 8px;
+  --gb-space-3: 12px;
+  --gb-space-4: 16px;
+  --gb-space-5: 24px;
+  --gb-space-6: 32px;
+
+  --gb-ease: 140ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  --gb-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.55);
+
+  --gb-rail-width: 48px;
+  --gb-panel-width: 260px;
+  --gb-inspector-width: 380px;
+  --gb-content-max: 760px;
+  --gb-composer-max: 720px;
+
+  /* Legacy aliases used by unmigrated components */
+  --gb-canvas: var(--gb-bg);
+  --gb-glass-border: var(--gb-border);
+  --gb-glass-shadow: none;
+  --gb-iris: var(--gb-accent);
+  --gb-ion: var(--gb-accent);
+  --gb-line: var(--gb-muted);
+  --gb-blush: var(--gb-accent);
+  --gb-signature: none;
+  --gb-radius-xl: var(--gb-radius-lg);
+  --gb-workbench-grid: transparent;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --gb-bg: #fafafa;
+  --gb-sidebar: #f4f4f5;
+  --gb-panel: #ffffff;
+  --gb-surface: #ffffff;
+  --gb-raised: #f4f4f5;
+  --gb-hover: rgba(0, 0, 0, 0.04);
+  --gb-border: #e4e4e7;
+  --gb-border-strong: #d4d4d8;
+  --gb-text: #18181b;
+  --gb-muted: #71717a;
+  --gb-faint: #a1a1aa;
+  --gb-accent: #2563eb;
+  --gb-accent-strong: #1d4ed8;
+  --gb-accent-dim: rgba(37, 99, 235, 0.1);
+  --gb-accent-ink: #ffffff;
+  --gb-success: #16a34a;
+  --gb-warning: #ca8a04;
+  --gb-danger: #dc2626;
+  --gb-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.12);
+
+  --gb-canvas: var(--gb-bg);
+  --gb-glass-border: var(--gb-border);
+  --gb-iris: var(--gb-accent);
+  --gb-ion: var(--gb-accent);
+  --gb-line: var(--gb-muted);
+  --gb-blush: var(--gb-accent);
+}

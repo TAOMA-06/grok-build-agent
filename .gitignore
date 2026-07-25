@@ -50,6 +50,7 @@ apps/desktop/src-tauri/WixTools/
 *.local
 .cache/
 .codegraph/
+.tmp-ui-preview/
 
 # Local Grok Build state
 .grok/

@@ -5,7 +5,6 @@ import { Bot, Ghost, Info, Puzzle, RefreshCw, Settings2, ShieldCheck, Stethoscop
 import { useRef, useState } from "react";
 import { useEffect } from "react";
 import { McpManager } from "../mcp/McpManager";
-import { HostJobsPanel } from "./HostJobsPanel";
 import { applyLocalePreference, t } from "../../i18n";
 import { GbButton } from "../../components/ui/GbButton";
 import { normalizeSettings } from "../../contracts";
@@ -40,11 +39,14 @@ export function SettingsDialog({
   onOpenChange,
   initialTab = "general",
   onReloadAgent,
+  mode = "dialog",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialTab?: SettingsTab;
   onReloadAgent?: () => void | Promise<void>;
+  /** dialog = modal overlay; page = full-stage settings view */
+  mode?: "dialog" | "page";
 }) {
   const bridge = useDesktopBridge();
   const settings = useAppStore((state) => state.settings);
@@ -57,31 +59,36 @@ export function SettingsDialog({
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [doctorAction, setDoctorAction] = useState<string | null>(null);
   const [bundlePreview, setBundlePreview] = useState<string | null>(null);
+  const active = mode === "page" || open;
   useEffect(() => {
-    if (open) setTab(initialTab);
-  }, [initialTab, open]);
+    if (active) {
+      setTab(initialTab);
+      setDraft(normalizeSettings(settings));
+      setSaveError(null);
+    }
+  }, [active, initialTab]); // eslint-disable-line react-hooks/exhaustive-deps -- refresh draft when opening
   const capabilitiesQuery = useQuery({
     queryKey: ["capabilities", settings.cliPathOverride || settings.grokPath, settings.cwd],
     queryFn: () => bridge.inspectCapabilities(
       settings.cliPathOverride || settings.grokPath || undefined,
       settings.cwd || null,
     ),
-    enabled: open,
+    enabled: active,
   });
   const modelsQuery = useQuery({
     queryKey: ["models", draft.cliPathOverride || draft.grokPath],
     queryFn: () => bridge.listModels(draft.cliPathOverride || draft.grokPath || undefined),
-    enabled: open,
+    enabled: active,
   });
   const policyRulesQuery = useQuery({
     queryKey: ["policy-rules"],
     queryFn: () => bridge.listPolicyRules(),
-    enabled: open && tab === "permissions",
+    enabled: active && tab === "permissions",
   });
   const doctorQuery = useQuery({
     queryKey: ["doctor-status"],
     queryFn: () => bridge.doctorStatus(),
-    enabled: open && tab === "diagnostics",
+    enabled: active && tab === "diagnostics",
   });
   const externalCompatibility = capabilitiesQuery.data?.externalCompat ?? null;
   const compatibilityVendors = externalCompatibility
@@ -112,7 +119,7 @@ export function SettingsDialog({
   }
 
   async function save() {
-    await persist(draft, true);
+    await persist(draft, mode === "dialog");
   }
 
   function applyImmediately(next: Partial<Settings>) {
@@ -140,14 +147,27 @@ export function SettingsDialog({
     }
   }
 
-  return (
-    <Dialog.Root open={open} onOpenChange={(next) => { if (next) { setDraft(normalizeSettings(settings)); setSaveError(null); } onOpenChange(next); }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="gb-dialog-overlay" />
-        <Dialog.Content className="gb-settings-dialog">
+  const settingsBody = (
+          <>
           <div className="gb-settings-head">
-            <div><Dialog.Title>{t.settings}</Dialog.Title><Dialog.Description>{t.settingsDescription}</Dialog.Description></div>
-            <Dialog.Close asChild><button type="button" className="gb-icon-button" aria-label={t.closeSettings}><X size={17} /></button></Dialog.Close>
+            <div>
+              {mode === "page" ? (
+                <>
+                  <h2 className="wb-settings-title">{t.settings}</h2>
+                  <p className="wb-settings-desc">{t.settingsDescription}</p>
+                </>
+              ) : (
+                <>
+                  <Dialog.Title>{t.settings}</Dialog.Title>
+                  <Dialog.Description>{t.settingsDescription}</Dialog.Description>
+                </>
+              )}
+            </div>
+            {mode === "dialog" && (
+              <Dialog.Close asChild>
+                <button type="button" className="gb-icon-button" aria-label={t.closeSettings}><X size={17} /></button>
+              </Dialog.Close>
+            )}
           </div>
           <Tabs.Root className="gb-settings-tabs" value={tab} onValueChange={(value) => setTab(value as SettingsTab)}>
             <Tabs.List>
@@ -222,7 +242,11 @@ export function SettingsDialog({
                   <label className="gb-switch-row"><span>{t.keepCliUpdated}<small>{t.keepCliUpdatedHint}</small></span><input type="checkbox" checked={draft.autoUpdateCli} onChange={(event) => patch({ autoUpdateCli: event.target.checked })} /></label>
                   <details className="gb-advanced-settings"><summary>{t.advanced}</summary><label><span>{t.cliPathOverride}<small>{t.cliPathHint}</small></span><input value={draft.cliPathOverride} onChange={(event) => patch({ cliPathOverride: event.target.value, grokPath: event.target.value })} placeholder={t.autoDetect} /></label></details>
                 </section>
-                <HostJobsPanel enabled={open && tab === "agent"} />
+                <section className="gb-settings-panel">
+                  <h3>{t.hostJobs}</h3>
+                  <p className="gb-settings-copy">{t.hostJobsHint}</p>
+                  <p className="gb-settings-copy">{t.missionControlDescription}</p>
+                </section>
               </Tabs.Content>
               <Tabs.Content value="extensions">
                 <div className="gb-settings-section-head"><h3>{t.extensions}</h3><button type="button" className="gb-icon-button" aria-label={t.refreshExtensions} onClick={() => void capabilitiesQuery.refetch()}><RefreshCw size={14} /></button></div>
@@ -330,9 +354,28 @@ export function SettingsDialog({
           </Tabs.Root>
           <div className="gb-settings-footer">
             {saveError && <span className="gb-settings-save-error" role="alert">{saveError}</span>}
-            <GbButton onClick={() => onOpenChange(false)}>{t.cancel}</GbButton>
+            {mode === "dialog" && <GbButton onClick={() => onOpenChange(false)}>{t.cancel}</GbButton>}
             <GbButton variant="primary" disabled={saving} onClick={() => void save()}>{saving ? t.saving : t.saveChanges}</GbButton>
           </div>
+          </>
+  );
+
+  if (mode === "page") {
+    return (
+      <div className="wb-page wb-settings-page">
+        <div className="gb-settings-dialog wb-settings-embedded">
+          {settingsBody}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(next) => { if (next) { setDraft(normalizeSettings(settings)); setSaveError(null); } onOpenChange(next); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="gb-dialog-overlay" />
+        <Dialog.Content className="gb-settings-dialog">
+          {settingsBody}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

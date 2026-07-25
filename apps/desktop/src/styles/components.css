@@ -1,0 +1,386 @@
+/* Shared UI primitives — Cursor-like, token-driven */
+
+/* —— Buttons —— */
+.gb-button,
+.wb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--gb-border-strong);
+  border-radius: var(--gb-radius-sm);
+  background: var(--gb-raised);
+  color: var(--gb-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition:
+    background var(--gb-ease),
+    border-color var(--gb-ease),
+    color var(--gb-ease);
+}
+
+.gb-button:hover,
+.wb-btn:hover {
+  background: var(--gb-hover);
+  border-color: var(--gb-border-strong);
+}
+
+.gb-button.primary,
+.wb-btn-primary {
+  border-color: var(--gb-accent);
+  background: var(--gb-accent);
+  color: var(--gb-accent-ink);
+}
+
+.gb-button.primary:hover,
+.wb-btn-primary:hover {
+  border-color: var(--gb-accent-strong);
+  background: var(--gb-accent-strong);
+  color: var(--gb-accent-ink);
+}
+
+.gb-button.danger,
+.wb-btn-danger {
+  border-color: color-mix(in srgb, var(--gb-danger) 40%, var(--gb-border));
+  color: var(--gb-danger);
+  background: transparent;
+}
+
+.gb-button.danger:hover,
+.wb-btn-danger:hover {
+  background: color-mix(in srgb, var(--gb-danger) 12%, transparent);
+}
+
+.gb-button.ghost,
+.wb-btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--gb-muted);
+}
+
+.gb-button.ghost:hover,
+.wb-btn-ghost:hover {
+  color: var(--gb-text);
+  background: var(--gb-hover);
+}
+
+.gb-icon-button,
+.wb-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--gb-radius-sm);
+  background: transparent;
+  color: var(--gb-muted);
+  transition: background var(--gb-ease), color var(--gb-ease), border-color var(--gb-ease);
+}
+
+.gb-icon-button:hover,
+.wb-icon-btn:hover {
+  color: var(--gb-text);
+  background: var(--gb-hover);
+  border-color: var(--gb-border);
+}
+
+/* —— Inputs —— */
+.gb-dialog-input,
+.gb-command-search,
+.wb-input,
+.wb-textarea {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-sm);
+  background: var(--gb-bg);
+  color: var(--gb-text);
+}
+
+.gb-dialog-input:focus,
+.gb-command-search:focus,
+.wb-input:focus,
+.wb-textarea:focus {
+  border-color: var(--gb-accent);
+  box-shadow: 0 0 0 3px var(--gb-accent-dim);
+}
+
+.wb-textarea {
+  min-height: 88px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+/* —— Pills / badges —— */
+.gb-run-pill,
+.gb-plan-pill,
+.gb-private-chat-pill,
+.wb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--gb-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gb-muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.gb-run-pill.running,
+.wb-pill.running {
+  color: var(--gb-accent);
+  border-color: color-mix(in srgb, var(--gb-accent) 35%, var(--gb-border));
+  background: var(--gb-accent-dim);
+}
+
+.gb-status-dot,
+.wb-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gb-faint);
+  flex: 0 0 auto;
+}
+
+.gb-status-dot.running,
+.wb-status-dot.running {
+  background: var(--gb-accent);
+  box-shadow: 0 0 0 3px var(--gb-accent-dim);
+}
+
+.gb-status-dot.idle,
+.wb-status-dot.idle {
+  background: var(--gb-success);
+}
+
+.gb-status-dot.attention,
+.wb-status-dot.attention {
+  background: var(--gb-warning);
+}
+
+.gb-status-dot.error,
+.wb-status-dot.error {
+  background: var(--gb-danger);
+}
+
+/* —— Overlay dialogs (palette / confirm only) —— */
+.gb-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.gb-command-palette,
+.gb-confirm-dialog,
+.gb-transcript-dialog,
+.gb-decision-dialog {
+  position: fixed;
+  top: 18vh;
+  left: 50%;
+  z-index: 90;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(70vh, 640px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-lg);
+  background: var(--gb-surface);
+  box-shadow: var(--gb-shadow-modal);
+  transform: translateX(-50%);
+}
+
+.gb-confirm-dialog {
+  top: 28vh;
+  width: min(420px, calc(100vw - 32px));
+}
+
+.gb-command-palette h2,
+.gb-confirm-dialog h2,
+.gb-transcript-dialog h2,
+.gb-command-palette [class*="Title"],
+.gb-confirm-dialog [class*="Title"] {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gb-command-palette p,
+.gb-confirm-dialog p {
+  margin: 0 0 12px;
+  color: var(--gb-muted);
+  font-size: 12.5px;
+}
+
+.gb-command-actions {
+  display: grid;
+  gap: 2px;
+  margin-top: 10px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.gb-command-actions button {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--gb-radius-sm);
+  background: transparent;
+  text-align: left;
+}
+
+.gb-command-actions button:hover:not(:disabled) {
+  background: var(--gb-hover);
+}
+
+.gb-command-actions code {
+  color: var(--gb-accent);
+  font-size: 12px;
+}
+
+.gb-command-actions span {
+  display: grid;
+  gap: 2px;
+  font-size: 12.5px;
+}
+
+.gb-command-actions small,
+.gb-command-actions i {
+  color: var(--gb-faint);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.gb-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* —— Dropdown —— */
+.gb-dropdown {
+  z-index: 70;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-md);
+  background: var(--gb-surface);
+  box-shadow: var(--gb-shadow-modal);
+}
+
+.gb-dropdown [role="menuitem"],
+.gb-dropdown [data-radix-collection-item] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: var(--gb-radius-sm);
+  font-size: 12.5px;
+  cursor: pointer;
+  outline: none;
+}
+
+.gb-dropdown [role="menuitem"]:hover,
+.gb-dropdown [role="menuitem"][data-highlighted],
+.gb-dropdown [data-radix-collection-item]:hover,
+.gb-dropdown [data-radix-collection-item][data-highlighted] {
+  background: var(--gb-hover);
+}
+
+.gb-dropdown .danger {
+  color: var(--gb-danger);
+}
+
+.gb-dropdown-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--gb-border);
+}
+
+/* —— Page chrome —— */
+.wb-page {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  background: var(--gb-bg);
+}
+
+.wb-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 28px 12px;
+  border-bottom: 1px solid var(--gb-border);
+}
+
+.wb-page-header h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.wb-page-header p {
+  margin: 4px 0 0;
+  color: var(--gb-muted);
+  font-size: 12.5px;
+}
+
+.wb-page-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 28px 28px;
+}
+
+.wb-empty {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 48px 16px;
+  color: var(--gb-muted);
+  text-align: center;
+}
+
+.wb-empty strong {
+  color: var(--gb-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wb-empty p {
+  margin: 0;
+  max-width: 360px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+kbd,
+.wb-kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border: 1px solid var(--gb-border);
+  border-radius: 4px;
+  background: var(--gb-raised);
+  color: var(--gb-muted);
+  font: 500 10px var(--gb-mono);
+}

@@ -1,7 +1,7 @@
 # Grok Build Desktop
 
-> A local-first, open-source macOS control plane for reliable [Grok Build](https://docs.x.ai/build/overview) coding agents.  
-> 面向官方 Grok Build CLI 的本地优先、开源 macOS 桌面控制台。
+> An open-source macOS operator workbench for [Grok Build](https://docs.x.ai/build/overview): run parallel ACP tasks, supervise Host jobs, and recover sessions locally.<br>
+> 面向官方 Grok Build CLI 的开源 macOS Agent 工作台：并行运行 ACP 任务、监督 Host 任务，并在本机恢复会话。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: macOS 12+](https://img.shields.io/badge/platform-macOS%2012%2B%20universal-black)](#download--安装)
@@ -19,9 +19,12 @@ This is an **unofficial community project** and is **not affiliated with, endors
 
 Grok Build Desktop now tracks the latest Grok Build CLI workflow (0.2.107–0.2.111) with:
 
+- A redesigned **Operator Workbench** with a navigation rail, searchable project/task panel, and clear running, attention, and archived states
+- **Mission Control** for prioritizing recovery, permission, and plan signals across concurrent tasks
+- A dedicated **Host Jobs** page for persistent scheduled or periodic Agent prompts, separate from Grok `/loop`
 - Orchestrator harness guidance for workflows, Host jobs, `/usage`, `/summarize`|`/recap`, and non-overlapping `/loop`
 - New-install default model **Grok 4.5**, with optional image/video tool stripping at process spawn
-- Focused Briefing home composition and Host-level agent customization controls
+- Focused Briefing home composition and Host-level Agent customization controls
 - A multiline desktop composer for normal chat-style prompts
 - `PageUp` / `PageDown` transcript scrolling while the composer is focused
 - CLI-aware `/vim-mode` discovery in the command palette when that command is advertised
@@ -34,6 +37,9 @@ The official Grok Build CLI remains the runtime and authentication owner; this p
 
 Grok Build Desktop 已适配最新 Grok Build CLI 工作流（0.2.107–0.2.111），新增：
 
+- 全新 **Operator Workbench**：导航栏、可搜索的项目 / 任务面板，以及清晰的运行中、需关注和已归档状态
+- **任务控制台（Mission Control）**：集中排序多任务的恢复、权限与计划信号
+- 独立的 **Host 任务**页面：持久化定时 / 周期 Agent 提示，与 Grok `/loop` 分离
 - Orchestrator harness 对齐 workflows、Host jobs、`/usage`、`/summarize`|`/recap`，以及不重叠的 `/loop`
 - 新安装默认模型 **Grok 4.5**，并可在进程启动时剥离图像/视频工具
 - Focused Briefing 首页构图与 Host 级 Agent 定制控件
@@ -50,20 +56,20 @@ Grok Build Desktop 已适配最新 Grok Build CLI 工作流（0.2.107–0.2.111�
 ## Screenshots · 截图
 
 <p align="center">
-  <img src="docs/screenshots/01-home.png" alt="New task workspace" width="900" />
+  <img src="docs/screenshots/01-home.png" alt="Grok Build Desktop Operator Workbench" width="900" />
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/02-settings.png" alt="Desktop settings" width="440" />
+  <img src="docs/screenshots/02-mission-control.png" alt="Mission Control dashboard" width="440" />
   &nbsp;
-  <img src="docs/screenshots/03-commands.png" alt="Command palette" width="440" />
+  <img src="docs/screenshots/03-host-jobs.png" alt="Persistent Host jobs" width="440" />
 </p>
 
 | | |
 |---|---|
-| **Workspace** · 工作区 | A focused new-task canvas with quick project review, a multiline composer, and Agent / Plan / Goal controls. |
-| **Settings** · 设置 | Clear controls for theme, language, privacy, agent behavior, permissions, extensions, and diagnostics. |
-| **Command palette** · 命令面板 | Keyboard-first access to `/plan`, `/effort`, `/diff`, and other desktop controls. |
+| **Operator Workbench** · Agent 工作台 | Projects, searchable tasks, parallel threads, a multiline composer, and Agent / Plan / Goal controls in one calm workspace. |
+| **Mission Control** · 任务控制台 | A cross-task view that puts active work and recovery, permission, or plan attention signals first. |
+| **Host Jobs** · Host 任务 | Persistent scheduled or periodic Agent prompts managed by the desktop Host, independent from Grok `/loop`. |
 
 ---
 
@@ -106,11 +112,13 @@ Grok Build Desktop is independently maintained. Feedback, collaboration, and spo
 
 ### What it is
 
-Grok Build Desktop turns the official Grok Build CLI into a dependable desktop coding workspace. The CLI remains the execution runtime and owns Grok authentication; this app is the control plane: projects, tasks, permissions, isolated worktrees, terminals, diffs, event history, and crash recovery.
+Grok Build Desktop turns the official Grok Build CLI into a dependable desktop coding workspace. The CLI remains the execution runtime and owns Grok authentication; this app is the operator layer for projects, parallel tasks, Host jobs, permissions, isolated worktrees, diffs, event history, and crash recovery.
 
 ### Highlights
 
-- Project / task sidebar with running, attention, completed, and archived states
+- Operator Workbench with project-scoped search, parallel threads, and running, attention, and archived states
+- Mission Control for supervising concurrent sessions and surfacing recovery, permission, and plan attention
+- Host Jobs for persistent scheduled or periodic prompts, separate from Grok `/loop`
 - Independent Agent Host sidecar — closing the UI does not kill confirmed work
 - Concurrent ACP sessions with crash recovery and event replay
 - Automatic Git worktrees and explicit dirty-worktree choice
@@ -160,11 +168,13 @@ More: [architecture](docs/architecture.md) · [release](docs/release.md) · [ACP
 
 ### 这是什么
 
-Grok Build Desktop 把官方 Grok Build CLI 变成可用的桌面编程工作区。CLI 仍是执行运行时并负责 Grok 登录；本应用是控制面：项目、任务、权限、隔离 worktree、终端、diff、事件历史与崩溃恢复。
+Grok Build Desktop 把官方 Grok Build CLI 变成可靠的桌面编程工作区。CLI 仍是执行运行时并负责 Grok 登录；本应用提供项目、并行任务、Host 任务、权限、隔离 worktree、diff、事件历史与崩溃恢复等操作层能力。
 
 ### 主要能力
 
-- 项目 / 任务侧边栏：运行中、需关注、已完成、已归档
+- Operator Workbench：项目内搜索、并行线程，以及运行中、需关注和已归档状态
+- 任务控制台：监督并发会话，优先展示恢复、权限与计划信号
+- Host 任务：由桌面 Host 持久化定时 / 周期提示，与 Grok `/loop` 分离
 - 独立 Agent Host：关掉窗口也不会中断已确认的任务
 - 多会话 ACP，支持崩溃恢复与事件回放
 - Git 项目自动 worktree，脏工作区需显式选择策略

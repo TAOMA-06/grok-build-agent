@@ -1,0 +1,348 @@
+/* Full-page Jobs / Control / Settings */
+
+.wb-split {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 0;
+  height: 100%;
+}
+
+.wb-split-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border-right: 1px solid var(--gb-border);
+  background: var(--gb-sidebar);
+  overflow: auto;
+}
+
+.wb-split-nav button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--gb-radius-sm);
+  background: transparent;
+  color: var(--gb-muted);
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.wb-split-nav button:hover {
+  color: var(--gb-text);
+  background: var(--gb-hover);
+}
+
+.wb-split-nav button.active {
+  color: var(--gb-text);
+  background: var(--gb-accent-dim);
+}
+
+.wb-split-main {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 28px 32px;
+  background: var(--gb-bg);
+}
+
+.wb-card {
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-md);
+  background: var(--gb-surface);
+  overflow: hidden;
+}
+
+.wb-card + .wb-card {
+  margin-top: 12px;
+}
+
+.wb-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--gb-border);
+}
+
+.wb-card-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wb-card-body {
+  padding: 14px;
+}
+
+.wb-field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.wb-field label {
+  color: var(--gb-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.wb-field .hint {
+  color: var(--gb-faint);
+  font-size: 11.5px;
+}
+
+.wb-list {
+  display: grid;
+  gap: 2px;
+}
+
+.wb-list-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: start;
+  padding: 10px 12px;
+  border-radius: var(--gb-radius-sm);
+}
+
+.wb-list-row:hover {
+  background: var(--gb-hover);
+}
+
+.wb-list-row strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 550;
+}
+
+.wb-list-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--gb-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.wb-list-row .meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  color: var(--gb-faint);
+  font: 11px var(--gb-mono);
+}
+
+/* Settings page field rows (from old dialog) */
+.gb-settings-dialog,
+.wb-settings {
+  display: contents;
+}
+
+.wb-settings-section {
+  max-width: 720px;
+}
+
+.wb-settings-section h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.wb-settings-section > .desc {
+  margin: 0 0 16px;
+  color: var(--gb-muted);
+  font-size: 12.5px;
+}
+
+.wb-settings-row {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--gb-border);
+}
+
+.wb-settings-row > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wb-settings-row strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.wb-settings-row span {
+  color: var(--gb-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.wb-settings-row select,
+.wb-settings-row input[type="text"],
+.wb-settings-row input:not([type]) {
+  min-width: 160px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-sm);
+  background: var(--gb-bg);
+  color: var(--gb-text);
+}
+
+.wb-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* Control page matrix */
+.wb-control-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.wb-stat {
+  padding: 14px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-md);
+  background: var(--gb-surface);
+}
+
+.wb-stat strong {
+  display: block;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.wb-stat span {
+  color: var(--gb-muted);
+  font-size: 12px;
+}
+
+.wb-mission-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  border-radius: var(--gb-radius-sm);
+  background: transparent;
+  color: var(--gb-text);
+  text-align: left;
+}
+
+.wb-mission-row:hover {
+  background: var(--gb-hover);
+}
+
+.wb-mission-row .icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--gb-radius-sm);
+  background: var(--gb-raised);
+  color: var(--gb-muted);
+}
+
+.wb-mission-row[data-state="attention"] .icon {
+  color: var(--gb-warning);
+  background: color-mix(in srgb, var(--gb-warning) 12%, transparent);
+}
+
+.wb-mission-row[data-state="working"] .icon {
+  color: var(--gb-accent);
+  background: var(--gb-accent-dim);
+}
+
+.wb-mission-row[data-state="failed"] .icon {
+  color: var(--gb-danger);
+  background: color-mix(in srgb, var(--gb-danger) 12%, transparent);
+}
+
+/* Host jobs panel inside pages — restyle settings panel remnants */
+.gb-settings-panel,
+.gb-host-jobs {
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-md);
+  background: var(--gb-surface);
+}
+
+.gb-settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--gb-border);
+}
+
+.gb-settings-section-head h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.gb-host-jobs .gb-settings-copy,
+.gb-settings-copy {
+  margin: 0;
+  padding: 0 14px 10px;
+  color: var(--gb-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.gb-host-jobs label,
+.gb-settings-panel label {
+  display: grid;
+  gap: 6px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--gb-border);
+  font-size: 12px;
+  color: var(--gb-muted);
+}
+
+.gb-host-jobs textarea,
+.gb-host-jobs input,
+.gb-settings-panel textarea,
+.gb-settings-panel input,
+.gb-settings-panel select {
+  width: 100%;
+  min-height: 32px;
+  padding: 7px 10px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-sm);
+  background: var(--gb-bg);
+  color: var(--gb-text);
+}
+
+.gb-host-jobs textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.gb-host-jobs .gb-button {
+  margin: 12px 14px;
+}
+
+/* Legacy settings dialog shell if still mounted — make full-bleed friendly */
+.gb-settings-dialog {
+  /* when used as page fragment, ignore dialog positioning */
+}
+
+.gb-settings-dialog:not(.wb-settings-page) {
+  /* keep for any residual portal usage */
+}
