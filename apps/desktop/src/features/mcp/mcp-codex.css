@@ -235,6 +235,7 @@
 .gb-mcp-notice code {
   margin-top: 4px;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
   color: inherit;
   font: 11px/1.45 var(--gb-mono, "IBM Plex Mono", monospace);
 }
@@ -559,6 +560,7 @@
 
 .gb-mcp-form-error code {
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
   color: inherit;
   font: 11px/1.45 var(--gb-mono, "IBM Plex Mono", monospace);
 }

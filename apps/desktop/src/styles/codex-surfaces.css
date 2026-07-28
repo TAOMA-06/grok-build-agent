@@ -56,6 +56,7 @@ button:disabled {
   font-size: 12px;
   line-height: 1.55;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .gb-settings-warning,
@@ -865,6 +866,7 @@ button:disabled {
 .gb-settings-copy {
   padding: 8px 0 0;
   font-size: 11.5px;
+  white-space: pre-wrap;
 }
 
 .gb-settings-panel .gb-settings-copy + .gb-settings-copy {
@@ -1015,9 +1017,11 @@ button:disabled {
 }
 
 .gb-settings-save-error {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-height: 120px;
+  flex: 1;
+  overflow: auto;
+  text-overflow: clip;
+  white-space: pre-wrap;
 }
 
 /* Host jobs: form rows + plain active-job list */

@@ -510,6 +510,10 @@ select {
   color: var(--gb-text);
 }
 
+.gb-composer-error > span {
+  white-space: pre-wrap;
+}
+
 .gb-model-custom-option strong {
   color: var(--gb-accent);
 }

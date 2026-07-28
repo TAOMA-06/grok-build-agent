@@ -4,6 +4,12 @@ import type { BootstrapState } from "../../types";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore } from "../../store";
 import { t } from "../../i18n";
+import { describeError } from "../../contracts";
+import { formatFailureForTimeline } from "./errorPresentation";
+
+function explainBootstrapError(error: unknown): string {
+  return formatFailureForTimeline(describeError(error));
+}
 
 export function BootstrapScreen({ state, onRefresh }: { state: BootstrapState; onRefresh: () => Promise<void> }) {
   const bridge = useDesktopBridge();
@@ -19,7 +25,7 @@ export function BootstrapScreen({ state, onRefresh }: { state: BootstrapState; o
       setLog(result.map((item) => `${item.ok ? "✓" : "×"} ${item.detail}`));
       await onRefresh();
     } catch (error) {
-      setLog([String(error)]);
+      setLog([explainBootstrapError(error)]);
     } finally {
       setBusy(false);
     }
@@ -33,7 +39,7 @@ export function BootstrapScreen({ state, onRefresh }: { state: BootstrapState; o
       if (message) setLog([message]);
       await onRefresh();
     } catch (error) {
-      setLog([String(error)]);
+      setLog([explainBootstrapError(error)]);
     } finally {
       setBusy(false);
     }

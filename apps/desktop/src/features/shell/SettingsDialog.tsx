@@ -7,11 +7,12 @@ import { useEffect } from "react";
 import { McpManager } from "../mcp/McpManager";
 import { applyLocalePreference, t } from "../../i18n";
 import { GbButton } from "../../components/ui/GbButton";
-import { normalizeSettings } from "../../contracts";
+import { describeError, normalizeSettings } from "../../contracts";
 import { BUILT_IN_MODEL_FALLBACKS, mergeSelectableModels } from "../../contracts/model";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore } from "../../store";
 import type { Settings } from "../../types";
+import { formatFailureForTimeline } from "./errorPresentation";
 
 export type SettingsTab = "general" | "agent" | "permissions" | "extensions" | "diagnostics" | "about";
 
@@ -33,6 +34,10 @@ function compatibilityStateLabel(enabled?: boolean | null) {
   if (enabled === true) return t.compatibilityEnabled;
   if (enabled === false) return t.compatibilityDisabled;
   return t.compatibilityInherited;
+}
+
+function explainSettingsError(error: unknown): string {
+  return formatFailureForTimeline(describeError(error));
 }
 
 export function SettingsDialog({
@@ -114,7 +119,7 @@ export function SettingsDialog({
       await write;
       if (closeWhenSaved && revision === saveRevision.current) onOpenChange(false);
     } catch (error) {
-      if (revision === saveRevision.current) setSaveError(String(error));
+      if (revision === saveRevision.current) setSaveError(explainSettingsError(error));
     } finally {
       if (revision === saveRevision.current) setSaving(false);
     }
@@ -145,7 +150,7 @@ export function SettingsDialog({
       const message = String(error);
       // NotRunning is expected when no agent is active; keep the local preference.
       if (/not running|NotRunning/i.test(message)) return;
-      setSaveError(message);
+      setSaveError(explainSettingsError(error));
     }
   }
 
@@ -306,7 +311,7 @@ export function SettingsDialog({
                     )}
                   </div>
                 )}
-                {capabilitiesQuery.isError && <div className="gb-settings-placeholder"><Puzzle size={24} /><strong>{t.capabilitiesUnavailable}</strong><p>{String(capabilitiesQuery.error)}</p></div>}
+                {capabilitiesQuery.isError && <div className="gb-settings-placeholder"><Puzzle size={24} /><strong>{t.capabilitiesUnavailable}</strong><p>{explainSettingsError(capabilitiesQuery.error)}</p></div>}
                 <McpManager onReloadAgent={onReloadAgent} />
               </Tabs.Content>
               <Tabs.Content value="diagnostics">
@@ -320,28 +325,28 @@ export function SettingsDialog({
                   <div><span><b>Blob storage</b><small>Content-addressed artifacts</small></span><i>{doctorQuery.data.blobBytes} bytes</i></div>
                   <div><span><b>Strict network isolation</b><small>Grok cannot attest enforceable isolation</small></span><i>{doctorQuery.data.strictNetworkIsolation ? "protected" : "unavailable"}</i></div>
                 </section></div>}
-                {doctorQuery.isError && <div className="gb-settings-placeholder"><Stethoscope size={24} /><strong>{t.capabilitiesUnavailable}</strong><p>{String(doctorQuery.error)}</p></div>}
+                {doctorQuery.isError && <div className="gb-settings-placeholder"><Stethoscope size={24} /><strong>{t.capabilitiesUnavailable}</strong><p>{explainSettingsError(doctorQuery.error)}</p></div>}
                 <div className="gb-settings-section-head"><h3>Recovery</h3><div><button type="button" className="gb-button" onClick={() => {
                   if (!window.confirm("Restart the Agent Host? Running Runtime processes will be interrupted and uncertain prompts will not be retried automatically.")) return;
                   setDoctorAction("Restarting Agent Host…");
                   void bridge.restartAgentHost().then(() => {
                     setDoctorAction("Agent Host restarted.");
                     return doctorQuery.refetch();
-                  }).catch((error) => setDoctorAction(`Agent Host restart failed: ${String(error)}`));
+                  }).catch((error) => setDoctorAction(`Agent Host restart failed:\n${explainSettingsError(error)}`));
                 }}>Restart Host</button><button type="button" className="gb-button" onClick={() => {
                   if (!window.confirm("Rebuild all event projections? Current projections are replaced only after validation succeeds.")) return;
                   setDoctorAction("Rebuilding projections…");
                   void bridge.rebuildProjections().then((report) => {
                     setDoctorAction(`Rebuilt ${report.projectedEntities} entities from ${report.processedEvents} events.`);
                     return doctorQuery.refetch();
-                  }).catch((error) => setDoctorAction(`Projection rebuild failed: ${String(error)}`));
+                  }).catch((error) => setDoctorAction(`Projection rebuild failed:\n${explainSettingsError(error)}`));
                 }}>Rebuild projections</button></div></div>
                 {doctorAction && <p className="gb-settings-copy">{doctorAction}</p>}
                 <button type="button" className="gb-button" onClick={() => {
                   if (!window.confirm("Remove unreferenced Blob files? Referenced artifacts are retained.")) return;
-                  void bridge.gcBlobs().then((result) => { setDoctorAction(`Removed ${result.removed} blobs and reclaimed ${result.reclaimedBytes} bytes.`); return doctorQuery.refetch(); }).catch((error) => setDoctorAction(String(error)));
+                  void bridge.gcBlobs().then((result) => { setDoctorAction(`Removed ${result.removed} blobs and reclaimed ${result.reclaimedBytes} bytes.`); return doctorQuery.refetch(); }).catch((error) => setDoctorAction(explainSettingsError(error)));
                 }}>Garbage collect blobs</button>
-                <div className="gb-settings-section-head"><h3>Diagnostic bundle</h3><div><button type="button" className="gb-button" onClick={() => void bridge.diagnosticBundlePreview().then(setBundlePreview).catch((error) => setDoctorAction(String(error)))}>Preview</button><button type="button" className="gb-button" disabled={!bundlePreview} onClick={() => void bridge.exportDiagnosticBundle().then((path) => setDoctorAction(path ? `Exported diagnostics to ${path}` : null)).catch((error) => setDoctorAction(String(error)))}>Export previewed bundle</button></div></div>
+                <div className="gb-settings-section-head"><h3>Diagnostic bundle</h3><div><button type="button" className="gb-button" onClick={() => void bridge.diagnosticBundlePreview().then(setBundlePreview).catch((error) => setDoctorAction(explainSettingsError(error)))}>Preview</button><button type="button" className="gb-button" disabled={!bundlePreview} onClick={() => void bridge.exportDiagnosticBundle().then((path) => setDoctorAction(path ? `Exported diagnostics to ${path}` : null)).catch((error) => setDoctorAction(explainSettingsError(error)))}>Export previewed bundle</button></div></div>
                 {bundlePreview && <pre className="gb-doctor-preview">{bundlePreview}</pre>}
               </Tabs.Content>
               <Tabs.Content value="about">

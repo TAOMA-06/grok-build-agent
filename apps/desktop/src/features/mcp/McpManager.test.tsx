@@ -34,6 +34,26 @@ describe("McpManager", () => {
     expect(screen.getByLabelText(/Name|名称/i)).toHaveFocus();
   });
 
+  it("explains the technical detail, cause, and recovery for MCP failures", async () => {
+    const bridge = {
+      ...mockDesktopBridge,
+      listMcpServers: vi.fn().mockRejectedValue(
+        new Error("ENOENT: no such file or directory, grok"),
+      ),
+    } as DesktopBridge;
+
+    render(
+      <DesktopBridgeContext.Provider value={bridge}>
+        <McpManager />
+      </DesktopBridgeContext.Provider>,
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("ENOENT: no such file or directory, grok");
+    expect(alert.textContent).toMatch(/Why|原因/);
+    expect(alert.textContent).toMatch(/What to do|下一步/);
+  });
+
   it("uses an in-app confirmation before deleting a server", async () => {
     const server: McpServerInfo = {
       name: "filesystem",

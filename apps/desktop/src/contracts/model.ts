@@ -208,6 +208,20 @@ export function mergeSelectableModels(
   return Array.from(byId.values());
 }
 
+/**
+ * Resolve the model for a new task without letting a refreshed CLI catalog
+ * overwrite the user's saved preference. Custom model ids remain valid even
+ * when the current catalog is offline or incomplete.
+ */
+export function resolvePreferredModelId(
+  models: readonly SelectableModel[],
+  configuredId: string | null | undefined,
+): string | null {
+  const configured = configuredId?.trim();
+  if (configured) return configured;
+  return models.find((model) => model.isDefault)?.id ?? models[0]?.id ?? null;
+}
+
 function preferRicherModel(a: SelectableModel, b: SelectableModel): SelectableModel {
   const aScore =
     (a.supportsReasoningEffort ? 2 : 0) +

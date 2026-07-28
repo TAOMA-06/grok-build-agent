@@ -69,6 +69,21 @@ describe("CommandComposer", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("中文", [], "agent"));
   });
 
+  it("explains a first-send setup failure instead of silently rejecting", async () => {
+    const onSend = vi.fn().mockRejectedValue(
+      new Error("EACCES: permission denied, open '/workspace/.grok'"),
+    );
+    renderComposer({ onSend });
+    const textarea = screen.getByRole("textbox", { name: "Message Grok" });
+    fireEvent.change(textarea, { target: { value: "Inspect the workspace" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("EACCES: permission denied");
+    expect(alert.textContent).toMatch(/Why|原因/);
+    expect(alert.textContent).toMatch(/What to do|下一步/);
+  });
+
   it("marks path attachments as private before the Host inspects them", async () => {
     useAppStore.setState((state) => ({
       settings: { ...state.settings, privateChat: true },

@@ -23,6 +23,7 @@ import { describeError, emptyMcpServerInput } from "../../contracts";
 import { t, translate } from "../../i18n";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore } from "../../store";
+import { formatFailureForTimeline } from "../shell/errorPresentation";
 import type {
   McpDoctorResult,
   McpScope,
@@ -31,6 +32,10 @@ import type {
   McpTransport,
 } from "../../types";
 import "./mcp-codex.css";
+
+function explainMcpError(error: unknown): string {
+  return formatFailureForTimeline(describeError(error));
+}
 
 function McpField({
   label,
@@ -159,7 +164,7 @@ export function McpManager({
       setMessage(null);
     } catch (error) {
       setServers([]);
-      setMessage(describeError(error).message);
+      setMessage(explainMcpError(error));
     } finally {
       setLoading(false);
     }
@@ -237,7 +242,7 @@ export function McpManager({
       setAgentReloadRequired(true);
       await refresh();
     } catch (error) {
-      setFormError(describeError(error).message);
+      setFormError(explainMcpError(error));
     } finally {
       setBusy(false);
     }
@@ -255,7 +260,7 @@ export function McpManager({
       setAgentReloadRequired(true);
       await refresh();
     } catch (error) {
-      setMessage(describeError(error).message);
+      setMessage(explainMcpError(error));
     } finally {
       setBusy(false);
     }
@@ -277,7 +282,7 @@ export function McpManager({
       });
       setMessage(null);
     } catch (error) {
-      setMessage(describeError(error).message);
+      setMessage(explainMcpError(error));
     } finally {
       setBusy(false);
     }

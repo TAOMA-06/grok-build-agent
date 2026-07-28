@@ -6,6 +6,7 @@ import {
   formatTokenCount,
   mergeSelectableModels,
   resolveEffortForModel,
+  resolvePreferredModelId,
   sanitizeDefaultReasoningEffort,
 } from "./model";
 import { extractContextUsage } from "../acp/client";
@@ -19,6 +20,16 @@ describe("reasoning effort helpers", () => {
     );
     expect(catalog.map((model) => model.id)).toEqual(["grok-build", "grok-4.5"]);
     expect(catalog.find((model) => model.id === "grok-build")?.isDefault).not.toBe(true);
+  });
+
+  it("keeps the saved model preference ahead of the CLI catalog default", () => {
+    const catalog = [
+      { id: "grok-4.5", name: "Grok 4.5", isDefault: true },
+      { id: "grok-build", name: "Grok Build" },
+    ];
+    expect(resolvePreferredModelId(catalog, "grok-build")).toBe("grok-build");
+    expect(resolvePreferredModelId(catalog, "private/custom-model")).toBe("private/custom-model");
+    expect(resolvePreferredModelId(catalog, "")).toBe("grok-4.5");
   });
 
   it("hides effort controls when the model does not support them", () => {

@@ -22,6 +22,7 @@ import { useAppStore } from "../../store";
 import {
   inferAttachmentMime,
   validateAttachments,
+  describeError,
   effortOptionsForModel,
   resolveEffortForModel,
   formatTokenCount,
@@ -38,8 +39,13 @@ import type {
 import { t, translate } from "../../i18n";
 import { buildCommandCatalog, parseSlashCommand } from "./commands";
 import { STOP_ARM_MS } from "./composerTiming";
+import { formatFailureForTimeline } from "./errorPresentation";
 
 export { STOP_ARM_MS } from "./composerTiming";
+
+function explainComposerError(error: unknown): string {
+  return formatFailureForTimeline(describeError(error));
+}
 
 /** OpenCode-style circular context meter: fill arc grows with usage %. */
 function ContextUsageRing({
@@ -349,7 +355,7 @@ export function CommandComposer({
               const staged = await bridge.stageAttachments(paths, privateChat);
               acceptAttachments(staged);
             } catch (error) {
-              setAttachmentError(String(error));
+              setAttachmentError(explainComposerError(error));
             }
           })();
         });
@@ -378,7 +384,7 @@ export function CommandComposer({
         await bridge.stageAttachments(paths, currentSession?.privateChat ?? settings.privateChat),
       );
     } catch (error) {
-      setAttachmentError(String(error));
+      setAttachmentError(explainComposerError(error));
     }
   }
 
@@ -413,7 +419,7 @@ export function CommandComposer({
       }
       acceptAttachments(await Promise.all(files.map(browserAttachment)));
     } catch (error) {
-      setAttachmentError(String(error));
+      setAttachmentError(explainComposerError(error));
     }
   }
 
@@ -520,6 +526,8 @@ export function CommandComposer({
         return;
       }
       await onSend(submittedText, attachments, mode);
+    } catch (error) {
+      setCommandError(explainComposerError(error));
     } finally {
       submittingRef.current = false;
     }
@@ -531,7 +539,7 @@ export function CommandComposer({
       if (result.kind === "unsupported") setCommandError(result.reason);
       else setCommandError(null);
     } catch (error) {
-      setCommandError(translate("modeSwitchFailed", { reason: String(error) }));
+      setCommandError(explainComposerError(error));
     }
   }
 

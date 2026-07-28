@@ -3,7 +3,12 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore, type SessionRuntime } from "../../store";
-import { BUILT_IN_MODEL_FALLBACKS, mergeSelectableModels } from "../../contracts/model";
+import {
+  BUILT_IN_MODEL_FALLBACKS,
+  mergeSelectableModels,
+  resolvePreferredModelId,
+} from "../../contracts/model";
+import { describeError } from "../../contracts";
 import type { Settings } from "../../types";
 import { t } from "../../i18n";
 import { ContextDrawer } from "../shell/ContextDrawer";
@@ -12,6 +17,7 @@ import { SettingsDialog, type SettingsTab } from "../shell/SettingsDialog";
 import { ThreadView } from "../shell/ThreadView";
 import { useDesktopController, type DirtyPolicy } from "../shell/useDesktopController";
 import { buildCommandCatalog } from "../shell/commands";
+import { formatFailureForTimeline } from "../shell/errorPresentation";
 import { ControlPage } from "../control/ControlPage";
 import { JobsPage } from "../jobs/JobsPage";
 import { NavRail } from "./NavRail";
@@ -126,7 +132,7 @@ export function AppWorkbench() {
   useEffect(() => {
     const models = modelsQuery.data;
     if (!models?.length) return;
-    const current = models.find((model) => model.isDefault)?.id || settings.model || models[0]?.id || null;
+    const current = resolvePreferredModelId(models, settings.model);
     setGlobalModelState({
       currentModelId: current,
       availableModels: models,
@@ -188,6 +194,7 @@ export function AppWorkbench() {
         clearProvisionalDraft();
         setActiveSession(null);
         setInspectorOpen(false);
+        if (usesOverlayPanels()) setTaskPanelOpen(false);
         setAppView("home");
       } else if (key === "b") {
         event.preventDefault();
@@ -199,9 +206,11 @@ export function AppWorkbench() {
       } else if (event.key === ",") {
         event.preventDefault();
         setSettingsTab("general");
+        if (usesOverlayPanels()) setTaskPanelOpen(false);
         setAppView("settings");
       } else if (event.key === "\\") {
         event.preventDefault();
+        if (usesOverlayPanels()) setTaskPanelOpen(false);
         setAppView("control");
       }
     }
@@ -356,7 +365,7 @@ export function AppWorkbench() {
         window.dispatchEvent(new Event("grok:focus-task-search"));
         break;
       case "/dashboard":
-        setAppView("control");
+        navigate("control");
         break;
       case "/model":
         if (args) await controller.chooseModel(args);
@@ -402,11 +411,11 @@ export function AppWorkbench() {
       case "/marketplace":
       case "/skills":
         setSettingsTab("extensions");
-        setAppView("settings");
+        navigate("settings");
         break;
       case "/settings":
         setSettingsTab("general");
-        setAppView("settings");
+        navigate("settings");
         break;
       case "/help":
         setCommandOpen(true);
@@ -500,7 +509,7 @@ export function AppWorkbench() {
           onSelectWorkspace={(path) => void selectWorkspace(path)}
           onOpenSettings={() => {
             setSettingsTab("general");
-            setAppView("settings");
+            navigate("settings");
           }}
         />
       )}
@@ -657,7 +666,7 @@ export function AppWorkbench() {
                   setTranscriptExportStatus("Exporting…");
                   void bridge.exportTranscript(activeSession.summary.sessionId, "markdown")
                     .then((path) => setTranscriptExportStatus(path ? `Exported to ${path}` : null))
-                    .catch((error) => setTranscriptExportStatus(`Export failed: ${String(error)}`));
+                    .catch((error) => setTranscriptExportStatus(`Export failed:\n${formatFailureForTimeline(describeError(error))}`));
                 }}
                 disabled={!activeSession || activeSession.privateChat}
               >
@@ -671,7 +680,7 @@ export function AppWorkbench() {
                   setTranscriptExportStatus("Exporting…");
                   void bridge.exportTranscript(activeSession.summary.sessionId, "json")
                     .then((path) => setTranscriptExportStatus(path ? `Exported to ${path}` : null))
-                    .catch((error) => setTranscriptExportStatus(`Export failed: ${String(error)}`));
+                    .catch((error) => setTranscriptExportStatus(`Export failed:\n${formatFailureForTimeline(describeError(error))}`));
                 }}
                 disabled={!activeSession || activeSession.privateChat}
               >
