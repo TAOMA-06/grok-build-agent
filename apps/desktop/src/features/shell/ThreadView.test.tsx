@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { SessionRuntime } from "../../store";
 import { ThreadView } from "./ThreadView";
@@ -8,7 +8,19 @@ vi.mock("./CommandComposer", () => ({
 }));
 
 vi.mock("./EmptyTaskState", () => ({
-  EmptyTaskState: () => <div data-testid="empty-task-state" />,
+  EmptyTaskState: ({
+    onSuggest,
+  }: {
+    onSuggest: (prompt: string, mode: "agent") => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="empty-task-state"
+      onClick={() => onSuggest("Explain this project", "agent")}
+    >
+      Suggest
+    </button>
+  ),
 }));
 
 vi.mock("./ExecutionFlightDeck", () => ({
@@ -88,6 +100,24 @@ describe("ThreadView", () => {
 
     expect(screen.getByTestId("empty-task-state")).toBeInTheDocument();
     expect(screen.queryByTestId("execution-flight-deck")).not.toBeInTheDocument();
+  });
+
+  it("explains failures from an empty-state suggestion", async () => {
+    render(
+      <ThreadView
+        {...props}
+        session={null}
+        onSend={vi.fn().mockRejectedValue(
+          new Error("EACCES: permission denied, open '/workspace/.grok'"),
+        )}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("empty-task-state"));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("EACCES: permission denied");
+    expect(alert.textContent).toMatch(/Why|原因/);
+    expect(alert.textContent).toMatch(/What to do|下一步/);
   });
 
   it("shows a plan-mode pill when the active task is planning", () => {

@@ -29,4 +29,32 @@ describe("BootstrapScreen", () => {
     expect(status.textContent).toMatch(/Why|原因/);
     expect(status.textContent).toMatch(/What to do|下一步/);
   });
+
+  it("explains a completed installer step that reports ok false", async () => {
+    const bridge = {
+      ...mockDesktopBridge,
+      installCli: vi.fn().mockResolvedValue([
+        {
+          phase: "verify",
+          detail: "ENOENT: Grok CLI was not found after installation",
+          ok: false,
+        },
+      ]),
+    } as DesktopBridge;
+
+    render(
+      <DesktopBridgeContext.Provider value={bridge}>
+        <BootstrapScreen
+          state={{ status: "needs_cli", health: {} as RuntimeHealth }}
+          onRefresh={vi.fn().mockResolvedValue(undefined)}
+        />
+      </DesktopBridgeContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Install from x\.ai|安装/i }));
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("ENOENT: Grok CLI was not found after installation");
+    expect(status.textContent).toMatch(/Why|原因/);
+    expect(status.textContent).toMatch(/What to do|下一步/);
+  });
 });

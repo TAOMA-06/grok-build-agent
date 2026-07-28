@@ -19,6 +19,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { ComposerAttachment, ModeSwitchResult, SelectableModel, ServerRequest, TaskMode } from "../../types";
 import type { SessionRuntime } from "../../store";
+import { describeError } from "../../contracts";
 import { classifyPermissionCategory, type PermissionRiskCategory } from "../../contracts/permission";
 import { CommandComposer } from "./CommandComposer";
 import { EmptyTaskState } from "./EmptyTaskState";
@@ -26,7 +27,7 @@ import { ExecutionFlightDeck } from "./ExecutionFlightDeck";
 import { Timeline } from "./Timeline";
 import { t } from "../../i18n";
 import { useAppStore } from "../../store";
-import { guidanceForError } from "./errorPresentation";
+import { formatFailureForTimeline, guidanceForError } from "./errorPresentation";
 
 function permissionCategoryLabel(category: PermissionRiskCategory): string {
   switch (category) {
@@ -167,6 +168,7 @@ export function ThreadView({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState(session?.summary.title ?? "");
   const threadScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => setTitleDraft(session?.summary.title ?? ""), [session?.summary.title]);
@@ -202,6 +204,15 @@ export function ThreadView({
   const isNewTask = !session;
   const failure = session?.failedSubmission ?? null;
   const failureGuidance = failure ? guidanceForError(failure.errorCategory) : null;
+
+  async function sendSuggestion(prompt: string, mode: TaskMode) {
+    setSuggestionError(null);
+    try {
+      await onSend(prompt, [], mode);
+    } catch (error) {
+      setSuggestionError(formatFailureForTimeline(describeError(error)));
+    }
+  }
 
   const composer = (
     <div className={`gb-composer-dock${isEmpty ? " is-empty" : ""}`}>
@@ -294,7 +305,12 @@ export function ThreadView({
       {isEmpty ? (
         <div className="gb-empty-layout">
           {session && !session.privateChat && <ExecutionFlightDeck session={session} />}
-          {isNewTask && <EmptyTaskState onSuggest={(prompt, mode) => void onSend(prompt, [], mode)} />}
+          {isNewTask && <EmptyTaskState onSuggest={(prompt, mode) => void sendSuggestion(prompt, mode)} />}
+          {suggestionError && (
+            <div className="gb-composer-error" role="alert">
+              <span>{suggestionError}</span>
+            </div>
+          )}
           {composer}
         </div>
       ) : (

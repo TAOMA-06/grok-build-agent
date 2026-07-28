@@ -22,7 +22,11 @@ export function BootstrapScreen({ state, onRefresh }: { state: BootstrapState; o
     setLog([]);
     try {
       const result = await bridge.installCli();
-      setLog(result.map((item) => `${item.ok ? "✓" : "×"} ${item.detail}`));
+      const failures = result.filter((item) => !item.ok);
+      setLog([
+        ...result.map((item) => `${item.ok ? "✓" : "×"} ${item.detail}`),
+        ...failures.flatMap((item) => ["", explainBootstrapError(item.detail)]),
+      ]);
       await onRefresh();
     } catch (error) {
       setLog([explainBootstrapError(error)]);
