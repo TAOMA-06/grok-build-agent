@@ -177,7 +177,11 @@ pub async fn handle_server_request(
     if is_terminal_method(&method) {
         let mode = session_id
             .as_deref()
-            .map(|id| conn.session_mode_state(id).current_mode.to_ascii_lowercase())
+            .map(|id| {
+                conn.session_mode_state(id)
+                    .current_mode
+                    .to_ascii_lowercase()
+            })
             .unwrap_or_default();
 
         // Plan mode: refuse PTY input so a previously-started process cannot be
@@ -240,14 +244,16 @@ pub async fn handle_server_request(
                 })
                 .unwrap_or_default();
             let action = crate::policy::classify_terminal_action_with_options(
-                json_rpc_id_string(&id),
-                conn.cwd.to_string_lossy().into(),
-                routed_session_id.clone(),
-                routed_session_id.clone(),
-                &command,
-                &args,
-                secret_refs,
-                conn.key.strict_terminal,
+                crate::policy::TerminalActionInput {
+                    request_id: json_rpc_id_string(&id),
+                    workspace_id: conn.cwd.to_string_lossy().into(),
+                    task_id: routed_session_id.clone(),
+                    session_id: routed_session_id.clone(),
+                    command: &command,
+                    args: &args,
+                    secret_refs,
+                    strict_terminal: conn.key.strict_terminal,
+                },
             );
             let allowed_paths = bus.task_allowed_paths(&routed_session_id);
             let decision = crate::policy::evaluate_with_allowed_paths(&action, &allowed_paths);

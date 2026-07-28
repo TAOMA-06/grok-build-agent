@@ -42,12 +42,16 @@ export function BootstrapScreen({ state, onRefresh }: { state: BootstrapState; o
   return (
     <main className="gb-bootstrap">
       <div className="gb-bootstrap-brand"><span>G</span><strong>Grok Build</strong></div>
-      <section className="gb-bootstrap-card">
+      <section
+        className="gb-bootstrap-card"
+        aria-busy={busy || state.status === "checking"}
+        aria-live="polite"
+      >
         {state.status === "checking" && <><LoaderCircle className="gb-spin" size={22} /><h1>{t.bootstrapCheckingTitle}</h1><p>{t.bootstrapCheckingHint}</p></>}
         {state.status === "needs_cli" && <><div className="gb-bootstrap-icon"><TerminalSquare size={22} /></div><h1>{t.bootstrapInstallTitle}</h1><p>{t.bootstrapInstallHint}</p><button type="button" className="gb-bootstrap-primary" disabled={busy} onClick={() => void install()}><Download size={16} />{busy ? t.installing : t.installOfficial}</button></>}
         {state.status === "needs_auth" && <><div className="gb-bootstrap-icon"><LogIn size={22} /></div><h1>{t.bootstrapLoginTitle}</h1><p>{t.bootstrapLoginHint}</p><button type="button" className="gb-bootstrap-primary" disabled={busy} onClick={() => void login()}><LogIn size={16} />{busy ? t.waitingLogin : t.continueBrowser}</button></>}
-        {state.status === "error" && <><div className="gb-bootstrap-icon error"><CircleAlert size={22} /></div><h1>{t.bootstrapErrorTitle}</h1><p>{state.message}</p>{state.detail && <pre className="gb-bootstrap-log">{state.detail}</pre>}<button type="button" className="gb-bootstrap-primary" onClick={() => void onRefresh()}><RefreshCw size={16} />{t.tryAgain}</button></>}
-        {log.length > 0 && <pre className="gb-bootstrap-log">{log.join("\n")}</pre>}
+        {state.status === "error" && <><div className="gb-bootstrap-icon error"><CircleAlert size={22} /></div><h1>{t.bootstrapErrorTitle}</h1><p role="alert">{state.message}</p>{state.detail && <pre className="gb-bootstrap-log" role="alert">{state.detail}</pre>}<button type="button" className="gb-bootstrap-primary" onClick={() => void onRefresh()}><RefreshCw size={16} />{t.tryAgain}</button></>}
+        {log.length > 0 && <pre className="gb-bootstrap-log" role="status">{log.join("\n")}</pre>}
         {(state.status === "needs_cli" || state.status === "needs_auth") && <div className="gb-bootstrap-trust"><Check size={14} /> {t.officialRuntime}</div>}
       </section>
     </main>

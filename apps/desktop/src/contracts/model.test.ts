@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BUILT_IN_MODEL_FALLBACKS,
   effortOptionsForModel,
   emptyContextUsage,
   formatTokenCount,
@@ -11,6 +12,15 @@ import { extractContextUsage } from "../acp/client";
 import { normalizeSettings, defaultSettings } from "./settings";
 
 describe("reasoning effort helpers", () => {
+  it("keeps the documented built-in coding model available beside an offline catalog", () => {
+    const catalog = mergeSelectableModels(
+      BUILT_IN_MODEL_FALLBACKS,
+      [{ id: "grok-4.5", name: "Grok 4.5", isDefault: true }],
+    );
+    expect(catalog.map((model) => model.id)).toEqual(["grok-build", "grok-4.5"]);
+    expect(catalog.find((model) => model.id === "grok-build")?.isDefault).not.toBe(true);
+  });
+
   it("hides effort controls when the model does not support them", () => {
     expect(
       effortOptionsForModel({

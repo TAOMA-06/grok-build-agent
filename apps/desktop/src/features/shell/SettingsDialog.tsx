@@ -8,6 +8,7 @@ import { McpManager } from "../mcp/McpManager";
 import { applyLocalePreference, t } from "../../i18n";
 import { GbButton } from "../../components/ui/GbButton";
 import { normalizeSettings } from "../../contracts";
+import { BUILT_IN_MODEL_FALLBACKS, mergeSelectableModels } from "../../contracts/model";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore } from "../../store";
 import type { Settings } from "../../types";
@@ -80,6 +81,7 @@ export function SettingsDialog({
     queryFn: () => bridge.listModels(draft.cliPathOverride || draft.grokPath || undefined),
     enabled: active,
   });
+  const availableModels = mergeSelectableModels(BUILT_IN_MODEL_FALLBACKS, modelsQuery.data);
   const policyRulesQuery = useQuery({
     queryKey: ["policy-rules"],
     queryFn: () => bridge.listPolicyRules(),
@@ -218,7 +220,7 @@ export function SettingsDialog({
               <Tabs.Content value="agent">
                 <section className="gb-settings-panel">
                   <h3>{t.newTasks}</h3>
-                  <label><span>{t.defaultModel}<small>{t.defaultModelHint}</small></span><select value={draft.model} onChange={(event) => patch({ model: event.target.value })}>{!modelsQuery.data?.some((model) => model.id === draft.model) && <option value={draft.model}>{draft.model}</option>}{modelsQuery.data?.map((model) => <option value={model.id} key={model.id}>{model.name}</option>)}</select></label>
+                  <label><span>{t.defaultModel}<small>{t.defaultModelHint}</small></span><select value={draft.model} onChange={(event) => patch({ model: event.target.value })}>{!availableModels.some((model) => model.id === draft.model) && <option value={draft.model}>{draft.model}</option>}{availableModels.map((model) => <option value={model.id} key={model.id}>{model.name}</option>)}</select></label>
                   <label><span>{t.defaultReasoningEffort}<small>{t.defaultReasoningEffortHint}</small></span><select value={draft.defaultReasoningEffort} onChange={(event) => patch({ defaultReasoningEffort: event.target.value })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
                   <label><span>{t.defaultMode}<small>{t.defaultModeHint}</small></span><select value={draft.defaultMode} onChange={(event) => patch({ defaultMode: event.target.value as Settings["defaultMode"] })}><option value="agent">{t.modeAgent}</option><option value="plan">{t.modePlan}</option><option value="goal">{t.modeGoal}</option></select></label>
                   <label><span>{t.focusMode}<small>{t.focusModeHint}</small></span><select value={draft.focusMode} onChange={(event) => patch({ focusMode: event.target.value as Settings["focusMode"] })}><option value="economy">{t.focusEconomy} · {t.focusEconomyHint}</option><option value="balanced">{t.focusBalanced} · {t.focusBalancedHint}</option></select></label>

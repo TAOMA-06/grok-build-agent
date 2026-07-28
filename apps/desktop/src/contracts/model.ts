@@ -40,6 +40,21 @@ export type SelectableModel = {
   autoCompactThresholdPercent?: number | null;
 };
 
+/**
+ * Grok documents this built-in coding agent even when `grok models` can only
+ * return the last cached remote default (for example while the network is
+ * unavailable). It is intentionally not marked default: the CLI/settings
+ * remain the source of truth for a new task's selected model.
+ */
+export const BUILT_IN_MODEL_FALLBACKS: readonly SelectableModel[] = [
+  {
+    id: "grok-build",
+    name: "Grok Build",
+    description: "Built-in coding agent",
+    tags: ["built-in"],
+  },
+];
+
 export type SessionModelState = {
   currentModelId: string | null;
   availableModels: SelectableModel[];
@@ -180,7 +195,7 @@ export function resolveEffortForModel(
 
 /** Merge model rows, keeping richer catalog metadata (effort / window) over bare ACP ids. */
 export function mergeSelectableModels(
-  ...groups: Array<SelectableModel[] | null | undefined>
+  ...groups: Array<readonly SelectableModel[] | null | undefined>
 ): SelectableModel[] {
   const byId = new Map<string, SelectableModel>();
   for (const group of groups) {

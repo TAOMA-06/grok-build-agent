@@ -3,7 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore, type SessionRuntime } from "../../store";
-import { mergeSelectableModels } from "../../contracts/model";
+import { BUILT_IN_MODEL_FALLBACKS, mergeSelectableModels } from "../../contracts/model";
 import type { Settings } from "../../types";
 import { t } from "../../i18n";
 import { ContextDrawer } from "../shell/ContextDrawer";
@@ -17,6 +17,10 @@ import { JobsPage } from "../jobs/JobsPage";
 import { NavRail } from "./NavRail";
 import { TaskPanel } from "./TaskPanel";
 import type { AppView } from "./types";
+
+function usesOverlayPanels(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
+}
 
 export function AppWorkbench() {
   const bridge = useDesktopBridge();
@@ -50,6 +54,32 @@ export function AppWorkbench() {
   const [dirtyDialogOpen, setDirtyDialogOpen] = useState(false);
   const dirtyResolver = useRef<((policy: DirtyPolicy) => void) | null>(null);
   const hydratedSessions = useRef(new Set<string>());
+
+  const openTaskPanel = useCallback(() => {
+    if (usesOverlayPanels()) setInspectorOpen(false);
+    setTaskPanelOpen(true);
+  }, []);
+
+  const toggleTaskPanel = useCallback(() => {
+    setTaskPanelOpen((current) => {
+      const next = !current;
+      if (next && usesOverlayPanels()) setInspectorOpen(false);
+      return next;
+    });
+  }, []);
+
+  const openInspector = useCallback(() => {
+    if (usesOverlayPanels()) setTaskPanelOpen(false);
+    setInspectorOpen(true);
+  }, []);
+
+  const toggleInspector = useCallback(() => {
+    setInspectorOpen((current) => {
+      const next = !current;
+      if (next && usesOverlayPanels()) setTaskPanelOpen(false);
+      return next;
+    });
+  }, []);
 
   const chooseDirtyPolicy = useCallback(
     () => new Promise<DirtyPolicy>((resolve) => {
@@ -122,6 +152,7 @@ export function AppWorkbench() {
     clearProvisionalDraft();
     setActiveSession(null);
     setInspectorOpen(false);
+    if (usesOverlayPanels()) setTaskPanelOpen(false);
     setAppView("home");
   }
 
@@ -129,6 +160,7 @@ export function AppWorkbench() {
     setActiveSession(id);
     setAppView("thread");
     setInspectorOpen(false);
+    if (usesOverlayPanels()) setTaskPanelOpen(false);
   }
 
   function navigate(view: AppView) {
@@ -137,12 +169,13 @@ export function AppWorkbench() {
       return;
     }
     if (view === "thread") {
-      setTaskPanelOpen(true);
+      openTaskPanel();
       if (activeSessionId) setAppView("thread");
       else setAppView("home");
       return;
     }
     setInspectorOpen(false);
+    if (usesOverlayPanels()) setTaskPanelOpen(false);
     setAppView(view);
   }
 
@@ -158,7 +191,7 @@ export function AppWorkbench() {
         setAppView("home");
       } else if (key === "b") {
         event.preventDefault();
-        setTaskPanelOpen((value) => !value);
+        toggleTaskPanel();
       } else if (key === "k") {
         event.preventDefault();
         setCommandSearch("");
@@ -174,7 +207,17 @@ export function AppWorkbench() {
     }
     window.addEventListener("keydown", onShortcut);
     return () => window.removeEventListener("keydown", onShortcut);
-  }, [clearProvisionalDraft, setActiveSession]);
+  }, [clearProvisionalDraft, setActiveSession, toggleTaskPanel]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 900px)");
+    const reconcilePanels = () => {
+      if (media.matches && taskPanelOpen && inspectorOpen) setInspectorOpen(false);
+    };
+    reconcilePanels();
+    media.addEventListener("change", reconcilePanels);
+    return () => media.removeEventListener("change", reconcilePanels);
+  }, [inspectorOpen, taskPanelOpen]);
 
   useEffect(() => {
     function onEscape(event: KeyboardEvent) {
@@ -198,7 +241,7 @@ export function AppWorkbench() {
     const sessionModels = activeSession?.modelState?.availableModels ?? [];
     const cliModels = modelsQuery.data ?? [];
     const configuredId = activeSession?.summary.model || settings.model;
-    const ordered = mergeSelectableModels(cliModels, sessionModels);
+    const ordered = mergeSelectableModels(BUILT_IN_MODEL_FALLBACKS, cliModels, sessionModels);
     if (configuredId && !ordered.some((model) => model.id === configuredId)) {
       ordered.push({ id: configuredId, name: configuredId, isDefault: ordered.length === 0 });
     }
@@ -218,6 +261,7 @@ export function AppWorkbench() {
     setActiveSession(first?.summary.sessionId ?? null);
     setSettings({ cwd: path });
     setInspectorOpen(false);
+    if (usesOverlayPanels()) setTaskPanelOpen(false);
     if (first) setAppView("thread");
     else setAppView("home");
     await bridge.saveSettings({ ...useAppStore.getState().settings, cwd: path } satisfies Settings);
@@ -308,7 +352,7 @@ export function AppWorkbench() {
         goHome();
         break;
       case "/resume":
-        setTaskPanelOpen(true);
+        openTaskPanel();
         window.dispatchEvent(new Event("grok:focus-task-search"));
         break;
       case "/dashboard":
@@ -349,7 +393,7 @@ export function AppWorkbench() {
       case "/diff":
         if (state.activeSessionId) {
           setAppView("thread");
-          setInspectorOpen(true);
+          openInspector();
         }
         break;
       case "/mcps":
@@ -441,7 +485,7 @@ export function AppWorkbench() {
         view={appView === "thread" ? "thread" : appView}
         taskPanelOpen={taskPanelOpen}
         onNavigate={navigate}
-        onToggleTaskPanel={() => setTaskPanelOpen((value) => !value)}
+        onToggleTaskPanel={toggleTaskPanel}
       />
 
       {taskPanelOpen && (
@@ -464,7 +508,7 @@ export function AppWorkbench() {
       <main className="wb-stage">
         {showChat && (
           <ThreadView
-            session={appView === "home" ? null : activeSession}
+            session={activeSession}
             workspaceName={activeWorkspaceRecord?.name || activeWorkspace.split(/[\\/]/).pop() || ""}
             models={models}
             connecting={Boolean(activeSessionId && controller.connectingSessionId === activeSessionId)}
@@ -480,11 +524,16 @@ export function AppWorkbench() {
               || pendingPlanApproval.sessionId === activeSession.summary.remoteSessionId
             ) ? pendingPlanApproval : null}
             permissionOptions={permissionOptions}
-            onToggleDrawer={() => setInspectorOpen((value) => !value)}
+            onToggleDrawer={toggleInspector}
             onOpenPath={(path) => bridge.openPath(path)}
             onSend={async (text, attachments, mode) => {
-              await controller.send(text, attachments, mode);
+              const sending = controller.send(text, attachments, mode);
+              // A task is created synchronously before its first IPC await. Move
+              // to its real thread immediately so first-turn permission UI owns
+              // the stage instead of competing with the empty-task screen.
+              await Promise.resolve();
               if (useAppStore.getState().activeSessionId) setAppView("thread");
+              await sending;
             }}
             onCancel={controller.cancel}
             onChooseModel={controller.chooseModel}

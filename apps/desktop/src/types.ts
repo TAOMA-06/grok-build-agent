@@ -64,6 +64,11 @@ export type {
 } from "./contracts";
 
 export type {
+  UserErrorCategory,
+  DescribedError,
+} from "./contracts";
+
+export type {
   ComposerDraft,
   ComposerAttachment,
   PromptContent,

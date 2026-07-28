@@ -170,6 +170,13 @@ export function CommandComposer({
   const attachments = effectiveAttachments();
   const modelId = effectiveModelId() || models.find((model) => model.isDefault)?.id || settings.model;
   const selectedModel = models.find((model) => model.id === modelId) ?? null;
+  const matchingModels = models.filter((model) =>
+    `${model.name} ${model.id}`.toLowerCase().includes(modelQuery.toLowerCase()),
+  );
+  const customModelId = modelQuery.trim();
+  const canUseCustomModel =
+    /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(customModelId)
+    && !models.some((model) => model.id === customModelId);
   const effortOptions = effortOptionsForModel(selectedModel);
   const effortId =
     resolveEffortForModel(
@@ -728,12 +735,26 @@ export function CommandComposer({
                     onKeyDown={(event) => event.stopPropagation()}
                     placeholder={t.modelSearch}
                   />
-                  {models.filter((model) => `${model.name} ${model.id}`.toLowerCase().includes(modelQuery.toLowerCase())).map((model) => (
-                    <DropdownMenu.Item key={model.id} onSelect={() => void onChooseModel(model.id)}>
+                  {matchingModels.map((model) => (
+                    <DropdownMenu.Item key={model.id} onSelect={() => { setModelQuery(""); void onChooseModel(model.id); }}>
                       <span><strong>{model.name}</strong><small>{model.description}</small></span>
                       {model.id === modelId && <Check size={14} />}
                     </DropdownMenu.Item>
                   ))}
+                  {canUseCustomModel && (
+                    <>
+                      <DropdownMenu.Separator className="gb-dropdown-separator" />
+                      <DropdownMenu.Item
+                        className="gb-model-custom-option"
+                        onSelect={() => {
+                          setModelQuery("");
+                          void onChooseModel(customModelId);
+                        }}
+                      >
+                        <span><strong>{translate("useCustomModel", { model: customModelId })}</strong><small>{t.customModelHint}</small></span>
+                      </DropdownMenu.Item>
+                    </>
+                  )}
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
             </DropdownMenu.Root>

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { buildPromptContent, seedTaskFromPrompt } from "../../contracts";
+import { buildPromptContent, describeError, seedTaskFromPrompt } from "../../contracts";
 import { mergeSelectableModels, resolveEffortForModel } from "../../contracts/model";
 import { extractContextUsage } from "../../acp/client";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
@@ -15,6 +15,7 @@ import type {
   TaskMode,
 } from "../../types";
 import { STOP_ARM_MS } from "./composerTiming";
+import { formatFailureForTimeline } from "./errorPresentation";
 
 export type DirtyPolicy = "clean_head" | "copy_dirty";
 
@@ -489,6 +490,7 @@ export function useDesktopController(
         }
       } catch (error) {
         if (wasCancelled()) return;
+        const failure = describeError(error);
         const current = useAppStore.getState().sessions[sessionId];
         if (current && current.draft === "" && current.attachments.length === 0) {
           state.setSessionDraft(sessionId, rawText);
@@ -505,13 +507,14 @@ export function useDesktopController(
           attachments,
           mode,
           modelId: state.sessions[sessionId]?.summary.model ?? null,
-          error: String(error),
+          error: failure.message,
+          errorCategory: failure.category,
         });
         state.addBlock(sessionId, {
           id: crypto.randomUUID(),
           type: "system",
           level: "error",
-          text: String(error),
+          text: formatFailureForTimeline(failure),
         });
         state.updateSummary(sessionId, { runState: "error" });
       } finally {

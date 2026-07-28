@@ -808,7 +808,6 @@ fn mark_execution_intent_cancelled(state: &HostState, idempotency_key: &str, rea
     );
 }
 
-
 // RPC dispatch table lives in dispatch.rs
 
 fn terminal_execution_root(
@@ -858,16 +857,17 @@ async fn authorize_platform_terminal(
     let strict_terminal = crate::config::load_settings()
         .map(|settings| settings.strict_terminal)
         .unwrap_or(false);
-    let mut action = crate::policy::classify_terminal_action_with_options(
-        uuid::Uuid::new_v4().to_string(),
-        workspace.to_string_lossy().into_owned(),
-        task_id.to_string(),
-        task_id.to_string(),
-        command,
-        args,
-        vec![],
-        strict_terminal,
-    );
+    let mut action =
+        crate::policy::classify_terminal_action_with_options(crate::policy::TerminalActionInput {
+            request_id: uuid::Uuid::new_v4().to_string(),
+            workspace_id: workspace.to_string_lossy().into_owned(),
+            task_id: task_id.to_string(),
+            session_id: task_id.to_string(),
+            command,
+            args,
+            secret_refs: vec![],
+            strict_terminal,
+        });
     action.actor = "user:desktop-terminal".into();
     let allowed_paths = state
         .db

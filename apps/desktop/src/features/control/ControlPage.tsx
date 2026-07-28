@@ -94,7 +94,7 @@ export function ControlPage({
         </button>
       </header>
       <div className="wb-page-body">
-        <div className="wb-control-stats" aria-live="polite">
+        <div className="wb-control-stats" aria-live="polite" aria-label={t.missionControlSignals}>
           <div className="wb-stat">
             <strong>{visibleSessions.length}</strong>
             <span>{t.missionControlTasks}</span>
@@ -109,11 +109,11 @@ export function ControlPage({
           </div>
         </div>
 
-        <div className="wb-card">
-          <div className="wb-card-head">
-            <h3>{t.missionControlSignals}</h3>
+        <section className="wb-mission-list" aria-labelledby="mission-control-signals">
+          <div className="wb-mission-list-head">
+            <h2 id="mission-control-signals">{t.missionControlSignals}</h2>
           </div>
-          <div className="wb-card-body" style={{ padding: 6 }}>
+          <div className="wb-mission-list-body">
             {visibleSessions.map((session) => {
               const state = missionState(session);
               const label = stateLabel(state);
@@ -127,15 +127,15 @@ export function ControlPage({
                   onClick={() => onOpenSession(session.summary.sessionId)}
                 >
                   <span className="icon" aria-hidden>{stateIcon(state)}</span>
-                  <span>
-                    <strong style={{ display: "block", fontSize: 13 }}>{session.summary.title}</strong>
-                    <small style={{ color: "var(--gb-muted)", fontSize: 12 }}>
+                  <span className="wb-mission-copy">
+                    <strong>{session.summary.title}</strong>
+                    <small>
                       {workspaceName(session.summary.workspaceRoot)} · {session.summary.lastMessagePreview || label}
                     </small>
                   </span>
-                  <span className="meta" style={{ display: "grid", justifyItems: "end", gap: 4, color: "var(--gb-faint)", fontSize: 11 }}>
-                    <em style={{ fontStyle: "normal" }}>{label}</em>
-                    <time dateTime={session.summary.updatedAt} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <span className="wb-mission-meta">
+                    <em>{label}</em>
+                    <time dateTime={session.summary.updatedAt}>
                       <Clock3 size={11} /> {relativeTime(session.summary.updatedAt)}
                     </time>
                     <ArrowUpRight size={14} aria-hidden />
@@ -144,14 +144,14 @@ export function ControlPage({
               );
             })}
             {visibleSessions.length === 0 && (
-              <div className="wb-empty">
+              <div className="wb-empty" role="status">
                 <CircleDot size={18} />
                 <strong>{t.missionControlEmpty}</strong>
                 <p>{t.missionControlEmptyHint}</p>
               </div>
             )}
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );

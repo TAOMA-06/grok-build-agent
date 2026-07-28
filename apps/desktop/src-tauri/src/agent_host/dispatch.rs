@@ -265,17 +265,20 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
                 let policy_json = serde_json::to_string(&policy).unwrap_or_else(|_| "{}".into());
                 state
                     .db
-                    .upsert_job(
-                        &job_id,
+                    .upsert_job(crate::db::JobUpsertInput {
+                        job_id: &job_id,
                         workspace_id,
-                        request.params.get("taskId").and_then(Value::as_str),
+                        task_id: request.params.get("taskId").and_then(Value::as_str),
                         kind,
                         schedule,
-                        state_name,
-                        request.params.get("idempotencyKey").and_then(Value::as_str),
-                        &policy_json,
-                        request.params.get("nextRunAt").and_then(Value::as_str),
-                    )
+                        state: state_name,
+                        idempotency_key: request
+                            .params
+                            .get("idempotencyKey")
+                            .and_then(Value::as_str),
+                        policy_json: &policy_json,
+                        next_run_at: request.params.get("nextRunAt").and_then(Value::as_str),
+                    })
                     .map_err(|error| error.to_string())
             }
         }
@@ -1002,4 +1005,3 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
     }
     response
 }
-

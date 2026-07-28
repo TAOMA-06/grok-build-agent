@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { BootstrapScreen } from "./features/shell/BootstrapScreen";
 import { AppWorkbench } from "./features/workbench/AppWorkbench";
 import { bootstrapStateFromHealth } from "./features/shell/bootstrap";
-import { normalizeSettings } from "./contracts";
+import { describeError, normalizeSettings } from "./contracts";
+import { formatFailureForTimeline } from "./features/shell/errorPresentation";
 import { applyLocalePreference, t, useTranslation } from "./i18n";
 import { useDesktopBridge } from "./platform/DesktopBridge";
 import { useAppStore } from "./store";
@@ -14,6 +15,8 @@ import "./styles/workbench.css";
 import "./styles/chat.css";
 import "./styles/pages.css";
 import "./styles/settings-legacy.css";
+import "./styles/codex.css";
+import "./styles/codex-surfaces.css";
 
 export default function App() {
   useTranslation();
@@ -35,7 +38,11 @@ export default function App() {
       setHealth(health);
       setBootstrap(bootstrapStateFromHealth(health));
     } catch (error) {
-      setBootstrap({ status: "error", message: t.runtimeCheckFailed, detail: String(error) });
+      setBootstrap({
+        status: "error",
+        message: t.runtimeCheckFailed,
+        detail: formatFailureForTimeline(describeError(error)),
+      });
     }
   }, [bridge, setHealth]);
 
@@ -71,7 +78,11 @@ export default function App() {
         if (cancelled) return;
         unsubs = await bridge.subscribeEvents();
       } catch (e) {
-        setBootstrap({ status: "error", message: t.appStartFailed, detail: String(e) });
+        setBootstrap({
+          status: "error",
+          message: t.appStartFailed,
+          detail: formatFailureForTimeline(describeError(e)),
+        });
         setSettingsLoaded(true);
       }
     })();
@@ -83,8 +94,9 @@ export default function App() {
 
   if (!settingsLoaded) {
     return (
-      <div className="onboarding">
-        <p className="muted">…</p>
+      <div className="onboarding gb-app-loading" role="status" aria-live="polite">
+        <span className="gb-app-loading-mark" aria-hidden>G</span>
+        <p className="muted">{t.bootstrapCheckingTitle}</p>
       </div>
     );
   }

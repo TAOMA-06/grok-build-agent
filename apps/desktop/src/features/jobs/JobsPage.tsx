@@ -10,7 +10,7 @@ export function JobsPage() {
           <p>{t.hostJobsHint}</p>
         </div>
       </header>
-      <div className="wb-page-body" style={{ maxWidth: 720 }}>
+      <div className="wb-page-body wb-jobs-body">
         <HostJobsPanel enabled />
       </div>
     </div>

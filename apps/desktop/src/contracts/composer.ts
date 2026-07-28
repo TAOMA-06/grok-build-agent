@@ -3,6 +3,7 @@
  * Drafts survive without an active session (provisional → SessionSummary on first send).
  */
 import type { TaskMode } from "./mode";
+import type { UserErrorCategory } from "./errors";
 
 export type AttachmentKind = "image" | "file" | "resource";
 export type AttachmentSource = "path" | "inline";
@@ -49,6 +50,8 @@ export type FailedSubmission = {
   attachments: ComposerAttachment[];
   mode: TaskMode;
   modelId: string | null;
+  /** Category lets the renderer pair the raw failure with a useful cause. */
+  errorCategory?: UserErrorCategory;
   error: string;
 };
 

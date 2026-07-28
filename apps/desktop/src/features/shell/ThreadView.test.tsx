@@ -115,7 +115,7 @@ describe("ThreadView", () => {
         {...props}
         session={{
           ...recoveredSession,
-          // Non-empty transcript so the permission card mounts in the thread column.
+          // A first-turn permission must be presented above, not inside, the chat scroll area.
           blocks: [
             {
               id: "u1",
@@ -150,6 +150,7 @@ describe("ThreadView", () => {
         ]}
       />,
     );
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText(/Shell or script execution|Shell 或脚本执行/)).toBeInTheDocument();
     expect(screen.getByText(/bash \.\/hack\.sh/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Allow once" })).toBeInTheDocument();

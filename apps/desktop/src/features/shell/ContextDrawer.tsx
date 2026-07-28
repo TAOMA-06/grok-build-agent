@@ -330,13 +330,17 @@ export function ContextDrawer({
   }
 
   return (
-    <aside className="gb-drawer">
+    <aside
+      className="gb-drawer"
+      aria-label={t.taskContext}
+      aria-busy={reviewQuery.isLoading || patchQuery.isLoading}
+    >
       <div className="gb-drawer-head">
         <div><GitBranch size={15} /><span>{t.taskContext}</span></div>
         <button type="button" className="gb-icon-button" aria-label={t.closeDrawer} onClick={onClose}><X size={16} /></button>
       </div>
       <Tabs.Root className="gb-drawer-tabs" defaultValue="changes">
-        <Tabs.List>
+        <Tabs.List aria-label={t.taskContext}>
           <Tabs.Trigger value="changes"><FileCode2 size={14} /> {t.changes} <span>{reviewQuery.data?.files.length ?? 0}</span></Tabs.Trigger>
           <Tabs.Trigger value="activity"><Activity size={14} /> {t.tasks} <span>{session.tools.length}</span></Tabs.Trigger>
           {!privateChat && <Tabs.Trigger value="context"><Eye size={14} /> Context <span>{contextQuery.data?.length ?? 0}</span></Tabs.Trigger>}
@@ -381,7 +385,7 @@ export function ContextDrawer({
               }}>Review hunk</button></div></div>)}
             </div>
           )}
-          {gitError && <div className="gb-apply-status blocked"><span>{gitError}</span></div>}
+          {gitError && <div className="gb-apply-status blocked" role="alert"><span>{gitError}</span></div>}
           {lastCheckpoint && <div className="gb-apply-status ready"><strong>Checkpoint available</strong><span>{lastCheckpoint.checkpointId}</span><button type="button" className="gb-review-button" onClick={() => void bridge.gitCheckpointRestorePreview(root, lastCheckpoint.checkpointId, privateChat).then(async (preview) => {
             if (!preview.ready) throw new Error(preview.reason || "Checkpoint cannot be restored");
             if (!window.confirm(`Restore checkpoint ${lastCheckpoint.checkpointId}?`)) return;
@@ -481,7 +485,7 @@ export function ContextDrawer({
             <pre aria-live="polite">{terminalTabs.find((tab) => tab.id === activeTerminal)?.output || "Starting terminal…"}</pre>
             <form onSubmit={(event) => { event.preventDefault(); void sendTerminalInput(); }}><input aria-label="Terminal input" value={terminalInput} onChange={(event) => setTerminalInput(event.target.value)} autoComplete="off" /><button type="submit">Send</button><button type="button" aria-label="Stop terminal" onClick={() => activeTerminal && void bridge.terminalKill(activeTerminal)}><Square size={12} /></button><button type="button" onClick={() => activeTerminal && void closeTerminal(activeTerminal)}>Close</button></form>
           </div>}
-          {terminalError && <div className="gb-apply-status blocked"><span>{terminalError}</span></div>}
+          {terminalError && <div className="gb-apply-status blocked" role="alert"><span>{terminalError}</span></div>}
         </Tabs.Content>
         <Tabs.Content value="files" className="gb-drawer-content">
           <div className="gb-drawer-toolbar"><button type="button" className="gb-icon-button" disabled={!explorerPath} title="Parent directory" aria-label="Parent directory" onClick={() => setExplorerPath(explorerPath?.split("/").slice(0, -1).join("/") || null)}>↑</button><span>{explorerPath || "."}</span><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => void treeQuery.refetch()}><RefreshCw size={14} /></button></div>
@@ -505,7 +509,7 @@ export function ContextDrawer({
                   : applyPreview.reason}</span>
               </div>
             )}
-            {applyError && <div className="gb-apply-status blocked"><strong>{t.preflightFailed}</strong><span>{applyError}</span></div>}
+            {applyError && <div className="gb-apply-status blocked" role="alert"><strong>{t.preflightFailed}</strong><span>{applyError}</span></div>}
             <div className="gb-confirm-actions">
               <Dialog.Close asChild><button type="button" className="gb-button">{t.cancel}</button></Dialog.Close>
               <button type="button" className="gb-button primary" disabled={!applyPreview?.ready || applying} onClick={() => void confirmApply()}>

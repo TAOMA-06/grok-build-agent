@@ -851,14 +851,20 @@ pub fn sync_combine_queued_prompts(enabled: bool) -> Result<(), CliBridgeError> 
         return Ok(());
     }
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| CliBridgeError::Message(error.to_string()))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|error| CliBridgeError::Message(error.to_string()))?;
     }
     std::fs::write(&path, next).map_err(|error| CliBridgeError::Message(error.to_string()))?;
     Ok(())
 }
 
 /// Insert or replace `key = true|false` under `[table]` in a TOML document.
-pub(crate) fn upsert_toml_table_bool(contents: &str, table: &str, key: &str, enabled: bool) -> String {
+pub(crate) fn upsert_toml_table_bool(
+    contents: &str,
+    table: &str,
+    key: &str,
+    enabled: bool,
+) -> String {
     let header = format!("[{table}]");
     let assignment = format!("{key} = {}", if enabled { "true" } else { "false" });
     let lines: Vec<&str> = contents.lines().collect();

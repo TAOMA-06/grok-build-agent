@@ -1,3 +1,4 @@
+import { Plus, X } from "lucide-react";
 import type { McpSecretField, SecretFieldAction } from "../../types";
 import { t } from "../../i18n";
 
@@ -26,10 +27,10 @@ export function KeyValueEditor({
   }
 
   return (
-    <div className="kv-editor">
-      <div className="section-title">{label}</div>
+    <fieldset className="gb-mcp-kv">
+      <legend>{label}</legend>
       {rows.map((row, i) => (
-        <div key={i} className="kv-row">
+        <div key={i} className="gb-mcp-kv-row">
           <input
             value={row.key}
             placeholder="KEY"
@@ -57,18 +58,24 @@ export function KeyValueEditor({
               aria-label={`${label} value ${i + 1}`}
             />
           ) : (
-            <span className="muted kv-placeholder">
+            <span className="gb-mcp-kv-placeholder">
               {row.action === "keep" ? t.secretConfigured : t.secretDelete}
             </span>
           )}
-          <button type="button" className="ghost" onClick={() => remove(i)}>
-            ×
+          <button
+            type="button"
+            className="gb-mcp-icon-button gb-mcp-danger-button"
+            onClick={() => remove(i)}
+            aria-label={`${t.mcpRemove} ${label} ${i + 1}`}
+          >
+            <X aria-hidden="true" size={14} />
           </button>
         </div>
       ))}
-      <button type="button" className="ghost" onClick={add}>
+      <button type="button" className="gb-mcp-button gb-mcp-button-subtle" onClick={add}>
+        <Plus aria-hidden="true" size={14} />
         {t.addField}
       </button>
-    </div>
+    </fieldset>
   );
 }

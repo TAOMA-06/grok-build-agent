@@ -2,6 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   Archive,
+  CircleAlert,
   CircleDot,
   ExternalLink,
   FileCode2,
@@ -25,6 +26,7 @@ import { ExecutionFlightDeck } from "./ExecutionFlightDeck";
 import { Timeline } from "./Timeline";
 import { t } from "../../i18n";
 import { useAppStore } from "../../store";
+import { guidanceForError } from "./errorPresentation";
 
 function permissionCategoryLabel(category: PermissionRiskCategory): string {
   switch (category) {
@@ -51,7 +53,7 @@ function permissionCategoryLabel(category: PermissionRiskCategory): string {
   }
 }
 
-function PermissionCard({
+function PermissionDialog({
   request,
   options,
   onAnswer,
@@ -80,24 +82,37 @@ function PermissionCard({
     request.method,
   );
   return (
-    <section className="gb-permission-card" data-category={category}>
-      <div className="gb-permission-icon"><ShieldAlert size={18} /></div>
-      <div className="gb-permission-copy">
-        <strong>{t.permissionNeeded}</strong>
-        <span className="gb-permission-category">{permissionCategoryLabel(category)}</span>
-        <span>{title}</span>
-        <code>{detail}</code>
-        {hostReason && <small>{t.permissionHostReason}: {hostReason}</small>}
-        {action && <small>{String(action.risk ?? "unknown")} · {String(action.effect ?? "execute")}</small>}
-        {secondConfirm && <small className="gb-permission-second">{t.permissionSecondConfirm}</small>}
-      </div>
-      <div className="gb-permission-actions">
-        {options.filter((option) => !option.kind?.startsWith("reject")).map((option) => (
-          <button type="button" className="gb-button primary" key={option.optionId} onClick={() => void onAnswer(option.optionId)}>{option.name}</button>
-        ))}
-        <button type="button" className="gb-button" onClick={() => void onAnswer(null)}>{t.deny}</button>
-      </div>
-    </section>
+    <Dialog.Root open onOpenChange={() => undefined}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="gb-dialog-overlay gb-permission-overlay" />
+        <Dialog.Content
+          className="gb-permission-dialog"
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onPointerDownOutside={(event) => event.preventDefault()}
+        >
+          <div className="gb-permission-dialog-head">
+            <div className="gb-permission-icon"><ShieldAlert size={18} /></div>
+            <div>
+              <Dialog.Title>{t.permissionNeeded}</Dialog.Title>
+              <Dialog.Description>{permissionCategoryLabel(category)}</Dialog.Description>
+            </div>
+          </div>
+          <div className="gb-permission-dialog-body">
+            <strong>{title}</strong>
+            <code>{detail}</code>
+            {hostReason && <p><b>{t.permissionHostReason}</b> {hostReason}</p>}
+            {action && <p className="gb-permission-risk">{String(action.risk ?? "unknown")} · {String(action.effect ?? "execute")}</p>}
+            {secondConfirm && <p className="gb-permission-second">{t.permissionSecondConfirm}</p>}
+          </div>
+          <div className="gb-permission-actions">
+            {options.filter((option) => !option.kind?.startsWith("reject")).map((option) => (
+              <button type="button" className="gb-button primary" key={option.optionId} onClick={() => void onAnswer(option.optionId)}>{option.name}</button>
+            ))}
+            <button type="button" className="gb-button" onClick={() => void onAnswer(null)}>{t.deny}</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -185,6 +200,8 @@ export function ThreadView({
   const visibleMode = session?.summary.mode ?? session?.modeState.currentMode ?? "agent";
   const isEmpty = !session?.blocks.length;
   const isNewTask = !session;
+  const failure = session?.failedSubmission ?? null;
+  const failureGuidance = failure ? guidanceForError(failure.errorCategory) : null;
 
   const composer = (
     <div className={`gb-composer-dock${isEmpty ? " is-empty" : ""}`}>
@@ -216,9 +233,17 @@ export function ThreadView({
           onLocalCommand={onLocalCommand}
         />
       </div>
-      {session?.failedSubmission && (
+      {failure && failureGuidance && (
         <div className="gb-send-failure" role="alert">
-          <span>{session.failedSubmission.error}</span>
+          <CircleAlert size={17} aria-hidden />
+          <div className="gb-send-failure-copy">
+            <strong>{failureGuidance.title}</strong>
+            <dl>
+              <div><dt>{t.errorTechnicalDetail}</dt><dd><code>{failure.error}</code></dd></div>
+              <div><dt>{t.errorWhy}</dt><dd>{failureGuidance.cause}</dd></div>
+              <div><dt>{t.errorWhatToDo}</dt><dd>{failureGuidance.recovery}</dd></div>
+            </dl>
+          </div>
           <button type="button" onClick={() => void onRetryFailed()}>{t.retry}</button>
         </div>
       )}
@@ -308,15 +333,15 @@ export function ThreadView({
                   }
                 }}
               />
-              {pendingPermission && (
-                <PermissionCard request={pendingPermission} options={permissionOptions} onAnswer={onAnswerPermission} />
-              )}
             </div>
           </div>
           {composer}
         </>
       )}
     </main>
+    {pendingPermission && (
+      <PermissionDialog request={pendingPermission} options={permissionOptions} onAnswer={onAnswerPermission} />
+    )}
     <Dialog.Root open={renameOpen} onOpenChange={setRenameOpen}>
       <Dialog.Portal><Dialog.Overlay className="gb-dialog-overlay" /><Dialog.Content className="gb-confirm-dialog"><Dialog.Title>{t.renameTask}</Dialog.Title><Dialog.Description>{t.renameTaskHint}</Dialog.Description><input className="gb-dialog-input" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} autoFocus /><div className="gb-confirm-actions"><Dialog.Close asChild><button type="button" className="gb-button">{t.cancel}</button></Dialog.Close><button type="button" className="gb-button primary" disabled={!titleDraft.trim()} onClick={() => { void onRename(titleDraft.trim()); setRenameOpen(false); }}>{t.save}</button></div></Dialog.Content></Dialog.Portal>
     </Dialog.Root>

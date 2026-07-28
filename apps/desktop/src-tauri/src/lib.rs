@@ -54,6 +54,7 @@ fn acquire_instance_lock() -> Result<Option<File>, String> {
         let path = std::path::Path::new(&directory).join("desktop-instance.lock");
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(path)
@@ -645,24 +646,12 @@ async fn list_jobs(
 }
 
 #[tauri::command]
-async fn upsert_job(
-    state: State<'_, AppState>,
-    job: Value,
-) -> Result<Value, acp::AcpError> {
-    host_request(
-        &state,
-        "jobs.upsert",
-        job,
-        Some(rpc_meta("jobs", None)),
-    )
-    .await
+async fn upsert_job(state: State<'_, AppState>, job: Value) -> Result<Value, acp::AcpError> {
+    host_request(&state, "jobs.upsert", job, Some(rpc_meta("jobs", None))).await
 }
 
 #[tauri::command]
-async fn cancel_job(
-    state: State<'_, AppState>,
-    job_id: String,
-) -> Result<Value, acp::AcpError> {
+async fn cancel_job(state: State<'_, AppState>, job_id: String) -> Result<Value, acp::AcpError> {
     host_request(
         &state,
         "jobs.cancel",
@@ -1861,7 +1850,7 @@ pub fn run() {
             // background processes do not keep running after the UI closes.
             if let tauri::RunEvent::Exit = event {
                 let host = app_handle.state::<AppState>().host.clone();
-                let _ = tauri::async_runtime::block_on(async {
+                tauri::async_runtime::block_on(async {
                     // New Hosts stop every connection before exiting. Retain a
                     // backward-compatible active-runtime stop for an older
                     // already-running Host during an in-place upgrade.

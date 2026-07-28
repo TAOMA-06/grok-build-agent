@@ -9,6 +9,17 @@
 use crate::platform::{ActionEffect, ActionRequest, PolicyDecision, PolicyDecisionKind, RiskLevel};
 use std::path::{Component, Path, PathBuf};
 
+pub struct TerminalActionInput<'a> {
+    pub request_id: String,
+    pub workspace_id: String,
+    pub task_id: String,
+    pub session_id: String,
+    pub command: &'a str,
+    pub args: &'a [String],
+    pub secret_refs: Vec<String>,
+    pub strict_terminal: bool,
+}
+
 pub fn classify_terminal_action(
     request_id: String,
     workspace_id: String,
@@ -18,7 +29,7 @@ pub fn classify_terminal_action(
     args: &[String],
     secret_refs: Vec<String>,
 ) -> ActionRequest {
-    classify_terminal_action_with_options(
+    classify_terminal_action_with_options(TerminalActionInput {
         request_id,
         workspace_id,
         task_id,
@@ -26,20 +37,21 @@ pub fn classify_terminal_action(
         command,
         args,
         secret_refs,
-        false,
-    )
+        strict_terminal: false,
+    })
 }
 
-pub fn classify_terminal_action_with_options(
-    request_id: String,
-    workspace_id: String,
-    task_id: String,
-    session_id: String,
-    command: &str,
-    args: &[String],
-    secret_refs: Vec<String>,
-    strict_terminal: bool,
-) -> ActionRequest {
+pub fn classify_terminal_action_with_options(input: TerminalActionInput<'_>) -> ActionRequest {
+    let TerminalActionInput {
+        request_id,
+        workspace_id,
+        task_id,
+        session_id,
+        command,
+        args,
+        secret_refs,
+        strict_terminal,
+    } = input;
     let program = program_name(command);
     let paths = classify_terminal_paths(Path::new(&workspace_id), args);
     let mut effect = ActionEffect::Execute;
@@ -499,41 +511,42 @@ fn is_known_safe_project_check(program: &str, args: &[String], strict: bool) -> 
                     | "describe"
             )
         )
-        && !args.iter().any(|a| {
-            matches!(
-                a.as_str(),
-                "--hard" | "-D" | "--force" | "-f" | "--delete"
-            )
-        }));
+        && !args
+            .iter()
+            .any(|a| matches!(a.as_str(), "--hard" | "-D" | "--force" | "-f" | "--delete")));
 
     if strict {
         return pure_inspection
             || (program == "cargo"
-                && matches!(sub, Some("tree" | "metadata" | "version" | "-V" | "--version")));
+                && matches!(
+                    sub,
+                    Some("tree" | "metadata" | "version" | "-V" | "--version")
+                ));
     }
 
     pure_inspection
         || match program {
-            "cargo" => matches!(
-                sub,
-                Some(
-                    "test"
-                        | "check"
-                        | "clippy"
-                        | "build"
-                        | "fmt"
-                        | "tree"
-                        | "metadata"
-                        | "nextest"
-                )
-            ) && !args.iter().any(|a| a == "--" || a.starts_with("--eval")),
-            "git" => matches!(sub, Some("tag" | "remote" | "config"))
-                && !args.iter().any(|a| {
-                    matches!(
-                        a.as_str(),
-                        "--hard" | "-D" | "--force" | "-f" | "--delete"
+            "cargo" => {
+                matches!(
+                    sub,
+                    Some(
+                        "test"
+                            | "check"
+                            | "clippy"
+                            | "build"
+                            | "fmt"
+                            | "tree"
+                            | "metadata"
+                            | "nextest"
                     )
-                }),
+                ) && !args.iter().any(|a| a == "--" || a.starts_with("--eval"))
+            }
+            "git" => {
+                matches!(sub, Some("tag" | "remote" | "config"))
+                    && !args.iter().any(|a| {
+                        matches!(a.as_str(), "--hard" | "-D" | "--force" | "-f" | "--delete")
+                    })
+            }
             "rustc" | "rustfmt" | "clippy-driver" => args.iter().all(|a| {
                 is_metadata_only_flag(a)
                     || a.starts_with("--print")
@@ -542,13 +555,18 @@ fn is_known_safe_project_check(program: &str, args: &[String], strict: bool) -> 
             }),
             "tsc" | "eslint" | "prettier" | "vitest" | "jest" | "mocha" | "pytest" | "pyright"
             | "mypy" | "ruff" | "black" | "go" => match program {
-                "go" => matches!(sub, Some("test" | "vet" | "fmt" | "list" | "env" | "version")),
+                "go" => matches!(
+                    sub,
+                    Some("test" | "vet" | "fmt" | "list" | "env" | "version")
+                ),
                 "vitest" | "jest" | "mocha" | "pytest" => true,
                 "tsc" | "eslint" | "prettier" | "pyright" | "mypy" | "ruff" | "black" => true,
                 _ => false,
             },
-            "swift" => matches!(sub, Some("test" | "build" | "package"))
-                || args.iter().any(|a| a == "--version" || a == "-version"),
+            "swift" => {
+                matches!(sub, Some("test" | "build" | "package"))
+                    || args.iter().any(|a| a == "--version" || a == "-version")
+            }
             "xcodebuild" => args
                 .iter()
                 .all(|a| matches!(a.as_str(), "-version" | "-showsdks" | "-list" | "-help")),
@@ -832,28 +850,28 @@ mod tests {
 
     #[test]
     fn strict_terminal_requires_confirmation_for_project_tests() {
-        let open = classify_terminal_action_with_options(
-            "r1".into(),
-            "/workspace".into(),
-            "t1".into(),
-            "s1".into(),
-            "cargo",
-            &["test".into()],
-            vec![],
-            false,
-        );
+        let open = classify_terminal_action_with_options(TerminalActionInput {
+            request_id: "r1".into(),
+            workspace_id: "/workspace".into(),
+            task_id: "t1".into(),
+            session_id: "s1".into(),
+            command: "cargo",
+            args: &["test".into()],
+            secret_refs: vec![],
+            strict_terminal: false,
+        });
         assert_eq!(evaluate(&open).decision, PolicyDecisionKind::AllowOnce);
 
-        let strict = classify_terminal_action_with_options(
-            "r1".into(),
-            "/workspace".into(),
-            "t1".into(),
-            "s1".into(),
-            "cargo",
-            &["test".into()],
-            vec![],
-            true,
-        );
+        let strict = classify_terminal_action_with_options(TerminalActionInput {
+            request_id: "r1".into(),
+            workspace_id: "/workspace".into(),
+            task_id: "t1".into(),
+            session_id: "s1".into(),
+            command: "cargo",
+            args: &["test".into()],
+            secret_refs: vec![],
+            strict_terminal: true,
+        });
         assert_eq!(
             evaluate(&strict).decision,
             PolicyDecisionKind::RequireConfirmation

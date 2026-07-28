@@ -65,15 +65,21 @@ function ToolActivity({ block }: { block: Extract<ChatBlock, { type: "tool" }> }
   const [open, setOpen] = useState(false);
   const payload = block.tool.output ?? block.tool.input;
   return (
-    <div className={`gb-activity gb-status-${block.tool.status}`}>
-      <button type="button" className="gb-activity-head" onClick={() => setOpen((value) => !value)}>
+    <div className={`gb-activity gb-tool-activity gb-status-${block.tool.status}`}>
+      <button
+        type="button"
+        className="gb-activity-head"
+        aria-expanded={open}
+        aria-controls={`tool-output-${block.id}`}
+        onClick={() => setOpen((value) => !value)}
+      >
         <span className="gb-activity-icon">{statusIcon(block.tool.status)}</span>
         <span>{block.tool.title}</span>
         <span className="gb-activity-status">{block.tool.status}</span>
         <ChevronRight size={14} className={open ? "open" : ""} />
       </button>
       {open && payload != null && (
-        <pre className="gb-tool-output">{typeof payload === "string" ? payload : JSON.stringify(payload, null, 2)}</pre>
+        <pre id={`tool-output-${block.id}`} className="gb-tool-output">{typeof payload === "string" ? payload : JSON.stringify(payload, null, 2)}</pre>
       )}
     </div>
   );
@@ -108,7 +114,7 @@ export function Timeline({
     return null;
   }, [visibleBlocks]);
   return (
-    <div className="gb-timeline">
+    <div className="gb-timeline" aria-live="polite" aria-busy={busy}>
       {visibleCount < blocks.length && <button type="button" className="gb-button" onClick={() => setVisibleCount((count) => Math.min(blocks.length, count + 2_000))}>Load 2,000 earlier events</button>}
       {visibleBlocks.map((block, blockIndex) => {
         if (block.type === "user") {
@@ -153,7 +159,7 @@ export function Timeline({
         }
         if (block.type === "subtask") {
           return (
-            <div key={block.id} className="gb-activity">
+            <div key={block.id} className="gb-activity gb-subtask-activity">
               <span className="gb-activity-icon">{statusIcon(block.status)}</span>
               <span>{block.title}</span>
               <span className="gb-activity-status">{t.subagent} · {block.status}</span><Timestamp at={block.at} />

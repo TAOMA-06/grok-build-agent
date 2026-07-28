@@ -41,10 +41,11 @@ export function NavRail({
         </button>
         <button
           type="button"
-          className={taskPanelOpen || view === "thread" ? "wb-rail-btn active" : "wb-rail-btn"}
+          className={view === "thread" ? "wb-rail-btn active" : "wb-rail-btn"}
           title={`${t.tasks} (⌘B)`}
           aria-label={t.tasks}
           aria-pressed={taskPanelOpen}
+          aria-current={view === "thread" ? "page" : undefined}
           onClick={onToggleTaskPanel}
         >
           <PanelLeft size={18} strokeWidth={1.75} />

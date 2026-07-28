@@ -85,6 +85,19 @@ pub struct ExecutionIntentInput {
     pub payload: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct JobUpsertInput<'a> {
+    pub job_id: &'a str,
+    pub workspace_id: &'a str,
+    pub task_id: Option<&'a str>,
+    pub kind: &'a str,
+    pub schedule: Option<&'a str>,
+    pub state: &'a str,
+    pub idempotency_key: Option<&'a str>,
+    pub policy_json: &'a str,
+    pub next_run_at: Option<&'a str>,
+}
+
 type ExecutionRunRow = (
     String,
     String,
@@ -2897,10 +2910,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn list_jobs(
-        &self,
-        workspace_id: Option<&str>,
-    ) -> Result<Vec<serde_json::Value>, DbError> {
+    pub fn list_jobs(&self, workspace_id: Option<&str>) -> Result<Vec<serde_json::Value>, DbError> {
         let conn = self.conn.lock();
         let mut stmt = if workspace_id.is_some() {
             conn.prepare(
@@ -2936,23 +2946,13 @@ impl Database {
             stmt.query_map(params![workspace_id], map_row)?
                 .collect::<Result<Vec<_>, _>>()?
         } else {
-            stmt.query_map([], map_row)?.collect::<Result<Vec<_>, _>>()?
+            stmt.query_map([], map_row)?
+                .collect::<Result<Vec<_>, _>>()?
         };
         Ok(rows)
     }
 
-    pub fn upsert_job(
-        &self,
-        job_id: &str,
-        workspace_id: &str,
-        task_id: Option<&str>,
-        kind: &str,
-        schedule: Option<&str>,
-        state: &str,
-        idempotency_key: Option<&str>,
-        policy_json: &str,
-        next_run_at: Option<&str>,
-    ) -> Result<serde_json::Value, DbError> {
+    pub fn upsert_job(&self, input: JobUpsertInput<'_>) -> Result<serde_json::Value, DbError> {
         let now = iso_now();
         self.conn.lock().execute(
             "INSERT INTO jobs (
@@ -2970,21 +2970,21 @@ impl Database {
                next_run_at=excluded.next_run_at,
                updated_at=excluded.updated_at",
             params![
-                job_id,
-                workspace_id,
-                task_id,
-                kind,
-                schedule,
-                state,
-                idempotency_key,
-                policy_json,
-                next_run_at,
+                input.job_id,
+                input.workspace_id,
+                input.task_id,
+                input.kind,
+                input.schedule,
+                input.state,
+                input.idempotency_key,
+                input.policy_json,
+                input.next_run_at,
                 now
             ],
         )?;
-        self.list_jobs(Some(workspace_id))?
+        self.list_jobs(Some(input.workspace_id))?
             .into_iter()
-            .find(|job| job.get("jobId").and_then(|v| v.as_str()) == Some(job_id))
+            .find(|job| job.get("jobId").and_then(|v| v.as_str()) == Some(input.job_id))
             .ok_or_else(|| DbError::Message("job upsert did not persist".into()))
     }
 

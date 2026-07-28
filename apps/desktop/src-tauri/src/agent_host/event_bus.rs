@@ -21,7 +21,8 @@ pub(super) struct HostNotification {
 pub(super) struct HostEventBus {
     pub(super) db: Arc<Database>,
     pub(super) events: broadcast::Sender<HostNotification>,
-    pub(super) pending_actions: Arc<parking_lot::Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
+    pub(super) pending_actions:
+        Arc<parking_lot::Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
     pub(super) private_chat: bool,
 }
 

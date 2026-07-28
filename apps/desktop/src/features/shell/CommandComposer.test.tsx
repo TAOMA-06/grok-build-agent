@@ -6,16 +6,19 @@ import { emptyComposerDraft } from "../../contracts";
 import { DesktopBridgeContext, type DesktopBridge } from "../../platform/DesktopBridge";
 import { mockDesktopBridge } from "../../platform/mockBridge";
 import { defaultSettings, useAppStore } from "../../store";
+import type { SelectableModel } from "../../types";
 import { CommandComposer, browserAttachment, STOP_ARM_MS } from "./CommandComposer";
 
 function renderComposer(overrides?: {
   onSend?: ReturnType<typeof vi.fn>;
   onLocalCommand?: ReturnType<typeof vi.fn>;
   onChooseMode?: ReturnType<typeof vi.fn>;
+  onChooseModel?: ReturnType<typeof vi.fn>;
   onCancel?: ReturnType<typeof vi.fn>;
   busy?: boolean;
   connecting?: boolean;
   bridge?: DesktopBridge;
+  models?: SelectableModel[];
 }) {
   const onSend = overrides?.onSend ?? vi.fn().mockResolvedValue(undefined);
   const onLocalCommand = overrides?.onLocalCommand ?? vi.fn();
@@ -25,12 +28,12 @@ function renderComposer(overrides?: {
     <DesktopBridgeContext.Provider value={overrides?.bridge ?? mockDesktopBridge}>
       <QueryClientProvider client={queryClient}>
         <CommandComposer
-          models={[{ id: "grok-build", name: "Grok Build", isDefault: true }]}
+          models={overrides?.models ?? [{ id: "grok-build", name: "Grok Build", isDefault: true }]}
           busy={overrides?.busy ?? false}
           connecting={overrides?.connecting ?? false}
           onSend={onSend}
           onCancel={onCancel}
-          onChooseModel={vi.fn().mockResolvedValue(undefined)}
+          onChooseModel={overrides?.onChooseModel ?? vi.fn().mockResolvedValue(undefined)}
           onChooseEffort={vi.fn().mockResolvedValue(undefined)}
           onChooseMode={overrides?.onChooseMode ?? vi.fn().mockImplementation(async (mode) => ({
             kind: "switched",
@@ -295,5 +298,21 @@ describe("CommandComposer", () => {
     renderComposer({ busy: true });
     expect(screen.getByRole("button", { name: /Grok Build/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Agent/i })).toBeDisabled();
+  });
+
+  it("allows a documented or configured model ID when the live catalog is limited", async () => {
+    const user = userEvent.setup();
+    const onChooseModel = vi.fn().mockResolvedValue(undefined);
+    useAppStore.setState({ provisionalDraft: emptyComposerDraft("grok-4.5") });
+    renderComposer({
+      models: [{ id: "grok-4.5", name: "Grok 4.5", isDefault: true }],
+      onChooseModel,
+    });
+
+    await user.click(screen.getByRole("button", { name: /Grok 4\.5/i }));
+    await user.type(screen.getByRole("textbox", { name: "Search models" }), "grok-build");
+    await user.click(screen.getByRole("menuitem", { name: /Use model ID/i }));
+
+    expect(onChooseModel).toHaveBeenCalledWith("grok-build");
   });
 });

@@ -6,6 +6,7 @@
 export * from "./runtime";
 export * from "./session";
 export * from "./events";
+export * from "./errors";
 export * from "./permission";
 export * from "./review";
 export * from "./workspace";

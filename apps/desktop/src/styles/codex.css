@@ -1,0 +1,792 @@
+/*
+ * Codex desktop visual layer
+ *
+ * A quiet graphite workbench: one clear hierarchy for navigation, task
+ * context, conversation, and decisions. This layer intentionally sits last
+ * so legacy feature styles inherit the same spatial system.
+ */
+
+:root {
+  color-scheme: dark;
+  --gb-bg: #1b1b1b;
+  --gb-sidebar: #202020;
+  --gb-panel: #242424;
+  --gb-surface: #242424;
+  --gb-raised: #2c2c2c;
+  --gb-hover: rgba(255, 255, 255, 0.06);
+  --gb-border: #343434;
+  --gb-border-strong: #454545;
+  --gb-text: #f2f2f2;
+  --gb-muted: #a2a2a2;
+  --gb-faint: #747474;
+  --gb-accent: #4c8dff;
+  --gb-accent-strong: #78a9ff;
+  --gb-accent-dim: rgba(76, 141, 255, 0.14);
+  --gb-accent-ink: #ffffff;
+  --gb-success: #66c58a;
+  --gb-warning: #e7b764;
+  --gb-danger: #ef7770;
+  --gb-font: "Geist Variable", "Geist", -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+  --gb-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  --gb-radius-sm: 7px;
+  --gb-radius-md: 10px;
+  --gb-radius-lg: 14px;
+  --gb-ease: 140ms cubic-bezier(0.2, 0, 0, 1);
+  --gb-shadow-modal: 0 24px 72px rgba(0, 0, 0, 0.54), 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  --gb-rail-width: 56px;
+  --gb-panel-width: 278px;
+  --gb-inspector-width: 392px;
+  --gb-content-max: 820px;
+  --gb-composer-max: 792px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --gb-bg: #f7f7f5;
+  --gb-sidebar: #f2f2f0;
+  --gb-panel: #ffffff;
+  --gb-surface: #ffffff;
+  --gb-raised: #f2f2f2;
+  --gb-hover: rgba(0, 0, 0, 0.045);
+  --gb-border: #dededb;
+  --gb-border-strong: #c9c9c5;
+  --gb-text: #242424;
+  --gb-muted: #666663;
+  --gb-faint: #969691;
+  --gb-accent: #256fd4;
+  --gb-accent-strong: #185fbf;
+  --gb-accent-dim: rgba(37, 111, 212, 0.1);
+  --gb-accent-ink: #ffffff;
+  --gb-success: #178657;
+  --gb-warning: #a96805;
+  --gb-danger: #c53d37;
+  --gb-shadow-modal: 0 24px 64px rgba(31, 47, 37, 0.18), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+}
+
+body {
+  background: var(--gb-bg);
+  font-family: var(--gb-font);
+  letter-spacing: -0.006em;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+.wb-root {
+  background: var(--gb-bg);
+}
+
+.wb-rail {
+  gap: 5px;
+  padding: 12px 7px 10px;
+  border-right-color: var(--gb-border);
+  background: var(--gb-sidebar);
+}
+
+.wb-rail-drag {
+  height: 40px;
+  margin-bottom: 9px;
+}
+
+.wb-rail-mark {
+  width: 31px;
+  height: 31px;
+  border-color: color-mix(in srgb, var(--gb-border-strong) 82%, transparent);
+  border-radius: 9px;
+  background: var(--gb-raised);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+
+.wb-rail-mark svg {
+  width: 17px;
+  height: 17px;
+}
+
+.wb-rail-btn {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  color: var(--gb-muted);
+}
+
+.wb-rail-btn:hover {
+  color: var(--gb-text);
+  background: var(--gb-hover);
+}
+
+.wb-rail-btn.active {
+  color: var(--gb-accent);
+  background: var(--gb-accent-dim);
+}
+
+.wb-rail-btn.active::before {
+  position: absolute;
+  left: -7px;
+  width: 2px;
+  height: 18px;
+  border-radius: 0 2px 2px 0;
+  background: var(--gb-accent);
+  content: "";
+}
+
+.wb-task-panel,
+.wb-inspector {
+  background: var(--gb-sidebar);
+}
+
+.wb-task-panel-head,
+.gb-drawer-head {
+  height: 52px;
+  padding: 0 16px;
+  border-bottom-color: var(--gb-border);
+}
+
+.wb-task-panel-head strong,
+.gb-drawer-head {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.wb-task-panel-actions {
+  gap: 9px;
+  padding: 12px;
+  border-bottom-color: var(--gb-border);
+}
+
+.wb-task-new {
+  min-height: 36px;
+  border-color: var(--gb-border-strong);
+  border-radius: 9px;
+  background: var(--gb-raised);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.035) inset;
+}
+
+.wb-task-new:hover {
+  border-color: color-mix(in srgb, var(--gb-accent) 68%, var(--gb-border));
+  background: color-mix(in srgb, var(--gb-accent-dim) 58%, var(--gb-raised));
+}
+
+.wb-task-search {
+  height: 34px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--gb-bg) 70%, var(--gb-sidebar));
+}
+
+.wb-task-search:focus-within {
+  border-color: color-mix(in srgb, var(--gb-accent) 72%, var(--gb-border));
+  box-shadow: 0 0 0 3px var(--gb-accent-dim);
+}
+
+.wb-task-scroll {
+  padding: 10px 8px;
+}
+
+.wb-section-label {
+  padding: 12px 9px 6px;
+  color: var(--gb-faint);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.wb-project-row,
+.wb-thread-row {
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.wb-project-row:hover,
+.wb-thread-row:hover {
+  border-color: transparent;
+  background: var(--gb-hover);
+}
+
+.wb-project-row.active,
+.wb-thread-row.active {
+  border-color: color-mix(in srgb, var(--gb-accent) 18%, transparent);
+  background: var(--gb-accent-dim);
+}
+
+.wb-thread-row {
+  min-height: 52px;
+  padding: 8px;
+}
+
+.wb-thread-copy strong {
+  font-weight: 590;
+}
+
+.wb-thread-copy small {
+  color: var(--gb-faint);
+}
+
+.wb-task-panel-footer {
+  padding: 8px;
+  border-top-color: var(--gb-border);
+}
+
+.wb-footer-btn {
+  min-height: 34px;
+  border-radius: 8px;
+}
+
+.wb-stage,
+.gb-thread-view,
+.gb-thread-header,
+.gb-thread-scroll {
+  background: var(--gb-bg);
+}
+
+.gb-thread-view,
+.wb-chat {
+  grid-template-rows: 52px minmax(0, 1fr) auto;
+}
+
+.gb-thread-view.is-empty {
+  grid-template-rows: 52px minmax(0, 1fr);
+}
+
+.gb-thread-header {
+  height: 52px;
+  padding: 0 20px;
+  border-bottom-color: var(--gb-border);
+}
+
+.gb-thread-heading strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.gb-thread-heading span,
+.gb-thread-heading.new span {
+  color: var(--gb-faint);
+}
+
+.gb-header-button,
+.gb-icon-button {
+  border-radius: 8px;
+}
+
+.gb-header-button {
+  height: 30px;
+  border-color: transparent;
+}
+
+.gb-header-button:hover,
+.gb-header-button.active,
+.gb-icon-button:hover {
+  border-color: var(--gb-border);
+  background: var(--gb-hover);
+}
+
+.gb-run-pill,
+.gb-plan-pill,
+.gb-private-chat-pill {
+  min-height: 26px;
+  border-color: var(--gb-border);
+  background: color-mix(in srgb, var(--gb-surface) 78%, transparent);
+}
+
+.gb-empty-layout {
+  padding: 28px 24px 22px;
+}
+
+.gb-empty-copy {
+  gap: 10px;
+}
+
+.gb-empty-copy h1 {
+  font-size: clamp(25px, 3vw, 32px);
+  font-weight: 620;
+  letter-spacing: -0.045em;
+}
+
+.gb-empty-copy p {
+  max-width: 455px;
+  color: var(--gb-muted);
+}
+
+.gb-suggestion-card {
+  min-height: 36px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--gb-surface) 80%, transparent);
+}
+
+.gb-thread-column {
+  width: min(var(--gb-content-max), 100%);
+  padding: 30px clamp(20px, 3vw, 40px) 88px;
+}
+
+.gb-timeline {
+  gap: 22px;
+}
+
+.gb-user-turn {
+  max-width: min(80%, 590px);
+  border-color: color-mix(in srgb, var(--gb-border-strong) 85%, transparent);
+  border-radius: 12px;
+  background: var(--gb-raised);
+}
+
+.gb-agent-turn {
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.gb-agent-mark {
+  width: 30px;
+  height: 30px;
+  border-color: color-mix(in srgb, var(--gb-accent) 35%, var(--gb-border));
+  border-radius: 9px;
+  background: var(--gb-accent-dim);
+  color: var(--gb-accent);
+}
+
+.gb-markdown {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.gb-markdown pre,
+.gb-code-wrap,
+.gb-tool-output {
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--gb-bg) 78%, #000);
+}
+
+.gb-reasoning,
+.gb-activity,
+.gb-plan-card,
+.gb-system-message {
+  border-color: var(--gb-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--gb-surface) 94%, transparent);
+}
+
+.gb-system-message.error {
+  border-color: color-mix(in srgb, var(--gb-danger) 48%, var(--gb-border));
+  background: color-mix(in srgb, var(--gb-danger) 8%, var(--gb-surface));
+}
+
+.gb-composer-dock {
+  z-index: 4;
+  width: min(var(--gb-composer-max), calc(100% - 40px));
+  padding-bottom: 18px;
+  background: var(--gb-bg);
+}
+
+.gb-empty-layout .gb-composer-dock {
+  width: min(var(--gb-composer-max), 100%);
+}
+
+.gb-composer-shell {
+  position: relative;
+  overflow: visible;
+  border-color: var(--gb-border-strong);
+  border-radius: 12px;
+  background: var(--gb-surface);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.16), 0 1px 0 rgba(255, 255, 255, 0.035) inset;
+}
+
+.gb-composer-shell:focus-within {
+  border-color: color-mix(in srgb, var(--gb-accent) 76%, var(--gb-border));
+  box-shadow: 0 0 0 3px var(--gb-accent-dim), 0 10px 32px rgba(0, 0, 0, 0.16);
+}
+
+.gb-composer-shell.plan,
+.gb-composer-shell.goal {
+  border-left-width: 1px;
+  border-top-color: color-mix(in srgb, var(--gb-accent) 58%, var(--gb-border));
+}
+
+.gb-composer textarea {
+  min-height: 60px;
+  padding: 15px 16px 8px;
+  color: var(--gb-text);
+  font-size: 14px;
+}
+
+.gb-composer textarea::placeholder {
+  color: var(--gb-faint);
+}
+
+.gb-composer-footer {
+  min-height: 46px;
+  padding: 7px 9px 8px;
+  border-top: 1px solid color-mix(in srgb, var(--gb-border) 74%, transparent);
+}
+
+.gb-composer-select,
+.gb-icon-button.composer,
+.gb-context-meter {
+  height: 30px;
+  border-color: transparent;
+  border-radius: 7px;
+  color: var(--gb-muted);
+  background: transparent;
+}
+
+.gb-composer-select:hover,
+.gb-icon-button.composer:hover,
+.gb-context-meter:hover {
+  border-color: var(--gb-border);
+  color: var(--gb-text);
+  background: var(--gb-hover);
+}
+
+.gb-composer-select.model {
+  max-width: 205px;
+}
+
+.gb-send {
+  width: 34px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--gb-raised);
+}
+
+.gb-send.ready:not(:disabled) {
+  border-color: color-mix(in srgb, var(--gb-accent) 75%, transparent);
+  background: var(--gb-accent);
+  color: var(--gb-accent-ink);
+}
+
+.gb-send.ready:not(:disabled):hover {
+  background: var(--gb-accent-strong);
+}
+
+.gb-composer-note {
+  margin-top: 9px;
+  color: var(--gb-faint);
+}
+
+.gb-dropdown,
+.gb-command-menu {
+  border-color: var(--gb-border-strong);
+  border-radius: 10px;
+  background: var(--gb-panel);
+  box-shadow: var(--gb-shadow-modal);
+}
+
+.gb-dropdown [role="menuitem"],
+.gb-dropdown [data-radix-collection-item] {
+  min-height: 36px;
+  border-radius: 7px;
+}
+
+.gb-dropdown [role="menuitem"] > span,
+.gb-dropdown [data-radix-collection-item] > span {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+
+.gb-dropdown [role="menuitem"] strong,
+.gb-dropdown [data-radix-collection-item] strong {
+  font-size: 11px;
+  font-weight: 590;
+}
+
+.gb-dropdown [role="menuitem"] small,
+.gb-dropdown [data-radix-collection-item] small {
+  display: block;
+  overflow: hidden;
+  color: var(--gb-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9.5px;
+}
+
+.gb-model-search {
+  border-radius: 7px;
+  color: var(--gb-text);
+}
+
+.gb-model-custom-option strong {
+  color: var(--gb-accent);
+}
+
+.gb-send-failure {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 12px;
+  border-color: color-mix(in srgb, var(--gb-danger) 50%, var(--gb-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--gb-danger) 8%, var(--gb-surface));
+  color: var(--gb-text);
+}
+
+.gb-send-failure > svg {
+  margin-top: 2px;
+  color: var(--gb-danger);
+}
+
+.gb-send-failure-copy {
+  min-width: 0;
+}
+
+.gb-send-failure-copy > strong {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--gb-danger);
+  font-size: 12.5px;
+}
+
+.gb-send-failure-copy dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.gb-send-failure-copy dl > div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.gb-send-failure-copy dt {
+  color: var(--gb-muted);
+  font-size: 11px;
+}
+
+.gb-send-failure-copy dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--gb-text);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.gb-send-failure-copy code {
+  display: block;
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--gb-danger) 74%, var(--gb-text));
+  font: 10.5px/1.45 var(--gb-mono);
+}
+
+.gb-send-failure > button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--gb-danger) 40%, var(--gb-border));
+  border-radius: 7px;
+  color: var(--gb-text);
+  background: transparent;
+  font-size: 12px;
+}
+
+.gb-send-failure > button:hover {
+  background: color-mix(in srgb, var(--gb-danger) 13%, transparent);
+}
+
+.gb-dialog-overlay.gb-permission-overlay {
+  z-index: 120;
+  background: rgba(7, 11, 9, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.gb-permission-dialog {
+  position: fixed;
+  z-index: 130;
+  top: 50%;
+  left: 50%;
+  width: min(540px, calc(100vw - 32px));
+  max-height: min(78vh, 660px);
+  overflow: auto;
+  border: 1px solid var(--gb-border-strong);
+  border-radius: 14px;
+  background: var(--gb-panel);
+  box-shadow: var(--gb-shadow-modal);
+  color: var(--gb-text);
+  transform: translate(-50%, -50%);
+}
+
+.gb-permission-dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--gb-border);
+}
+
+.gb-permission-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid color-mix(in srgb, var(--gb-warning) 32%, var(--gb-border));
+  border-radius: 9px;
+  color: var(--gb-warning);
+  background: color-mix(in srgb, var(--gb-warning) 10%, transparent);
+}
+
+.gb-permission-dialog h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.gb-permission-dialog [role="document"] p,
+.gb-permission-dialog-head p {
+  margin: 3px 0 0;
+  color: var(--gb-muted);
+  font-size: 11.5px;
+}
+
+.gb-permission-dialog-body {
+  display: grid;
+  gap: 9px;
+  padding: 16px 18px;
+}
+
+.gb-permission-dialog-body > strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gb-permission-dialog-body code {
+  overflow-wrap: anywhere;
+  padding: 10px 11px;
+  border: 1px solid var(--gb-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--gb-bg) 82%, #000);
+  color: var(--gb-text);
+  font: 11px/1.5 var(--gb-mono);
+}
+
+.gb-permission-dialog-body p {
+  margin: 0;
+  color: var(--gb-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.gb-permission-dialog-body p b {
+  margin-right: 5px;
+  color: var(--gb-faint);
+  font-weight: 600;
+}
+
+.gb-permission-risk,
+.gb-permission-second {
+  color: var(--gb-warning) !important;
+}
+
+.gb-permission-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--gb-border);
+}
+
+.gb-settings-dialog,
+.wb-page,
+.gb-control-page,
+.gb-jobs-page {
+  background: var(--gb-bg);
+}
+
+.gb-settings-panel,
+.gb-control-card,
+.gb-job-card,
+.gb-page-card {
+  border-color: var(--gb-border);
+  border-radius: 10px;
+  background: var(--gb-surface);
+}
+
+.gb-button,
+.wb-btn {
+  min-height: 32px;
+  border-color: var(--gb-border-strong);
+  border-radius: 8px;
+  background: var(--gb-raised);
+}
+
+.gb-button.primary,
+.wb-btn-primary {
+  border-color: color-mix(in srgb, var(--gb-accent) 72%, transparent);
+  background: var(--gb-accent);
+  color: var(--gb-accent-ink);
+}
+
+.gb-button.primary:hover,
+.wb-btn-primary:hover {
+  border-color: var(--gb-accent-strong);
+  background: var(--gb-accent-strong);
+}
+
+:is(button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--gb-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 780px) {
+  .wb-root,
+  .wb-root.panel-open,
+  .wb-root.inspector-open,
+  .wb-root.panel-open.inspector-open {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .wb-rail {
+    padding-inline: 4px;
+  }
+
+  .wb-rail-btn.active::before {
+    left: -4px;
+  }
+
+  .gb-thread-header {
+    padding: 0 12px;
+  }
+
+  .gb-thread-header-actions .gb-run-pill,
+  .gb-thread-header-actions .gb-plan-pill,
+  .gb-thread-header-actions .gb-header-button {
+    display: none;
+  }
+
+  .gb-composer-dock {
+    width: min(var(--gb-composer-max), calc(100% - 24px));
+  }
+
+  .gb-thread-column {
+    padding: 20px 14px 54px;
+  }
+
+  .gb-send-failure-copy dl > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .gb-send-failure {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .gb-send-failure > button {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

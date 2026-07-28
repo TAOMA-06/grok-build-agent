@@ -71,6 +71,8 @@ describe("useDesktopController", () => {
     const session = state.activeSessionId ? state.sessions[state.activeSessionId] : null;
     expect(session?.draft).toBe("keep this draft");
     expect(session?.failedSubmission?.text).toBe("keep this draft");
+    expect(session?.failedSubmission?.errorCategory).toBe("network");
+    expect(session?.failedSubmission?.error).toBe("connection failed");
     expect(session?.blocks.find((block) => block.type === "user")).toMatchObject({ delivery: "failed" });
   });
 
