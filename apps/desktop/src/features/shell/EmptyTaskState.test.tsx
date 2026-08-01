@@ -13,5 +13,11 @@ describe("EmptyTaskState", () => {
 
     fireEvent.click(screen.getByRole("button", { name: t.reviewChanges }));
     expect(onSuggest).toHaveBeenLastCalledWith(t.reviewChangesPrompt, "agent");
+
+    fireEvent.click(screen.getByRole("button", { name: t.buildFeature }));
+    expect(onSuggest).toHaveBeenLastCalledWith(t.buildFeaturePrompt, "agent");
+
+    fireEvent.click(screen.getByRole("button", { name: t.fixIssues }));
+    expect(onSuggest).toHaveBeenLastCalledWith(t.fixIssuesPrompt, "agent");
   });
 });

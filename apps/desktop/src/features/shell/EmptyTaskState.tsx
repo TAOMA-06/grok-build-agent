@@ -1,8 +1,7 @@
-import { ArrowUpRight, FileSearch, GitPullRequest } from "lucide-react";
+import { FileSearch, GitPullRequest, Hammer, Sparkles, Wrench } from "lucide-react";
 import { t } from "../../i18n";
 import type { TaskMode } from "../../types";
 import { Stagger, StaggerItem } from "./motion";
-import { RocketLineArt } from "./RocketLineArt";
 
 export function EmptyTaskState({
   onSuggest,
@@ -13,7 +12,7 @@ export function EmptyTaskState({
     <Stagger className="gb-empty-stack gb-home-briefing" stagger={0.055} delayChildren={0.05}>
       <StaggerItem className="gb-home-signature">
         <div className="gb-empty-orbit" aria-hidden>
-          <RocketLineArt />
+          <Sparkles size={30} strokeWidth={1.45} />
         </div>
       </StaggerItem>
       <StaggerItem className="gb-home-copy">
@@ -28,12 +27,18 @@ export function EmptyTaskState({
           <button type="button" className="gb-suggestion-card" onClick={() => onSuggest(t.explainProjectPrompt, "agent")}>
             <FileSearch size={16} aria-hidden />
             <span>{t.explainProject}</span>
-            <ArrowUpRight size={15} aria-hidden />
+          </button>
+          <button type="button" className="gb-suggestion-card" onClick={() => onSuggest(t.buildFeaturePrompt, "agent")}>
+            <Hammer size={16} aria-hidden />
+            <span>{t.buildFeature}</span>
           </button>
           <button type="button" className="gb-suggestion-card" onClick={() => onSuggest(t.reviewChangesPrompt, "agent")}>
             <GitPullRequest size={16} aria-hidden />
             <span>{t.reviewChanges}</span>
-            <ArrowUpRight size={15} aria-hidden />
+          </button>
+          <button type="button" className="gb-suggestion-card" onClick={() => onSuggest(t.fixIssuesPrompt, "agent")}>
+            <Wrench size={16} aria-hidden />
+            <span>{t.fixIssues}</span>
           </button>
         </div>
       </StaggerItem>

@@ -122,7 +122,8 @@ and safe apply.
 
 Local release commands:
 
-    # Builder-machine smoke package only; uses an ad-hoc signature.
+    # Builder-machine smoke build; replaces the one canonical /Applications
+    # install and removes target/*.app copies after verification.
     npm run app:build
 
     # Signed/notarized build; requires a real Developer ID identity plus one

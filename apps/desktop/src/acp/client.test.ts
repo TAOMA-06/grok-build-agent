@@ -172,6 +172,15 @@ describe("ACP session event routing", () => {
   it("hides known xAI lifecycle notifications but preserves unknown diagnostics", () => {
     expect(shouldHideAcpNotification("_x.ai/session_notification")).toBe(true);
     expect(shouldHideAcpNotification("_x.ai/queue/changed")).toBe(true);
+    expect(shouldHideAcpNotification("notification")).toBe(true);
+    expect(shouldHideAcpNotification("notification", {
+      text: "Prompt echoed by runtime",
+      level: "info",
+    })).toBe(true);
+    expect(shouldHideAcpNotification("notification", {
+      text: "Permission policy rejected the action",
+      level: "warn",
+    })).toBe(false);
     expect(shouldHideAcpNotification("vendor/custom-warning")).toBe(false);
   });
 });

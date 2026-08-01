@@ -23,4 +23,9 @@ describe("runtime error descriptions", () => {
     expect(errorMessage("InvokeError: Error: request timed out")).toBe("request timed out");
     expect(describeError("InvokeError: Error: request timed out").category).toBe("timeout");
   });
+
+  it("identifies request schema mismatches as protocol failures", () => {
+    expect(describeError("missing field `connection_id`").category).toBe("protocol");
+    expect(describeError("failed to deserialize request payload").category).toBe("protocol");
+  });
 });

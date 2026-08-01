@@ -1,31 +1,35 @@
-/* Grok Build Desktop — design tokens (single source of truth).
-   Cursor / Claude Desktop: neutral surfaces, one accent. */
+/* Grok Build Desktop — Codex-aligned desktop tokens.
+   Neutral surfaces carry hierarchy; color is reserved for meaning. */
 
 :root {
   color-scheme: dark;
 
-  --gb-bg: #0f0f0f;
-  --gb-sidebar: #141414;
-  --gb-panel: #171717;
-  --gb-surface: #1a1a1a;
-  --gb-raised: #222222;
+  --gb-bg: #181818;
+  --gb-sidebar: #202020;
+  --gb-panel: #202020;
+  --gb-surface: #242424;
+  --gb-raised: #2a2a2a;
   --gb-hover: rgba(255, 255, 255, 0.06);
-  --gb-border: #2a2a2a;
-  --gb-border-strong: #3a3a3a;
-  --gb-text: #ececec;
-  --gb-muted: #8a8a8a;
-  --gb-faint: #5c5c5c;
-  --gb-accent: #3b82f6;
-  --gb-accent-strong: #60a5fa;
-  --gb-accent-dim: rgba(59, 130, 246, 0.14);
-  --gb-accent-ink: #ffffff;
-  --gb-success: #22c55e;
-  --gb-warning: #eab308;
-  --gb-danger: #ef4444;
+  --gb-active: rgba(255, 255, 255, 0.09);
+  --gb-border: rgba(255, 255, 255, 0.08);
+  --gb-border-strong: rgba(255, 255, 255, 0.14);
+  --gb-text: #f2f2f2;
+  --gb-muted: #a2a2a2;
+  --gb-faint: #737373;
+  --gb-primary: #ededed;
+  --gb-primary-ink: #181818;
+  --gb-accent: #78a9ff;
+  --gb-accent-strong: #9bc0ff;
+  --gb-accent-dim: rgba(120, 169, 255, 0.11);
+  --gb-accent-ink: #111111;
+  --gb-success: #69bd86;
+  --gb-warning: #dda957;
+  --gb-danger: #ed746d;
 
   --gb-font: "Geist Variable", "PingFang SC", "Helvetica Neue", system-ui, sans-serif;
   --gb-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
 
+  --gb-radius-xs: 4px;
   --gb-radius-sm: 6px;
   --gb-radius-md: 8px;
   --gb-radius-lg: 12px;
@@ -37,14 +41,18 @@
   --gb-space-5: 24px;
   --gb-space-6: 32px;
 
-  --gb-ease: 140ms cubic-bezier(0.2, 0.7, 0.2, 1);
-  --gb-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.55);
+  --gb-ease: 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --gb-panel-ease: 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --gb-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.5);
 
-  --gb-rail-width: 48px;
-  --gb-panel-width: 260px;
-  --gb-inspector-width: 380px;
+  --gb-titlebar-height: 72px;
+  --gb-panel-width: 268px;
+  --gb-inspector-width: 360px;
   --gb-content-max: 760px;
-  --gb-composer-max: 720px;
+  --gb-composer-max: 760px;
+  --gb-header-height: 48px;
+  --gb-control-sm: 28px;
+  --gb-control-md: 32px;
 
   /* Legacy aliases used by unmigrated components */
   --gb-canvas: var(--gb-bg);
@@ -62,25 +70,28 @@
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --gb-bg: #fafafa;
-  --gb-sidebar: #f4f4f5;
-  --gb-panel: #ffffff;
+  --gb-bg: #f7f7f5;
+  --gb-sidebar: #ececea;
+  --gb-panel: #f1f1ef;
   --gb-surface: #ffffff;
-  --gb-raised: #f4f4f5;
-  --gb-hover: rgba(0, 0, 0, 0.04);
-  --gb-border: #e4e4e7;
-  --gb-border-strong: #d4d4d8;
-  --gb-text: #18181b;
-  --gb-muted: #71717a;
-  --gb-faint: #a1a1aa;
-  --gb-accent: #2563eb;
-  --gb-accent-strong: #1d4ed8;
-  --gb-accent-dim: rgba(37, 99, 235, 0.1);
+  --gb-raised: #f0f0ee;
+  --gb-hover: rgba(0, 0, 0, 0.045);
+  --gb-active: rgba(0, 0, 0, 0.075);
+  --gb-border: rgba(0, 0, 0, 0.09);
+  --gb-border-strong: rgba(0, 0, 0, 0.15);
+  --gb-text: #242424;
+  --gb-muted: #666663;
+  --gb-faint: #969691;
+  --gb-primary: #202020;
+  --gb-primary-ink: #ffffff;
+  --gb-accent: #3978c5;
+  --gb-accent-strong: #245faa;
+  --gb-accent-dim: rgba(57, 120, 197, 0.09);
   --gb-accent-ink: #ffffff;
-  --gb-success: #16a34a;
-  --gb-warning: #ca8a04;
-  --gb-danger: #dc2626;
-  --gb-shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.12);
+  --gb-success: #258257;
+  --gb-warning: #a96c10;
+  --gb-danger: #c94e47;
+  --gb-shadow-modal: 0 24px 64px rgba(31, 31, 29, 0.16);
 
   --gb-canvas: var(--gb-bg);
   --gb-glass-border: var(--gb-border);

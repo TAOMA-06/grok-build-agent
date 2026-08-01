@@ -37,6 +37,12 @@ export function guidanceForError(category: UserErrorCategory | undefined): Failu
         cause: t.errorRuntimeCause,
         recovery: t.errorRuntimeRecovery,
       };
+    case "protocol":
+      return {
+        title: t.errorProtocolTitle,
+        cause: t.errorProtocolCause,
+        recovery: t.errorProtocolRecovery,
+      };
     case "timeout":
       return {
         title: t.errorTimeoutTitle,

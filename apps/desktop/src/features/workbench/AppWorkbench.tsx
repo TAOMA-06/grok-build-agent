@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
+import { PanelLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore, type SessionRuntime } from "../../store";
@@ -20,12 +21,15 @@ import { buildCommandCatalog } from "../shell/commands";
 import { formatFailureForTimeline } from "../shell/errorPresentation";
 import { ControlPage } from "../control/ControlPage";
 import { JobsPage } from "../jobs/JobsPage";
-import { NavRail } from "./NavRail";
 import { TaskPanel } from "./TaskPanel";
 import type { AppView } from "./types";
 
 function usesOverlayPanels(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
+}
+
+function usesCompactSidebar(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches;
 }
 
 export function AppWorkbench() {
@@ -50,7 +54,7 @@ export function AppWorkbench() {
   } = useAppStore();
 
   const [appView, setAppView] = useState<AppView>(activeSessionId ? "thread" : "home");
-  const [taskPanelOpen, setTaskPanelOpen] = useState(true);
+  const [taskPanelOpen, setTaskPanelOpen] = useState(() => !usesCompactSidebar());
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [commandOpen, setCommandOpen] = useState(false);
@@ -227,6 +231,15 @@ export function AppWorkbench() {
     media.addEventListener("change", reconcilePanels);
     return () => media.removeEventListener("change", reconcilePanels);
   }, [inspectorOpen, taskPanelOpen]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 760px)");
+    const collapseSidebar = (event: MediaQueryListEvent) => {
+      if (event.matches) setTaskPanelOpen(false);
+    };
+    media.addEventListener("change", collapseSidebar);
+    return () => media.removeEventListener("change", collapseSidebar);
+  }, []);
 
   useEffect(() => {
     function onEscape(event: KeyboardEvent) {
@@ -490,28 +503,36 @@ export function AppWorkbench() {
 
   return (
     <div className={rootClass}>
-      <NavRail
-        view={appView === "thread" ? "thread" : appView}
-        taskPanelOpen={taskPanelOpen}
-        onNavigate={navigate}
-        onToggleTaskPanel={toggleTaskPanel}
-      />
-
       {taskPanelOpen && (
         <TaskPanel
           workspaces={workspaces}
           sessions={orderedSessions}
           activeSessionId={activeSessionId}
           activeWorkspace={activeWorkspace}
+          view={appView === "thread" ? "thread" : appView}
           onNewThread={goHome}
           onSelectSession={openSession}
           onOpenWorkspace={() => void openWorkspace()}
           onSelectWorkspace={(path) => void selectWorkspace(path)}
+          onNavigate={navigate}
+          onToggle={toggleTaskPanel}
           onOpenSettings={() => {
             setSettingsTab("general");
             navigate("settings");
           }}
         />
+      )}
+
+      {!taskPanelOpen && (
+        <button
+          type="button"
+          className="wb-sidebar-reveal"
+          aria-label={t.tasks}
+          title={`${t.tasks} (⌘B)`}
+          onClick={openTaskPanel}
+        >
+          <PanelLeft size={16} />
+        </button>
       )}
 
       <main className="wb-stage">

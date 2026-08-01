@@ -18,10 +18,11 @@
     "release:check": "node scripts/release-safety-check.mjs",
     "tauri": "tauri",
     "app:dev": "GROK_BUILD_IN_PROCESS_HOST=1 tauri dev",
-    "app:build": "APPLE_SIGNING_IDENTITY=- tauri build",
+    "app:bundle": "APPLE_SIGNING_IDENTITY=- tauri build",
+    "app:build": "../../script/build_and_run.sh --build",
     "app:build:release": "node scripts/macos-release-preflight.mjs && tauri build",
     "app:build:universal": "node scripts/macos-release-preflight.mjs && tauri build --target universal-apple-darwin",
-    "app:open": "open 'src-tauri/target/release/bundle/macos/Grok Build Desktop.app'"
+    "app:open": "../../script/build_and_run.sh --open"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",

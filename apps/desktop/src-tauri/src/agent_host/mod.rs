@@ -201,6 +201,7 @@ fn request_targets_private_session(state: &HostState, params: &Value) -> bool {
 use event_bus::{HostEventBus, HostNotification};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct PromptParams {
     connection_id: String,
     session_id: String,
@@ -2248,6 +2249,34 @@ fn error_response(id: Value, code: i32, message: &str) -> HostResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prompt_params_accept_renderer_camel_case_payload() {
+        let params: PromptParams = serde_json::from_value(json!({
+            "connectionId": "connection-1",
+            "sessionId": "session-1",
+            "taskId": "task-1",
+            "turnId": "turn-1",
+            "idempotencyKey": "prompt-1",
+            "focusMode": "economy",
+            "privacyMode": "standard",
+            "privateChat": true,
+            "text": "hello",
+            "content": []
+        }))
+        .expect("renderer camelCase prompt payload should deserialize");
+
+        assert_eq!(params.connection_id, "connection-1");
+        assert_eq!(params.session_id, "session-1");
+        assert_eq!(params.task_id, "task-1");
+        assert_eq!(params.turn_id, "turn-1");
+        assert_eq!(params.idempotency_key, "prompt-1");
+        assert_eq!(params.focus_mode, crate::platform::FocusMode::Economy);
+        assert_eq!(params.privacy_mode, crate::platform::PrivacyMode::Standard);
+        assert!(params.private_chat);
+        assert_eq!(params.text, "hello");
+        assert!(params.content.is_empty());
+    }
 
     #[test]
     fn renderer_cannot_forge_executed_verification() {

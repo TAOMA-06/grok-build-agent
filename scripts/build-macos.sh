@@ -10,21 +10,20 @@ OUT_DIR="$ROOT/dist/release"
 echo "==> Building Grok Build Desktop (macOS)"
 cd "$APP_DIR"
 npm install
-npm run app:build
+npm run app:bundle
 
 mkdir -p "$OUT_DIR"
 rm -rf "$OUT_DIR"/*
 
-if [[ -d "$BUNDLE_DIR/macos" ]]; then
-  cp -R "$BUNDLE_DIR/macos/"*.app "$OUT_DIR/" 2>/dev/null || true
-fi
 if [[ -d "$BUNDLE_DIR/dmg" ]]; then
   cp -R "$BUNDLE_DIR/dmg/"*.dmg "$OUT_DIR/" 2>/dev/null || true
 fi
 
+"$ROOT/script/build_and_run.sh" --clean
+
 echo ""
 echo "==> Artifacts"
-ls -lah "$OUT_DIR" || ls -lah "$BUNDLE_DIR"/macos "$BUNDLE_DIR"/dmg 2>/dev/null || true
+ls -lah "$OUT_DIR" || ls -lah "$BUNDLE_DIR"/dmg 2>/dev/null || true
 echo ""
 echo "Install: open the .dmg and drag Grok Build Desktop into Applications."
 echo "Note: unsigned builds may need: right-click → Open (first launch), or"

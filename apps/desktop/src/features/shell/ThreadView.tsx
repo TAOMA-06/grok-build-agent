@@ -216,6 +216,12 @@ export function ThreadView({
 
   const composer = (
     <div className={`gb-composer-dock${isEmpty ? " is-empty" : ""}`}>
+      {isEmpty && (
+        <div className="gb-composer-context">
+          <FolderKanban size={13} />
+          <span>{workspaceName || t.chooseProject}</span>
+        </div>
+      )}
       <div
         className={`gb-composer-shell${visibleMode === "plan" ? " plan" : ""}${
           visibleMode === "goal" ? " goal" : ""
@@ -249,11 +255,9 @@ export function ThreadView({
           <CircleAlert size={17} aria-hidden />
           <div className="gb-send-failure-copy">
             <strong>{failureGuidance.title}</strong>
-            <dl>
-              <div><dt>{t.errorTechnicalDetail}</dt><dd><code>{failure.error}</code></dd></div>
-              <div><dt>{t.errorWhy}</dt><dd>{failureGuidance.cause}</dd></div>
-              <div><dt>{t.errorWhatToDo}</dt><dd>{failureGuidance.recovery}</dd></div>
-            </dl>
+            <p>{failureGuidance.cause}</p>
+            <code>{failure.error}</code>
+            <small>{failureGuidance.recovery}</small>
           </div>
           <button type="button" onClick={() => void onRetryFailed()}>{t.retry}</button>
         </div>

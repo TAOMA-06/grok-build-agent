@@ -404,9 +404,17 @@ const HIDDEN_XAI_NOTIFICATIONS = new Set([
   "_x.ai/session/update",
 ]);
 
-/** xAI lifecycle telemetry belongs in diagnostics, not the conversation transcript. */
-export function shouldHideAcpNotification(method: string): boolean {
-  return HIDDEN_XAI_NOTIFICATIONS.has(method);
+/** Lifecycle and generic info telemetry belongs in diagnostics, not the conversation transcript. */
+export function shouldHideAcpNotification(
+  method: string,
+  notification?: { level: "info" | "warn" | "error"; text?: string } | null,
+): boolean {
+  if (HIDDEN_XAI_NOTIFICATIONS.has(method)) return true;
+  return (
+    (method === "notification" || method === "extension")
+    && notification?.level !== "warn"
+    && notification?.level !== "error"
+  );
 }
 
 /** Batch high-frequency stream chunks per animation frame per session. */
@@ -834,7 +842,7 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
           applyContextUsage(sessionId, connectionId, p?.params ?? p ?? event.payload);
         }
         const notification = extractStructuredAcpNotification(p?.params ?? p ?? event.payload);
-        if (shouldHideAcpNotification(method) && !notification) return;
+        if (shouldHideAcpNotification(method, notification)) return;
         const sid = resolveLocalSessionId(sessionId, connectionId, !isSessionEventEnvelope(event.payload));
         if (sid) {
           useAppStore.getState().addBlock(sid, {
@@ -868,7 +876,7 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
           applyContextUsage(sessionId, connectionId, p?.params ?? p ?? event.payload);
         }
         const notification = extractStructuredAcpNotification(p?.params ?? p ?? event.payload);
-        if (shouldHideAcpNotification(method) && !notification) return;
+        if (shouldHideAcpNotification(method, notification)) return;
         const sid = resolveLocalSessionId(sessionId, connectionId, !isSessionEventEnvelope(event.payload));
         if (sid) {
           useAppStore.getState().addBlock(sid, {

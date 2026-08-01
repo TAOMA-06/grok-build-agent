@@ -1,8 +1,21 @@
-import { Archive, ChevronDown, Folder, FolderOpen, MessageSquarePlus, Search, Settings } from "lucide-react";
+import {
+  Archive,
+  ChevronDown,
+  Folder,
+  FolderOpen,
+  LayoutDashboard,
+  MessageSquarePlus,
+  PanelLeftClose,
+  Search,
+  Settings,
+  Timer,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../i18n";
 import type { SessionRuntime } from "../../store";
 import type { WorkspaceRecord } from "../../types";
+import type { AppView } from "./types";
 
 function requiresAttention(session: SessionRuntime): boolean {
   return session.summary.runState === "awaiting_permission" || session.summary.attentionRequired === true;
@@ -20,29 +33,39 @@ export function TaskPanel({
   sessions,
   activeSessionId,
   activeWorkspace,
+  view,
   onNewThread,
   onSelectSession,
   onOpenWorkspace,
   onSelectWorkspace,
   onOpenSettings,
+  onNavigate,
+  onToggle,
 }: {
   workspaces: WorkspaceRecord[];
   sessions: SessionRuntime[];
   activeSessionId: string | null;
   activeWorkspace: string;
+  view: AppView;
   onNewThread: () => void;
   onSelectSession: (id: string) => void;
   onOpenWorkspace: () => void;
   onSelectWorkspace: (path: string) => void;
   onOpenSettings: () => void;
+  onNavigate: (view: AppView) => void;
+  onToggle: () => void;
 }) {
   const [search, setSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [showArchived, setShowArchived] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const focus = () => searchRef.current?.focus();
+    const focus = () => {
+      setSearchOpen(true);
+      window.requestAnimationFrame(() => searchRef.current?.focus());
+    };
     window.addEventListener("grok:focus-task-search", focus);
     return () => window.removeEventListener("grok:focus-task-search", focus);
   }, []);
@@ -63,16 +86,70 @@ export function TaskPanel({
 
   return (
     <aside className="wb-task-panel" aria-label={t.tasks}>
-      <div className="wb-task-panel-head" data-tauri-drag-region>
-        <strong>{t.tasks}</strong>
+      <div className="wb-sidebar-titlebar" data-tauri-drag-region>
+        <div className="wb-sidebar-brand">
+          <span className="wb-sidebar-brand-mark" aria-hidden>G</span>
+          <strong>Grok Build</strong>
+        </div>
+        <div className="wb-sidebar-title-actions">
+          <button
+            type="button"
+            className={searchOpen ? "wb-sidebar-icon active" : "wb-sidebar-icon"}
+            aria-label={t.searchTasks}
+            onClick={() => {
+              setSearchOpen((current) => {
+                const next = !current;
+                if (next) window.requestAnimationFrame(() => searchRef.current?.focus());
+                return next;
+              });
+            }}
+          >
+            <Search size={15} />
+          </button>
+          <button
+            type="button"
+            className="wb-sidebar-icon"
+            aria-label={t.tasks}
+            title={`${t.tasks} (⌘B)`}
+            onClick={onToggle}
+          >
+            <PanelLeftClose size={15} />
+          </button>
+        </div>
       </div>
 
-      <div className="wb-task-panel-actions">
-        <button type="button" className="wb-task-new" onClick={onNewThread}>
-          <MessageSquarePlus size={15} />
+      <nav className="wb-sidebar-primary" aria-label={t.appName}>
+        <button
+          type="button"
+          className={view === "home" ? "active" : ""}
+          aria-current={view === "home" ? "page" : undefined}
+          onClick={onNewThread}
+        >
+          <MessageSquarePlus size={15} strokeWidth={1.8} />
           {t.newTask}
           <kbd>⌘N</kbd>
         </button>
+        <button
+          type="button"
+          className={view === "jobs" ? "active" : ""}
+          aria-current={view === "jobs" ? "page" : undefined}
+          onClick={() => onNavigate("jobs")}
+        >
+          <Timer size={15} strokeWidth={1.8} />
+          {t.hostJobs}
+        </button>
+        <button
+          type="button"
+          className={view === "control" ? "active" : ""}
+          aria-current={view === "control" ? "page" : undefined}
+          onClick={() => onNavigate("control")}
+        >
+          <LayoutDashboard size={15} strokeWidth={1.8} />
+          {t.missionControl}
+        </button>
+      </nav>
+
+      {searchOpen && (
         <label className="wb-task-search">
           <Search size={14} />
           <input
@@ -81,8 +158,18 @@ export function TaskPanel({
             onChange={(event) => setSearch(event.target.value)}
             placeholder={t.searchTasks}
           />
+          <button
+            type="button"
+            aria-label={t.cancel}
+            onClick={() => {
+              setSearch("");
+              setSearchOpen(false);
+            }}
+          >
+            <X size={13} />
+          </button>
         </label>
-      </div>
+      )}
 
       <div className="wb-task-scroll">
         <button type="button" className="wb-section-label" onClick={() => setProjectsOpen((v) => !v)}>
@@ -145,7 +232,12 @@ export function TaskPanel({
         >
           <Archive size={14} /> {showArchived ? t.backToTasks : t.archived}
         </button>
-        <button type="button" className="wb-footer-btn" onClick={onOpenSettings}>
+        <button
+          type="button"
+          className={view === "settings" ? "wb-footer-btn active" : "wb-footer-btn"}
+          aria-current={view === "settings" ? "page" : undefined}
+          onClick={onOpenSettings}
+        >
           <Settings size={14} /> {t.settings} <kbd>⌘,</kbd>
         </button>
       </div>

@@ -7,6 +7,12 @@ npm install
 npm run app:dev
 ```
 
+For normal local updates, use the repository-level `./script/build_and_run.sh`.
+It replaces the single canonical `/Applications/Grok Build Desktop.app`,
+removes Tauri `.app` copies from `target`, and launches only the canonical
+installation. `npm run app:open` also opens that installation rather than a
+build artifact.
+
 Use `npm run dev` for the browser MockBridge preview and `npm run check` for TypeScript, jsdom interaction tests, Vitest and the production bundle. `npm run test:coverage` reports coverage for the current shell, attachment validation and bridge/controller behavior. See the [repository README](../../README.md) for the user workflow and [architecture](../../docs/architecture.md) for bridge, state, MCP, attachment and ACP boundaries.
 
 Tasks support Agent, Plan and Goal modes. The mode in Settings is only the default for new tasks; the composer controls the active task and persists a switch only after Grok confirms it. Plan remains read-only until its in-task approval action returns the same ACP session to Agent mode.

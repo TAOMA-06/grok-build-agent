@@ -15,8 +15,7 @@ import "./styles/workbench.css";
 import "./styles/chat.css";
 import "./styles/pages.css";
 import "./styles/settings-legacy.css";
-import "./styles/codex.css";
-import "./styles/codex-surfaces.css";
+import "./styles/codex-desktop.css";
 
 export default function App() {
   useTranslation();

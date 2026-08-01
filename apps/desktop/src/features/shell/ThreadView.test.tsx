@@ -185,4 +185,40 @@ describe("ThreadView", () => {
     expect(screen.getByText(/bash \.\/hack\.sh/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Allow once" })).toBeInTheDocument();
   });
+
+  it("keeps lifecycle info noise out of the transcript while preserving errors", () => {
+    render(
+      <ThreadView
+        {...props}
+        session={{
+          ...recoveredSession,
+          blocks: [
+            { id: "internal-info", type: "system", text: "notify: notification", level: "info" },
+            { id: "real-error", type: "system", text: "Protocol handshake failed", level: "error" },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("notify: notification")).not.toBeInTheDocument();
+    expect(screen.getByText("Protocol handshake failed")).toBeInTheDocument();
+  });
+
+  it("folds identical assistant replays within one user turn", () => {
+    render(
+      <ThreadView
+        {...props}
+        session={{
+          ...recoveredSession,
+          blocks: [
+            { id: "user", type: "user", text: "Only answer once" },
+            { id: "answer-stream", type: "assistant", text: "Unique answer" },
+            { id: "answer-final", type: "assistant", text: "Unique answer" },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getAllByText("Unique answer")).toHaveLength(1);
+  });
 });

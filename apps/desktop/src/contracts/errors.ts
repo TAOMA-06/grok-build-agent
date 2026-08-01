@@ -8,6 +8,7 @@ export type UserErrorCategory =
   | "permission"
   | "workspace"
   | "runtime"
+  | "protocol"
   | "timeout"
   | "cancelled"
   | "unknown";
@@ -60,6 +61,11 @@ export function describeError(error: unknown): DescribedError {
     /\benoent\b|no such file|command not found|could not find (?:grok|the cli)|grok (?:binary|cli).*(?:missing|not found)/.test(normalized)
   ) {
     return { message, category: "runtime" };
+  }
+  if (
+    /missing field [`'"][a-z0-9_]+[`'"]|invalid type:|unknown field [`'"][a-z0-9_]+[`'"]|failed to deserialize|invalid (?:request|response) payload/.test(normalized)
+  ) {
+    return { message, category: "protocol" };
   }
   return { message, category: "unknown" };
 }

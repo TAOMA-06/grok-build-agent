@@ -61,6 +61,32 @@ function statusIcon(status: string) {
   return <LoaderCircle size={14} className="gb-spin" />;
 }
 
+function transcriptBlocks(blocks: ChatBlock[]): ChatBlock[] {
+  const result: ChatBlock[] = [];
+  const assistantTexts = new Set<string>();
+  const thoughtTexts = new Set<string>();
+  for (const block of blocks) {
+    if (block.type === "user") {
+      assistantTexts.clear();
+      thoughtTexts.clear();
+      result.push(block);
+      continue;
+    }
+    if (block.type === "system" && block.level !== "warn" && block.level !== "error") {
+      continue;
+    }
+    if (block.type === "assistant" || block.type === "thought") {
+      const text = block.text.trim();
+      if (!text) continue;
+      const seen = block.type === "assistant" ? assistantTexts : thoughtTexts;
+      if (seen.has(text)) continue;
+      seen.add(text);
+    }
+    result.push(block);
+  }
+  return result;
+}
+
 function ToolActivity({ block }: { block: Extract<ChatBlock, { type: "tool" }> }) {
   const [open, setOpen] = useState(false);
   const payload = block.tool.output ?? block.tool.input;
@@ -98,9 +124,10 @@ export function Timeline({
 }) {
   const [visibleCount, setVisibleCount] = useState(2_000);
   useEffect(() => setVisibleCount(2_000), [blocks.length === 0 ? "empty" : blocks[blocks.length - 1]?.id]);
+  const filteredBlocks = useMemo(() => transcriptBlocks(blocks), [blocks]);
   const visibleBlocks = useMemo(
-    () => blocks.slice(Math.max(0, blocks.length - visibleCount)),
-    [blocks, visibleCount],
+    () => filteredBlocks.slice(Math.max(0, filteredBlocks.length - visibleCount)),
+    [filteredBlocks, visibleCount],
   );
   const latestPlanIndex = visibleBlocks.reduce(
     (lastIndex, block, index) => block.type === "plan" ? index : lastIndex,
@@ -115,7 +142,7 @@ export function Timeline({
   }, [visibleBlocks]);
   return (
     <div className="gb-timeline" aria-live="polite" aria-busy={busy}>
-      {visibleCount < blocks.length && <button type="button" className="gb-button" onClick={() => setVisibleCount((count) => Math.min(blocks.length, count + 2_000))}>Load 2,000 earlier events</button>}
+      {visibleCount < filteredBlocks.length && <button type="button" className="gb-button" onClick={() => setVisibleCount((count) => Math.min(filteredBlocks.length, count + 2_000))}>Load 2,000 earlier events</button>}
       {visibleBlocks.map((block, blockIndex) => {
         if (block.type === "user") {
           return (
