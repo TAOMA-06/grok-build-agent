@@ -105,7 +105,7 @@ describe("ACP session event routing", () => {
     expect(runtime?.summary.mode).toBe("plan");
     expect(runtime?.modeState.currentMode).toBe("plan");
     expect(runtime?.availableCommands).toEqual([
-      { name: "context", description: "Inspect context", input: undefined },
+      { name: "context", description: "Inspect context", input: undefined, tag: null },
     ]);
   });
 

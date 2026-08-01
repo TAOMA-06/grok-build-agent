@@ -269,7 +269,7 @@ mod harness_tests {
             "rules must name modern wait/output helpers"
         );
         assert!(
-            rules.contains("0.2.111"),
+            rules.contains("0.2.118"),
             "rules should advertise current CLI alignment"
         );
         assert!(

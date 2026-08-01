@@ -151,6 +151,7 @@ pub fn is_write_method(method: &str) -> bool {
             | "attachment.prepare"
             | "mcp.upsert"
             | "mcp.remove"
+            | "mcp.setEnabled"
             | "settings.save"
             | "jobs.upsert"
             | "jobs.cancel"

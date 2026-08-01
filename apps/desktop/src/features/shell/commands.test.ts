@@ -82,6 +82,42 @@ describe("slash command catalog", () => {
   it("marks TUI-only commands unavailable instead of treating them as prompts", () => {
     const catalog = buildCommandCatalog([], []);
     expect(parseSlashCommand("/share", catalog)?.descriptor).toMatchObject({ available: false, execution: "unsupported" });
+    expect(parseSlashCommand("/tutorial", catalog)?.descriptor).toMatchObject({ available: false, execution: "unsupported" });
     expect(parseSlashCommand("/does-not-exist", catalog)).toBeNull();
+  });
+
+  it("exposes /undo as an alias for /rewind (CLI 0.2.116+)", () => {
+    const catalog = buildCommandCatalog([
+      { name: "/rewind", description: "Rewind the session", input: null },
+    ], []);
+    expect(parseSlashCommand("/undo", catalog)?.descriptor).toMatchObject({
+      name: "/rewind",
+      source: "acp",
+      execution: "acp",
+      available: true,
+    });
+  });
+
+  it("keeps local /delete and /doctor available without a live session", () => {
+    const catalog = buildCommandCatalog([], []);
+    expect(parseSlashCommand("/delete", catalog)?.descriptor).toMatchObject({
+      name: "/delete",
+      source: "desktop",
+      execution: "local",
+      available: true,
+    });
+    expect(parseSlashCommand("/doctor", catalog)?.descriptor).toMatchObject({
+      name: "/doctor",
+      source: "desktop",
+      execution: "local",
+      available: true,
+    });
+  });
+
+  it("preserves optional command tags from the live ACP catalog", () => {
+    const catalog = buildCommandCatalog([
+      { name: "/usage", description: "Token usage", input: null, tag: "new" },
+    ], []);
+    expect(parseSlashCommand("/usage", catalog)?.descriptor.tag).toBe("new");
   });
 });

@@ -10,7 +10,7 @@ when-to-use: orchestrate, parallel agents, fan-out, multi-component feature
 
 # Orchestrate Skill
 
-You coordinate; workers implement. Align with Grok Build **0.2.111** subagent APIs (0.2.103+ compatible).
+You coordinate; workers implement. Align with Grok Build **0.2.118** subagent APIs (0.2.103+ compatible).
 
 ## Steps
 

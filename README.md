@@ -15,31 +15,33 @@ This is an **unofficial community project** and is **not affiliated with, endors
 
 ---
 
-## Latest compatibility · Grok Build CLI v0.2.111
+## Latest compatibility · Grok Build CLI v0.2.118
 
-Grok Build Desktop now tracks the latest Grok Build CLI workflow (0.2.107–0.2.111) with:
+Grok Build Desktop now tracks the latest Grok Build CLI workflow (0.2.112–0.2.118) with:
 
-- Orchestrator harness guidance for workflows, Host jobs, `/usage`, `/summarize`|`/recap`, and non-overlapping `/loop`
+- Orchestrator harness guidance for workflows, Host jobs, `/usage`, `/summarize`|`/recap`, `/undo`|`/rewind`, and non-overlapping `/loop`
+- Settings MCP **enable/disable** without remove/re-add (`grok mcp enable|disable`, CLI 0.2.113+)
+- Local `/delete` task confirm, `/doctor` diagnostics entry, and honest TUI-only `/tutorial` catalog entry
+- Plan **Copy plan** action and **Edit** for queued follow-up prompts
+- Diagnostics soft-nudge for CLI updates (soft floor / latest check)
 - New-install default model **Grok 4.5**, with optional image/video tool stripping at process spawn
 - Focused Briefing home composition and Host-level agent customization controls
-- A multiline desktop composer for normal chat-style prompts
-- `PageUp` / `PageDown` transcript scrolling while the composer is focused
-- CLI-aware `/vim-mode` discovery in the command palette when that command is advertised
 - Queued follow-up prompts during a running Grok turn, with an explicit queued state and a separate Stop control
 - A read-only external-tool compatibility matrix sourced from `grok inspect --json`; it never imports or transmits third-party sessions
 
 The official Grok Build CLI remains the runtime and authentication owner; this project does not bundle, replace, or emulate it.
 
-### 最新适配 · Grok Build CLI v0.2.111
+### 最新适配 · Grok Build CLI v0.2.118
 
-Grok Build Desktop 已适配最新 Grok Build CLI 工作流（0.2.107–0.2.111），新增：
+Grok Build Desktop 已适配最新 Grok Build CLI 工作流（0.2.112–0.2.118），新增：
 
-- Orchestrator harness 对齐 workflows、Host jobs、`/usage`、`/summarize`|`/recap`，以及不重叠的 `/loop`
+- Orchestrator harness 对齐 workflows、Host jobs、`/usage`、`/summarize`|`/recap`、`/undo`|`/rewind`，以及不重叠的 `/loop`
+- 设置页 MCP 支持 **启用 / 停用**（无需删除后重建，CLI 0.2.113+）
+- 本地 `/delete` 确认删除任务、`/doctor` 打开诊断，以及 TUI 专用 `/tutorial` 的诚实目录项
+- 计划卡片 **复制计划**，以及对排队中后续消息的 **编辑**
+- 诊断页软提示 CLI 版本更新
 - 新安装默认模型 **Grok 4.5**，并可在进程启动时剥离图像/视频工具
 - Focused Briefing 首页构图与 Host 级 Agent 定制控件
-- 支持多行输入的桌面任务编辑器
-- 输入框聚焦时，可用 `PageUp` / `PageDown` 滚动当前对话
-- 当 CLI 声明支持时，命令面板会提供 `/vim-mode` 快捷入口
 - Grok 运行期间可排队后续消息，时间线会明确显示排队状态，并保留独立的停止控制
 - 通过 `grok inspect --json` 只读显示外部工具兼容性矩阵；不会导入或传输第三方会话
 
@@ -124,7 +126,7 @@ Grok Build Desktop turns the official Grok Build CLI into a dependable desktop c
 - The first task instruction automatically becomes an editable **Task focus** in the Context drawer.
 - **Economy** focus uses short task anchors and refreshes the full task contract less often; **Balanced** favors more regular full refreshes. Both show the injected token estimate and strategy in Context.
 - New installs default to **Privacy Mode** on (Grok Build `/privacy opt-out`): coding session data is not used to train or improve the product. The app syncs this preference when an agent is connected and you are signed in. See [PRIVACY.md](PRIVACY.md).
-- New installs default to **durable tasks** (Private Chat off) with **Orchestrator harness** on: task contracts, verification commands, orchestration rules, and session harness skills (Grok Build **0.2.111**) when the package path resolves.
+- New installs default to **durable tasks** (Private Chat off) with **Orchestrator harness** on: task contracts, verification commands, orchestration rules, and session harness skills (Grok Build **0.2.118**) when the package path resolves.
 - New tasks seed a structured **task contract** (goal, acceptance, inferred verify commands) and auto-run declared argv-only verifications after each turn when policy allows; shell, network, and destructive commands remain blocked pending confirmation.
 - New installs default to **Medium** reasoning effort and **Strict Privacy Shield** to reduce recurring token use and protect common prompt secrets and high-risk attachments from accidental dispatch.
 - Strict mode redacts detected API keys, access tokens, JWTs, and PEM private keys, and blocks high-risk attachment names. It is local protection only; account-level training is handled by Privacy Mode. See [PRIVACY.md](PRIVACY.md).
@@ -178,7 +180,7 @@ Grok Build Desktop 把官方 Grok Build CLI 变成可用的桌面编程工作区
 - 首条任务指令会自动成为可在 Context 抽屉中编辑的**任务聚焦**。
 - **经济**档使用短任务锚点，更少刷新完整任务合同；**均衡**档会更频繁刷新。两种档位都会在 Context 中显示注入策略和估算 Token。
 - 新安装默认开启 **Privacy Mode（隐私模式）**（对齐 Grok Build `/privacy opt-out`）：编程会话数据不会用于训练或改进产品。Agent 已连接且已登录时会同步到账户。详见 [PRIVACY.md](PRIVACY.md)。
-- 新安装默认可恢复任务（Private Chat 关）并开启 **编排 Harness**：任务合同、验证命令与计划/探索/验证引导默认生效（对齐 Grok Build **0.2.111**）。
+- 新安装默认可恢复任务（Private Chat 关）并开启 **编排 Harness**：任务合同、验证命令与计划/探索/验证引导默认生效（对齐 Grok Build **0.2.118**）。
 - 新任务会种子化结构化**任务合同**（目标、验收、推断的验证命令）；仅 argv 形式且策略允许的声明验证会自动运行，shell、网络和破坏性命令仍需确认。
 - 新安装默认使用**中等**推理强度与**严格隐私防护**，以降低重复 Token 消耗，并避免常见提示词密钥和高风险附件被意外发送。
 - 严格模式会脱敏识别到的 API 密钥、访问令牌、JWT 和 PEM 私钥，并阻止高风险附件名称。这是本地保护；账户级训练由 Privacy Mode 管理。详见 [PRIVACY.md](PRIVACY.md)。

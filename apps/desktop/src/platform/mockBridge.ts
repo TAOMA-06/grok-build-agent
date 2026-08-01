@@ -18,12 +18,12 @@ const projectPath = "/Users/demo/Projects/orbit";
 const now = new Date().toISOString();
 
 const health: RuntimeHealth = {
-  grok: { found: true, path: "~/.grok/bin/grok", version: "0.2.111" },
+  grok: { found: true, path: "~/.grok/bin/grok", version: "0.2.118" },
   authenticated: true,
   authMethod: "device",
   ready: true,
   checklist: [
-    { id: "cli", label: "Grok CLI", ok: true, detail: "0.2.111" },
+    { id: "cli", label: "Grok CLI", ok: true, detail: "0.2.118" },
     { id: "auth", label: "Signed in", ok: true, detail: "Device auth" },
   ],
 };
@@ -420,6 +420,20 @@ export const mockDesktopBridge: DesktopBridge = {
       tools: [{ name: "read_file" }],
       checkedAt: new Date().toISOString(),
     }];
+  },
+  async setMcpServerEnabled(name, enabled) {
+    return enabled ? `enabled ${name}` : `disabled ${name}`;
+  },
+  async checkCliUpdate() {
+    return {
+      currentVersion: "0.2.118",
+      latestVersion: "0.2.118",
+      updateAvailable: false,
+      channel: "stable",
+    };
+  },
+  async runCliUpdate() {
+    return "Already up to date";
   },
   async gitReview(root, _privateChat = false) {
     return mockReview(root);

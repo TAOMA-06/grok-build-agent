@@ -612,10 +612,19 @@ export function handleSessionUpdate(
           if (!command || typeof command !== "object") return [];
           const record = command as Record<string, unknown>;
           if (typeof record.name !== "string") return [];
+          const tag =
+            typeof record.tag === "string"
+              ? record.tag
+              : typeof record.badge === "string"
+                ? record.badge
+                : typeof record.label === "string" && /^\[.+\]$/.test(record.label)
+                  ? record.label.slice(1, -1)
+                  : null;
           return [{
             name: record.name,
             description: typeof record.description === "string" ? record.description : null,
             input: record.input,
+            tag,
           }];
         });
       store.setSessionCommands(sid, commands);

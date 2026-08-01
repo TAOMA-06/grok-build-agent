@@ -84,6 +84,9 @@ import {
   upsertMcpServer,
   removeMcpServer,
   doctorMcpServer,
+  setMcpServerEnabled,
+  checkCliUpdate,
+  runCliUpdate,
 } from "../api/catalog";
 import type { DesktopBridge } from "./DesktopBridge";
 import { normalizeCachedEvents } from "../features/shell/history";
@@ -143,6 +146,9 @@ export const tauriDesktopBridge: DesktopBridge = {
   upsertMcpServer,
   removeMcpServer,
   doctorMcpServer,
+  setMcpServerEnabled,
+  checkCliUpdate,
+  runCliUpdate,
   gitReview,
   gitFilePatch,
   gitFileAction,

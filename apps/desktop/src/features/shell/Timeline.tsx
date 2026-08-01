@@ -84,12 +84,16 @@ export function Timeline({
   busy = false,
   onPlanAction,
   planActionsEnabled = false,
+  sessionId = null,
 }: {
   blocks: ChatBlock[];
   busy?: boolean;
   onPlanAction: (action: "approve" | "revise") => void;
   planActionsEnabled?: boolean;
+  sessionId?: string | null;
 }) {
+  const setSessionDraft = useAppStore((state) => state.setSessionDraft);
+  const removeBlock = useAppStore((state) => state.removeBlock);
   const [visibleCount, setVisibleCount] = useState(2_000);
   useEffect(() => setVisibleCount(2_000), [blocks.length === 0 ? "empty" : blocks[blocks.length - 1]?.id]);
   const visibleBlocks = useMemo(
@@ -114,7 +118,25 @@ export function Timeline({
         if (block.type === "user") {
           return (
             <section key={block.id} className={`gb-turn gb-user-turn ${block.delivery ?? "sent"}`}>
-              <div className="gb-turn-label">{t.you}{block.delivery === "pending" ? ` · ${t.sending}` : block.delivery === "queued" ? ` · ${t.queued}` : block.delivery === "failed" ? ` · ${t.failed}` : ""}<Timestamp at={block.at} /></div>
+              <div className="gb-turn-label">
+                {t.you}
+                {block.delivery === "pending" ? ` · ${t.sending}` : block.delivery === "queued" ? ` · ${t.queued}` : block.delivery === "failed" ? ` · ${t.failed}` : ""}
+                <Timestamp at={block.at} />
+                {block.delivery === "queued" && sessionId && (
+                  <button
+                    type="button"
+                    className="gb-button ghost"
+                    style={{ marginLeft: 8 }}
+                    onClick={() => {
+                      setSessionDraft(sessionId, block.text);
+                      removeBlock(sessionId, block.id);
+                      window.dispatchEvent(new Event("grok:focus-composer"));
+                    }}
+                  >
+                    {t.editQueued}
+                  </button>
+                )}
+              </div>
               <div className="gb-user-prompt">{block.text}</div>
             </section>
           );
@@ -142,12 +164,21 @@ export function Timeline({
             <section key={block.id} className="gb-plan-card">
               <div className="gb-plan-title"><FileCode2 size={15} /> {t.proposedPlan}<Timestamp at={block.at} /></div>
               <div className="gb-markdown"><MarkdownBody>{block.text}</MarkdownBody></div>
-              {planActionsEnabled && blockIndex === latestPlanIndex && (
-                <div className="gb-plan-actions">
-                  <button type="button" className="gb-button primary" onClick={() => onPlanAction("approve")}>{t.planApproveAndBuild}</button>
-                  <button type="button" className="gb-button" onClick={() => onPlanAction("revise")}>{t.planRequestChanges}</button>
-                </div>
-              )}
+              <div className="gb-plan-actions">
+                <button
+                  type="button"
+                  className="gb-button"
+                  onClick={() => void navigator.clipboard.writeText(block.text)}
+                >
+                  <Copy size={13} /> {t.copyPlan}
+                </button>
+                {planActionsEnabled && blockIndex === latestPlanIndex && (
+                  <>
+                    <button type="button" className="gb-button primary" onClick={() => onPlanAction("approve")}>{t.planApproveAndBuild}</button>
+                    <button type="button" className="gb-button" onClick={() => onPlanAction("revise")}>{t.planRequestChanges}</button>
+                  </>
+                )}
+              </div>
             </section>
           );
         }

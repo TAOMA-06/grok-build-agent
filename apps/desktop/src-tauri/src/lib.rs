@@ -1588,6 +1588,28 @@ async fn doctor_mcp_server(
 }
 
 #[tauri::command]
+async fn set_mcp_server_enabled(
+    state: State<'_, AppState>,
+    grok_path: Option<String>,
+    name: String,
+    enabled: bool,
+    workspace_root: Option<String>,
+) -> Result<String, acp::AcpError> {
+    host_request(
+        &state,
+        "mcp.setEnabled",
+        serde_json::json!({
+            "grokPath": grok_path,
+            "name": name,
+            "enabled": enabled,
+            "workspaceRoot": workspace_root
+        }),
+        Some(rpc_meta("mcp", None)),
+    )
+    .await
+}
+
+#[tauri::command]
 async fn check_cli_update(
     state: State<'_, AppState>,
     grok_path: Option<String>,
@@ -1801,6 +1823,7 @@ pub fn run() {
             upsert_mcp_server,
             remove_mcp_server,
             doctor_mcp_server,
+            set_mcp_server_enabled,
             check_cli_update,
             run_cli_update,
             run_cli_login,

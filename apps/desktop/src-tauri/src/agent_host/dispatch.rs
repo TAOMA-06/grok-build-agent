@@ -641,6 +641,25 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
         )
         .map_err(|error| error.to_string())
         .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "mcp.setEnabled" => {
+            let enabled = request
+                .params
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            crate::cli_bridge::set_mcp_enabled(
+                request.params.get("grokPath").and_then(Value::as_str),
+                request
+                    .params
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                enabled,
+                request.params.get("workspaceRoot").and_then(Value::as_str),
+            )
+            .map_err(|error| error.to_string())
+            .map(Value::String)
+        }
         "runtime.start" => match serde_json::from_value::<StartConfig>(request.params) {
             Ok(config) if matches!(config.sandbox, Some(crate::contracts::SandboxMode::Strict)) => {
                 Err("Strict sandbox is unavailable because Grok cannot attest enforceable network isolation; use workspace sandbox".into())

@@ -454,6 +454,9 @@ pub struct McpServerInfo {
     pub header_keys: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    /// Whether the server is enabled (CLI 0.2.113+ enable/disable). Default true when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_doctor: Option<McpDoctorResult>,
 }

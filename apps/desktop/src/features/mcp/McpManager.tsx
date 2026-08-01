@@ -191,6 +191,22 @@ export function McpManager({
     }
   }
 
+  async function setEnabled(server: McpServerInfo, enabled: boolean) {
+    setBusy(true);
+    try {
+      await bridge.setMcpServerEnabled(server.name, enabled, {
+        grokPath: settings.grokPath || undefined,
+        workspaceRoot: settings.cwd || null,
+      });
+      setAgentReloadRequired(true);
+      await refresh();
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const anyBusySession = Object.values(useAppStore.getState().sessions).some(
     (s) => s.busy,
   );
@@ -247,13 +263,23 @@ export function McpManager({
             <div key={`${s.scope}:${s.name}`} className="mcp-card list-item">
               <div className="row-actions" style={{ justifyContent: "space-between" }}>
                 <strong>{s.name}</strong>
-                <span className="pill">{s.transport}</span>
+                <span className="pill">
+                  {s.transport}
+                  {s.enabled === false ? ` · ${t.mcpDisabled}` : ""}
+                </span>
               </div>
               <span className="meta">
                 {s.scope} · {s.displayTarget || s.command || s.url || "—"}
               </span>
               <span className="meta">
-                {t.mcpStatus}: {doc ? (doc.ok ? t.mcpOk : t.mcpError) : s.status ?? t.configured}
+                {t.mcpStatus}:{" "}
+                {s.enabled === false
+                  ? t.mcpDisabled
+                  : doc
+                    ? doc.ok
+                      ? t.mcpOk
+                      : t.mcpError
+                    : s.status ?? t.configured}
               </span>
               {s.envKeys.length > 0 && (
                 <span className="meta">
@@ -290,6 +316,14 @@ export function McpManager({
                   onClick={() => openEdit(s)}
                 >
                   {t.mcpEdit}
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={busy}
+                  onClick={() => void setEnabled(s, s.enabled === false)}
+                >
+                  {s.enabled === false ? t.mcpEnable : t.mcpDisable}
                 </button>
                 <button
                   type="button"

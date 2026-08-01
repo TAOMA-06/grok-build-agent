@@ -3,7 +3,7 @@ name: orchestrator
 description: >
   Full-power Grok Build orchestrator for software engineering. Primary agent when
   maximizing parallel subagents, plan/goal modes, worktrees, personas, optional
-  per-worker models, and platform-aligned verification (Grok Build 0.2.111).
+  per-worker models, and platform-aligned verification (Grok Build 0.2.118).
 prompt_mode: full
 model: inherit
 permission_mode: default

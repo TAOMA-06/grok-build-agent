@@ -11,6 +11,8 @@ export type CommandDescriptor = {
   execution: CommandExecution;
   available: boolean;
   unavailableReasonKey?: string | null;
+  /** Optional bracket tag from live ACP catalog (CLI 0.2.112+), e.g. "new". */
+  tag?: string | null;
 };
 
 export type ParsedSlashCommand = {

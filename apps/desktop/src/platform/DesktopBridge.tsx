@@ -130,6 +130,18 @@ export interface DesktopBridge {
     name?: string | null,
     options?: { grokPath?: string; workspaceRoot?: string | null },
   ): Promise<McpDoctorResult[]>;
+  setMcpServerEnabled(
+    name: string,
+    enabled: boolean,
+    options?: { grokPath?: string; workspaceRoot?: string | null },
+  ): Promise<string>;
+  checkCliUpdate(grokPath?: string): Promise<{
+    currentVersion?: string | null;
+    latestVersion?: string | null;
+    updateAvailable: boolean;
+    channel?: string | null;
+  }>;
+  runCliUpdate(grokPath?: string): Promise<string>;
   gitReview(workspaceRoot: string, privateChat?: boolean): Promise<ReviewSnapshot>;
   gitFilePatch(workspaceRoot: string, path: string, staged: boolean, privateChat?: boolean): Promise<string>;
   gitFileAction(

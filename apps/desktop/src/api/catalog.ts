@@ -534,6 +534,23 @@ export async function doctorMcpServer(
   });
 }
 
+/** Enable or disable an MCP server without removing it (CLI 0.2.113+). */
+export async function setMcpServerEnabled(
+  name: string,
+  enabled: boolean,
+  options?: {
+    grokPath?: string;
+    workspaceRoot?: string | null;
+  },
+): Promise<string> {
+  return invoke("set_mcp_server_enabled", {
+    name,
+    enabled,
+    grokPath: options?.grokPath || null,
+    workspaceRoot: options?.workspaceRoot ?? null,
+  });
+}
+
 export async function checkCliUpdate(
   grokPath?: string,
 ): Promise<UpdateCheck> {

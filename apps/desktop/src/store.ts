@@ -83,6 +83,7 @@ type SessionSlice = {
   setSessionContextUsage: (id: string, usage: SessionContextUsage | null) => void;
   addBlock: (sessionId: string, b: ChatBlock) => void;
   updateBlock: (sessionId: string, blockId: string, patch: Partial<ChatBlock>) => void;
+  removeBlock: (sessionId: string, blockId: string) => void;
   setFailedSubmission: (id: string, failed: FailedSubmission | null) => void;
   appendAssistant: (sessionId: string, text: string) => void;
   appendThought: (sessionId: string, text: string) => void;
@@ -527,6 +528,20 @@ export const useAppStore = create<AppState>((set, get) => ({
           blocks: s.blocks.map((block) =>
             block.id === blockId ? ({ ...block, ...patch } as ChatBlock) : block,
           ),
+        },
+      },
+    });
+  },
+
+  removeBlock: (sessionId, blockId) => {
+    const s = get().sessions[sessionId];
+    if (!s) return;
+    set({
+      sessions: {
+        ...get().sessions,
+        [sessionId]: {
+          ...s,
+          blocks: s.blocks.filter((block) => block.id !== blockId),
         },
       },
     });

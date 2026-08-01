@@ -314,6 +314,13 @@ export function AppShell() {
       case "/view-plan":
         window.dispatchEvent(new Event("grok:view-plan"));
         break;
+      case "/delete":
+        window.dispatchEvent(new Event("grok:delete-task"));
+        break;
+      case "/doctor":
+        setSettingsTab("diagnostics");
+        setSettingsOpen(true);
+        break;
       case "/tasks":
       case "/diff":
         if (state.activeSessionId) setDrawerOpen(true);
@@ -494,7 +501,7 @@ export function AppShell() {
                   } else {
                     void runLocalCommand(command.name);
                   }
-                }}><code>{command.name}</code><span>{command.label}{command.aliases.length ? <small>{command.aliases.join(" · ")}</small> : null}</span><i>{command.available ? command.source : t.unavailable}</i></button>
+                }}><code>{command.name}{command.tag ? ` [${command.tag}]` : ""}</code><span>{command.label}{command.aliases.length ? <small>{command.aliases.join(" · ")}</small> : null}</span><i>{command.available ? command.source : t.unavailable}</i></button>
               ))}
             </div>
           </Dialog.Content>

@@ -98,4 +98,6 @@ export type AvailableCommand = {
   name: string;
   description?: string | null;
   input?: unknown;
+  /** Optional bracket tag from CLI (0.2.112+), e.g. "new". */
+  tag?: string | null;
 };

@@ -1,6 +1,6 @@
 # Power harness
 
-The harness makes Grok Build **use** its strengths instead of only exposing them in the UI. It tracks Grok CLI **0.2.111** (and 0.2.103+) and Desktop platform contracts (task focus, durable verification, privacy).
+The harness makes Grok Build **use** its strengths instead of only exposing them in the UI. It tracks Grok CLI **0.2.118** (and 0.2.103+) and Desktop platform contracts (task focus, durable verification, privacy).
 
 ## What it contains
 
@@ -75,6 +75,11 @@ Grok’s bundled `/design` and `/execute-plan` remain the heavy DAG pipelines; t
 | `/summarize` alias for `/recap` (0.2.105+) | Documented ACP command + Desktop catalog alias |
 | `/usage` token + cost (0.2.109+) | Documented ACP command in Desktop catalog |
 | Workflows enabled by default (0.2.111+) | AGENTS prefers advertised workflows when they match; otherwise spawn_subagent |
+| Failed workflow resume (0.2.112+) | Documented in AGENTS; use platform resume when advertised |
+| `/undo` alias for `/rewind` (0.2.116+) | Desktop command catalog alias + capability gating |
+| `/delete` session (0.2.114+) | Desktop local confirm + task delete |
+| MCP enable/disable (0.2.113+) | Settings MCP cards call `grok mcp enable|disable` |
+| Stop kills prior-turn background subagents (0.2.117+) | Documented in AGENTS; Desktop cancel uses `session/cancel` |
 | In-place scheduled tasks; one-time schedules retired (0.2.106+) | Prefer Host jobs + background commands; update schedules in place when recurring |
 | Host jobs CRUD | `jobs.list` / `jobs.upsert` / `jobs.cancel` on the Agent Host SQLite `jobs` table |
 | Disable image/video tools (0.2.111+) | Settings → `--disallowed-tools` at process spawn |

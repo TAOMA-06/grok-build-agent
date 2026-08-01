@@ -56,6 +56,7 @@ export function SettingsDialog({
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [doctorAction, setDoctorAction] = useState<string | null>(null);
   const [bundlePreview, setBundlePreview] = useState<string | null>(null);
+  const [cliUpdateBusy, setCliUpdateBusy] = useState(false);
   useEffect(() => {
     if (open) setTab(initialTab);
   }, [initialTab, open]);
@@ -71,6 +72,11 @@ export function SettingsDialog({
     queryKey: ["models", draft.cliPathOverride || draft.grokPath],
     queryFn: () => bridge.listModels(draft.cliPathOverride || draft.grokPath || undefined),
     enabled: open,
+  });
+  const cliUpdateQuery = useQuery({
+    queryKey: ["cli-update", settings.cliPathOverride || settings.grokPath],
+    queryFn: () => bridge.checkCliUpdate(settings.cliPathOverride || settings.grokPath || undefined),
+    enabled: open && tab === "diagnostics",
   });
   const policyRulesQuery = useQuery({
     queryKey: ["policy-rules"],
@@ -282,7 +288,56 @@ export function SettingsDialog({
                 <McpManager onReloadAgent={onReloadAgent} />
               </Tabs.Content>
               <Tabs.Content value="diagnostics">
-                <div className="gb-settings-section-head"><h3>{t.diagnostics}</h3><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => void doctorQuery.refetch()}><RefreshCw size={14} /></button></div>
+                <div className="gb-settings-section-head"><h3>{t.diagnostics}</h3><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => { void doctorQuery.refetch(); void cliUpdateQuery.refetch(); }}><RefreshCw size={14} /></button></div>
+                <div className="gb-capability-groups"><section>
+                  <header><strong>{t.cliUpdateTitle}</strong><span>{cliUpdateQuery.data?.channel ?? "stable"}</span></header>
+                  <div>
+                    <span>
+                      <b>{t.cliUpdateCurrent}</b>
+                      <small>{cliUpdateQuery.data?.currentVersion ?? "—"}</small>
+                    </span>
+                    <i>{cliUpdateQuery.data?.updateAvailable ? t.updateAvailable : t.cliUpdateUpToDate}</i>
+                  </div>
+                  <div>
+                    <span>
+                      <b>{t.cliUpdateLatest}</b>
+                      <small>{cliUpdateQuery.data?.latestVersion ?? "—"}</small>
+                    </span>
+                    <i>{cliUpdateQuery.isFetching ? t.cliUpdateChecking : ""}</i>
+                  </div>
+                  {cliUpdateQuery.data?.updateAvailable && (
+                    <p className="gb-settings-copy">{t.cliUpdateAvailableHint}</p>
+                  )}
+                  <div className="row-actions" style={{ marginTop: 8, gap: 8 }}>
+                    <button
+                      type="button"
+                      className="gb-button"
+                      disabled={cliUpdateBusy || cliUpdateQuery.isFetching}
+                      onClick={() => void cliUpdateQuery.refetch()}
+                    >
+                      {t.cliUpdateCheck}
+                    </button>
+                    <button
+                      type="button"
+                      className="gb-button primary"
+                      disabled={cliUpdateBusy || !cliUpdateQuery.data?.updateAvailable}
+                      onClick={() => {
+                        setCliUpdateBusy(true);
+                        setDoctorAction(t.cliUpdateUpdating);
+                        void bridge
+                          .runCliUpdate(settings.cliPathOverride || settings.grokPath || undefined)
+                          .then((message) => {
+                            setDoctorAction(message || t.cliUpdateUpToDate);
+                            return cliUpdateQuery.refetch();
+                          })
+                          .catch((error) => setDoctorAction(String(error)))
+                          .finally(() => setCliUpdateBusy(false));
+                      }}
+                    >
+                      {cliUpdateBusy ? t.cliUpdateUpdating : t.cliUpdateNow}
+                    </button>
+                  </div>
+                </section></div>
                 {doctorQuery.isLoading && <div className="gb-settings-placeholder"><Stethoscope size={24} /><strong>{t.runtimeHealthTitle}</strong><p>{t.readingCapabilities}</p></div>}
                 {doctorQuery.data && <div className="gb-capability-groups"><section>
                   <header><strong>{t.runtimeHealthTitle}</strong><span>{doctorQuery.data.host}</span></header>

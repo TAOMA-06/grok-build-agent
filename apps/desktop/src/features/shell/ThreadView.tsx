@@ -162,6 +162,9 @@ export function ThreadView({
       setFindOpen(true);
     };
     const viewPlan = () => document.querySelector(".gb-plan-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const openDelete = () => {
+      if (session) setDeleteOpen(true);
+    };
     const scrollTranscript = (event: Event) => {
       const direction = (event as CustomEvent<"up" | "down">).detail;
       const container = threadScrollRef.current;
@@ -172,14 +175,16 @@ export function ThreadView({
     window.addEventListener("grok:rename-task", openRename);
     window.addEventListener("grok:find-transcript", openFind);
     window.addEventListener("grok:view-plan", viewPlan);
+    window.addEventListener("grok:delete-task", openDelete);
     window.addEventListener("grok:scroll-transcript", scrollTranscript);
     return () => {
       window.removeEventListener("grok:rename-task", openRename);
       window.removeEventListener("grok:find-transcript", openFind);
       window.removeEventListener("grok:view-plan", viewPlan);
+      window.removeEventListener("grok:delete-task", openDelete);
       window.removeEventListener("grok:scroll-transcript", scrollTranscript);
     };
-  }, []);
+  }, [session]);
   const executionRoot = session?.summary.executionRoot || session?.summary.worktreePath || session?.summary.workspaceRoot;
   const changesVisible = Boolean(session && (session.tools.length > 0 || session.summary.worktreePath));
   const visibleMode = session?.summary.mode ?? session?.modeState.currentMode ?? "agent";
@@ -283,6 +288,7 @@ export function ThreadView({
               <Timeline
                 blocks={session!.blocks}
                 busy={Boolean(session?.busy)}
+                sessionId={session?.summary.sessionId ?? null}
                 planActionsEnabled={Boolean(pendingPlanApproval)}
                 onPlanAction={(action) => {
                   if (pendingPlanApproval) {
