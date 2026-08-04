@@ -1,4 +1,5 @@
 import {
+  Bot,
   Check,
   ChevronRight,
   CircleAlert,
@@ -10,9 +11,21 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  buildPlanComments,
+  parsePlanDocument,
+  summarizePlanProgress,
+  type PlanDocument,
+} from "../../contracts/planSteps";
 import type { ChatBlock } from "../../types";
 import { t, useTranslation } from "../../i18n";
 import { useAppStore } from "../../store";
+
+export type PlanActionPayload = {
+  action: "approve" | "revise";
+  comments?: string[];
+  reviseNote?: string;
+};
 
 function Timestamp({ at }: { at?: string }) {
   const { locale } = useTranslation();
@@ -79,6 +92,148 @@ function ToolActivity({ block }: { block: Extract<ChatBlock, { type: "tool" }> }
   );
 }
 
+function SubagentActivity({ block }: { block: Extract<ChatBlock, { type: "subtask" }> }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`gb-activity gb-subagent gb-status-${block.status}`}>
+      <button type="button" className="gb-activity-head" onClick={() => setOpen((value) => !value)}>
+        <span className="gb-activity-icon"><Bot size={14} /></span>
+        <span>{block.title}</span>
+        <span className="gb-activity-status">
+          {t.subagent}
+          {block.role ? ` · ${block.role}` : ""}
+          {block.model ? ` · ${block.model}` : ""}
+          {" · "}
+          {block.status}
+        </span>
+        <ChevronRight size={14} className={open ? "open" : ""} />
+      </button>
+      {open && (
+        <pre className="gb-tool-output">
+          {block.detail || block.title}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function planStatusLabel(status: string): string {
+  if (status === "completed") return t.planStepCompleted;
+  if (status === "in_progress") return t.planStepInProgress;
+  if (status === "cancelled") return t.planStepCancelled;
+  return t.planStepPending;
+}
+
+function PlanCard({
+  text,
+  document,
+  actionsEnabled,
+  onPlanAction,
+}: {
+  text: string;
+  document?: PlanDocument;
+  actionsEnabled: boolean;
+  onPlanAction: (payload: PlanActionPayload) => void;
+}) {
+  const plan = useMemo(
+    () => document ?? parsePlanDocument(text),
+    [document, text],
+  );
+  const steps = plan.steps;
+  const progress = summarizePlanProgress(plan);
+  const [stepComments, setStepComments] = useState<Record<string, string>>({});
+  const [reviseNote, setReviseNote] = useState("");
+  const comments = buildPlanComments({ steps, stepComments, freeNote: reviseNote });
+
+  return (
+    <section className="gb-plan-card">
+      <div className="gb-plan-title">
+        <FileCode2 size={15} /> {t.proposedPlan}
+        {steps.length > 0 && (
+          <span className="gb-plan-progress">
+            {progress.completed}/{progress.total}
+            {plan.source === "structured" || plan.source === "mixed"
+              ? ` · ${t.planStructured}`
+              : ""}
+          </span>
+        )}
+      </div>
+      {plan.title && <div className="gb-plan-heading">{plan.title}</div>}
+      <div className="gb-markdown"><MarkdownBody>{text}</MarkdownBody></div>
+      {actionsEnabled && steps.length > 0 && (
+        <div className="gb-plan-steps" aria-label={t.planSteps}>
+          <strong>{t.planSteps}</strong>
+          <ol>
+            {steps.map((step) => (
+              <li key={step.id} data-status={step.status}>
+                <div className="gb-plan-step-row">
+                  <span className={`gb-plan-step-status ${step.status}`}>
+                    {planStatusLabel(step.status)}
+                  </span>
+                  <span>{step.text}</span>
+                </div>
+                <input
+                  className="gb-dialog-input"
+                  value={stepComments[step.id] ?? ""}
+                  placeholder={t.planStepCommentHint}
+                  onChange={(event) => setStepComments((prev) => ({
+                    ...prev,
+                    [step.id]: event.target.value,
+                  }))}
+                  aria-label={`${t.planStepComment} ${step.index}`}
+                />
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+      {actionsEnabled && (
+        <label className="gb-plan-revise">
+          <span>{t.planReviseNote}</span>
+          <textarea
+            className="gb-dialog-input"
+            rows={2}
+            value={reviseNote}
+            placeholder={t.planReviseHint}
+            onChange={(event) => setReviseNote(event.target.value)}
+          />
+        </label>
+      )}
+      <div className="gb-plan-actions">
+        <button
+          type="button"
+          className="gb-button"
+          onClick={() => void navigator.clipboard.writeText(text)}
+        >
+          <Copy size={13} /> {t.copyPlan}
+        </button>
+        {actionsEnabled && (
+          <>
+            <button
+              type="button"
+              className="gb-button primary"
+              onClick={() => onPlanAction({ action: "approve", comments })}
+            >
+              {t.planApproveAndBuild}
+            </button>
+            <button
+              type="button"
+              className="gb-button"
+              onClick={() => onPlanAction({
+                action: "revise",
+                comments: comments.length ? comments : [reviseNote.trim() || t.planFeedbackDraft].filter(Boolean),
+                reviseNote,
+              })}
+            >
+              {t.planRequestChanges}
+            </button>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function Timeline({
   blocks,
   busy = false,
@@ -88,7 +243,7 @@ export function Timeline({
 }: {
   blocks: ChatBlock[];
   busy?: boolean;
-  onPlanAction: (action: "approve" | "revise") => void;
+  onPlanAction: (payload: PlanActionPayload) => void;
   planActionsEnabled?: boolean;
   sessionId?: string | null;
 }) {
@@ -161,35 +316,18 @@ export function Timeline({
         if (block.type === "tool") return <ToolActivity key={block.id} block={block} />;
         if (block.type === "plan") {
           return (
-            <section key={block.id} className="gb-plan-card">
-              <div className="gb-plan-title"><FileCode2 size={15} /> {t.proposedPlan}<Timestamp at={block.at} /></div>
-              <div className="gb-markdown"><MarkdownBody>{block.text}</MarkdownBody></div>
-              <div className="gb-plan-actions">
-                <button
-                  type="button"
-                  className="gb-button"
-                  onClick={() => void navigator.clipboard.writeText(block.text)}
-                >
-                  <Copy size={13} /> {t.copyPlan}
-                </button>
-                {planActionsEnabled && blockIndex === latestPlanIndex && (
-                  <>
-                    <button type="button" className="gb-button primary" onClick={() => onPlanAction("approve")}>{t.planApproveAndBuild}</button>
-                    <button type="button" className="gb-button" onClick={() => onPlanAction("revise")}>{t.planRequestChanges}</button>
-                  </>
-                )}
-              </div>
-            </section>
+            <div key={block.id}>
+              <PlanCard
+                text={block.text}
+                document={block.document}
+                actionsEnabled={planActionsEnabled && blockIndex === latestPlanIndex}
+                onPlanAction={onPlanAction}
+              />
+            </div>
           );
         }
         if (block.type === "subtask") {
-          return (
-            <div key={block.id} className="gb-activity">
-              <span className="gb-activity-icon">{statusIcon(block.status)}</span>
-              <span>{block.title}</span>
-              <span className="gb-activity-status">{t.subagent} · {block.status}</span><Timestamp at={block.at} />
-            </div>
-          );
+          return <SubagentActivity key={block.id} block={block} />;
         }
         return (
           <div key={block.id} className={`gb-system-message ${block.level ?? "info"}`}>

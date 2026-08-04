@@ -19,9 +19,12 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
                 | "catalog.sessions.saveUi"
                 | "task.upsert"
                 | "context.save"
-                | "verification.save"
-                | "events.appendCompat"
-                | "events.platform.append"
+            | "verification.save"
+            | "events.appendCompat"
+            | "events.platform.append"
+            | "memory.upsert"
+            | "memory.review"
+            | "profile.save"
         )
     {
         return success(request.id, json!({}));
@@ -163,6 +166,18 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
         "runtime.probe" => serde_json::to_value(crate::acp::probe_grok(
             request.params.get("grokPath").and_then(Value::as_str),
         )).map_err(|error| error.to_string()),
+        "runtime.adapters.list" => {
+            let settings = crate::config::load_settings().ok();
+            let secondary = settings
+                .as_ref()
+                .map(|item| item.secondary_acp_path.as_str())
+                .filter(|path| !path.trim().is_empty());
+            serde_json::to_value(crate::adapter_registry::list_adapter_catalog(
+                request.params.get("grokPath").and_then(Value::as_str)
+                    .or_else(|| settings.as_ref().map(|item| item.grok_path.as_str()).filter(|path| !path.is_empty())),
+                secondary,
+            )).map_err(|error| error.to_string())
+        },
         "runtime.health" => serde_json::to_value(crate::runtime::health(
             request.params.get("grokPath").and_then(Value::as_str),
         )).map_err(|error| error.to_string()),
@@ -371,6 +386,89 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
             request.params.get("taskId").and_then(Value::as_str).unwrap_or_default(),
         ).map_err(|error| error.to_string())
           .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "memory.list" => state
+            .db
+            .list_memory_candidates(
+                request.params.get("workspaceId").and_then(Value::as_str),
+                request.params.get("state").and_then(Value::as_str),
+            )
+            .map_err(|error| error.to_string())
+            .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "memory.upsert" => serde_json::from_value::<crate::platform::MemoryCandidate>(
+            request.params.get("memory").cloned().unwrap_or(Value::Null),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|memory| {
+            if memory.content.trim().is_empty() {
+                return Err("memory content is required".into());
+            }
+            state
+                .db
+                .upsert_memory_candidate(&memory)
+                .map_err(|error| error.to_string())
+        })
+        .map(|_| json!({})),
+        "memory.review" => {
+            let memory_id = request
+                .params
+                .get("memoryId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if memory_id.is_empty() {
+                Err("memoryId is required".into())
+            } else {
+                match request.params.get("state").and_then(Value::as_str) {
+                    Some("accepted") | None => Ok(crate::platform::MemoryState::Accepted),
+                    Some("rejected") => Ok(crate::platform::MemoryState::Rejected),
+                    Some("candidate") => Ok(crate::platform::MemoryState::Candidate),
+                    Some(other) => Err(format!("unknown memory state {other}")),
+                }
+                .and_then(|next| {
+                    state
+                        .db
+                        .review_memory_candidate(memory_id, next, &crate::acp::iso_now())
+                        .map_err(|error| error.to_string())
+                        .map(|changed| json!({ "updated": changed }))
+                })
+            }
+        }
+        "profile.get" => {
+            let workspace_id = request
+                .params
+                .get("workspaceId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if workspace_id.is_empty() {
+                Err("workspaceId is required".into())
+            } else {
+                crate::workspace_ops::get_project_profile(workspace_id)
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| {
+                        serde_json::to_value(value).map_err(|error| error.to_string())
+                    })
+            }
+        }
+        "profile.save" => {
+            let workspace_id = request
+                .params
+                .get("workspaceId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let content = request
+                .params
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if workspace_id.is_empty() {
+                Err("workspaceId is required".into())
+            } else {
+                crate::workspace_ops::save_project_profile(workspace_id, content)
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| {
+                        serde_json::to_value(value).map_err(|error| error.to_string())
+                    })
+            }
+        }
         "task.completionGate" => state.db.completion_gate(
             request.params.get("taskId").and_then(Value::as_str).unwrap_or_default(),
         ).map_err(|error| error.to_string())
@@ -465,6 +563,12 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
         .map_err(|error| error.to_string())
         .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
         "workspace.search" => crate::workspace_ops::search(
+            request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
+            request.params.get("query").and_then(Value::as_str).unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "workspace.index.search" => crate::code_index::search_symbols(
             request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
             request.params.get("query").and_then(Value::as_str).unwrap_or_default(),
         )

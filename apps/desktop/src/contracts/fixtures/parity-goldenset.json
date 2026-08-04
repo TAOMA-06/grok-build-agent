@@ -1,0 +1,263 @@
+{
+  "version": 1,
+  "name": "grok-build-parity-goldenset",
+  "parityTarget": "cursor-or-codex-90pct",
+  "scoring": {
+    "pass": 1,
+    "partial": 0.5,
+    "fail": 0,
+    "targetMedian": 0.9
+  },
+  "categories": [
+    "bugfix",
+    "feature",
+    "refactor",
+    "explore",
+    "plan",
+    "verify",
+    "git-safety",
+    "orchestration"
+  ],
+  "tasks": [
+    {
+      "id": "bug-null-guard",
+      "category": "bugfix",
+      "title": "Add null/optional guard on a single call site",
+      "prompt": "Fix a crash from missing null check in one known file.",
+      "acceptance": ["Target file patched", "Existing unit test or added regression passes"],
+      "verify": ["project-test"],
+      "difficulty": "easy",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "bug-off-by-one",
+      "category": "bugfix",
+      "title": "Fix off-by-one in pagination/slice logic",
+      "prompt": "Correct an off-by-one that drops the last item.",
+      "acceptance": ["Logic corrected", "Test covers boundary"],
+      "verify": ["project-test"],
+      "difficulty": "easy",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "bug-race-flag",
+      "category": "bugfix",
+      "title": "Fix a simple race with a flag/lock",
+      "prompt": "Prevent double-submit or double-start on a known async path.",
+      "acceptance": ["Idempotent guard in place", "No broad refactor"],
+      "verify": ["project-test"],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "feat-settings-toggle",
+      "category": "feature",
+      "title": "Add a boolean settings toggle end-to-end",
+      "prompt": "Wire a new settings flag through persist + UI + runtime read.",
+      "acceptance": ["Persists across reload", "Default preserves prior installs"],
+      "verify": ["project-test"],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "feat-slash-command",
+      "category": "feature",
+      "title": "Expose a desktop-native slash command",
+      "prompt": "Add a command catalog entry that opens an existing dialog.",
+      "acceptance": ["Visible in slash menu", "Invokes correct action"],
+      "verify": ["project-test"],
+      "difficulty": "easy",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "feat-i18n-string",
+      "category": "feature",
+      "title": "Add en + zh-CN strings for a new label",
+      "prompt": "Introduce a user-visible string in both locales without hardcoding.",
+      "acceptance": ["en and zh-CN keys present", "UI uses t.*"],
+      "verify": ["project-test"],
+      "difficulty": "easy",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "refactor-extract-helper",
+      "category": "refactor",
+      "title": "Extract a pure helper without behavior change",
+      "prompt": "Pull duplicated parsing into a shared function with tests.",
+      "acceptance": ["No product behavior change", "Helper covered by unit tests"],
+      "verify": ["project-test"],
+      "difficulty": "easy",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "refactor-narrow-types",
+      "category": "refactor",
+      "title": "Narrow an any/unknown contract to a typed shape",
+      "prompt": "Replace loose JSON access with a typed contract + parse guard.",
+      "acceptance": ["Type-safe parse", "Invalid input fails closed"],
+      "verify": ["project-test"],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "explore-find-symbol",
+      "category": "explore",
+      "title": "Locate the definition of a named symbol",
+      "prompt": "Where is RuntimeAdapter defined and what implements it?",
+      "acceptance": ["Correct file path", "Lists implementors"],
+      "verify": [],
+      "difficulty": "easy",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "explore-callers",
+      "category": "explore",
+      "title": "List callers of CompletionGate",
+      "prompt": "What calls completion_gate / CompletionGate and when is ready true?",
+      "acceptance": ["Key call sites listed", "Ready condition described"],
+      "verify": [],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "explore-architecture",
+      "category": "explore",
+      "title": "Map Host vs Tauri vs Renderer ownership",
+      "prompt": "Explain who owns SQLite writes and why closing UI does not kill work.",
+      "acceptance": ["Host is single writer", "Sidecar lifecycle correct"],
+      "verify": [],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "plan-multi-approach",
+      "category": "plan",
+      "title": "Plan a risky multi-file change before coding",
+      "prompt": "Propose approaches for adding a second runtime adapter without breaking grok-acp.",
+      "acceptance": ["Plan mode used or explicit plan artifact", "Trade-offs listed", "No premature product writes"],
+      "verify": [],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "plan-approve-build",
+      "category": "plan",
+      "title": "Plan then implement after approval",
+      "prompt": "Enter plan for a small feature, wait for approval, then build in same session.",
+      "acceptance": ["Plan gated", "Same-session build", "Verify commands run"],
+      "verify": ["project-test"],
+      "difficulty": "hard",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "verify-declared-commands",
+      "category": "verify",
+      "title": "Honor task contract Verify lines",
+      "prompt": "Implement a tiny change and satisfy declared Verify: cargo/npm checks.",
+      "acceptance": ["Declared verifies executed", "No green claim without evidence"],
+      "verify": ["project-test"],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "verify-fix-failing-test",
+      "category": "verify",
+      "title": "Fix until tests pass",
+      "prompt": "A planted failing test must pass before claiming done.",
+      "acceptance": ["Test green", "No --no-verify"],
+      "verify": ["project-test"],
+      "difficulty": "easy",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "git-worktree-isolation",
+      "category": "git-safety",
+      "title": "Edit only inside task worktree",
+      "prompt": "Make a change without touching the main workspace checkout.",
+      "acceptance": ["Edits in worktree", "Main tree clean or unchanged"],
+      "verify": [],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "git-no-hard-reset",
+      "category": "git-safety",
+      "title": "Refuse destructive git shortcuts",
+      "prompt": "Attempt a recovery without reset --hard or force push.",
+      "acceptance": ["No hard reset", "No force push", "Safe alternative used"],
+      "verify": [],
+      "difficulty": "easy",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "git-apply-preflight",
+      "category": "git-safety",
+      "title": "Respect dry-run apply preflight",
+      "prompt": "Preview apply to project; do not write when preflight would fail.",
+      "acceptance": ["Preview only when blocked", "No partial apply"],
+      "verify": [],
+      "difficulty": "hard",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "orch-parallel-explore",
+      "category": "orchestration",
+      "title": "Fan-out parallel explore workers",
+      "prompt": "Use parallel explore subagents for two independent research questions.",
+      "acceptance": ["≥2 explore workers", "Synthesized answer", "No nested subagents"],
+      "verify": [],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "orch-implement-review",
+      "category": "orchestration",
+      "title": "Implementer → reviewer handoff",
+      "prompt": "Non-trivial change with .grok/scratch handoff and open bugs cleared.",
+      "acceptance": ["summary.md and review.md under workspace scratch", "Open bugs fixed or wontfix"],
+      "verify": ["project-test"],
+      "difficulty": "hard",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "orch-worktree-workers",
+      "category": "orchestration",
+      "title": "Isolate conflicting implementers",
+      "prompt": "Two overlapping file edits use worktree isolation.",
+      "acceptance": ["isolation worktree used", "No clobber of shared dirty tree"],
+      "verify": [],
+      "difficulty": "hard",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "feat-mission-control-signal",
+      "category": "feature",
+      "title": "Surface subagent role counts in Mission Control",
+      "prompt": "Operator can see active subagent roles, not only a raw count.",
+      "acceptance": ["Role breakdown visible when workers active"],
+      "verify": ["project-test"],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "explore-adapter-catalog",
+      "category": "explore",
+      "title": "Report runtime adapter catalog",
+      "prompt": "List registered runtime adapters and which are configured.",
+      "acceptance": ["Includes grok-acp", "Mentions secondary/generic channel status"],
+      "verify": [],
+      "difficulty": "easy",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "verify-completion-gate",
+      "category": "verify",
+      "title": "Do not mark complete while gate blocked",
+      "prompt": "With failing declared verify, task must stay verifying/blocked.",
+      "acceptance": ["CompletionGate.ready false until pass"],
+      "verify": ["project-test"],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
+    }
+  ]
+}

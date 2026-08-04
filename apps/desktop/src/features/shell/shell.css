@@ -2654,6 +2654,117 @@
   background: var(--gb-accent) !important;
 }
 
+.gb-plan-steps {
+  margin: 10px 0 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--gb-border);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.gb-plan-steps strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--gb-muted);
+}
+
+.gb-plan-steps ol {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 8px;
+}
+
+.gb-plan-steps li {
+  display: grid;
+  gap: 4px;
+}
+
+.gb-plan-step-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.gb-plan-step-status {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--gb-muted);
+  background: color-mix(in srgb, var(--gb-muted) 14%, transparent);
+}
+
+.gb-plan-step-status.completed {
+  color: #2f7a4a;
+  background: rgba(47, 122, 74, 0.12);
+}
+
+.gb-plan-step-status.in_progress {
+  color: var(--gb-accent);
+  background: color-mix(in srgb, var(--gb-accent) 16%, transparent);
+}
+
+.gb-plan-step-status.cancelled {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.gb-plan-progress {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gb-muted);
+}
+
+.gb-plan-heading {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gb-plan-steps li span {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.gb-plan-revise {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 4px;
+  font-size: 12px;
+  color: var(--gb-muted);
+}
+
+.gb-plan-revise textarea {
+  resize: vertical;
+  min-height: 48px;
+}
+
+.gb-activity.gb-subagent {
+  border-color: rgba(160, 120, 255, 0.28);
+}
+
+.gb-empty-strengths {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--gb-muted);
+  line-height: 1.45;
+}
+
+.gb-mission-subagents {
+  opacity: 0.9;
+  font-style: normal;
+  color: var(--gb-accent);
+}
+
 .gb-system-message.error,
 .gb-permission-card {
   border-color: rgba(228, 59, 59, 0.34);
@@ -3539,6 +3650,30 @@
 
 .gb-mission-control-stats .attention b { color: var(--gb-warning); }
 .gb-mission-control-stats .working b { color: var(--gb-accent); }
+.gb-mission-control-stats .gb-mission-role-breakdown {
+  color: var(--gb-muted);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+.gb-symbol-hits {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 8px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-md);
+  background: var(--gb-raised);
+}
+.gb-symbol-hits strong {
+  font-size: 10px;
+  color: var(--gb-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.gb-symbol-hits .gb-file-row i {
+  color: var(--gb-faint);
+  font-style: normal;
+}
 .gb-mission-control-stats small { margin-left: auto; color: var(--gb-muted); font-size: 8px; }
 
 .gb-mission-control-list {

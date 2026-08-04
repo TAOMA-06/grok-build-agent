@@ -34,6 +34,64 @@ function compatibilityStateLabel(enabled?: boolean | null) {
   return t.compatibilityInherited;
 }
 
+function RuntimeAdaptersPanel({
+  draft,
+  patch,
+}: {
+  draft: Settings;
+  patch: (partial: Partial<Settings>) => void;
+}) {
+  const bridge = useDesktopBridge();
+  const adaptersQuery = useQuery({
+    queryKey: ["runtime-adapters", draft.cliPathOverride || draft.grokPath, draft.secondaryAcpPath],
+    queryFn: () => bridge.listRuntimeAdapters(draft.cliPathOverride || draft.grokPath || undefined),
+  });
+
+  return (
+    <section className="gb-settings-panel">
+      <h3>{t.adapterCatalogTitle}</h3>
+      <label>
+        <span>{t.preferredAdapter}<small>{t.preferredAdapterHint}</small></span>
+        <select
+          value={draft.preferredAdapterId === "generic-acp" ? "generic-acp" : "grok-acp"}
+          onChange={(event) => patch({ preferredAdapterId: event.target.value })}
+        >
+          <option value="grok-acp">{t.preferredAdapterGrok}</option>
+          <option value="generic-acp">{t.preferredAdapterSecondary}</option>
+        </select>
+      </label>
+      <label>
+        <span>{t.secondaryAcpPath}<small>{t.secondaryAcpPathHint}</small></span>
+        <input
+          value={draft.secondaryAcpPath}
+          onChange={(event) => patch({ secondaryAcpPath: event.target.value })}
+          placeholder="/path/to/acp-agent"
+        />
+      </label>
+      {draft.preferredAdapterId === "generic-acp" && !draft.secondaryAcpPath.trim() && (
+        <p className="gb-settings-warning" role="status">{t.adapterUnavailable}</p>
+      )}
+      <div className="gb-capability-groups">
+        <section>
+          <header>
+            <strong>{t.adapterCatalogTitle}</strong>
+            <span>{adaptersQuery.data?.length ?? 0}</span>
+          </header>
+          {(adaptersQuery.data ?? []).map((adapter) => (
+            <div key={adapter.adapterId}>
+              <span>
+                <b>{adapter.label}</b>
+                <small>{adapter.notes}</small>
+              </span>
+              <i>{adapter.configured ? t.adapterConfigured : t.adapterUnavailable}</i>
+            </div>
+          ))}
+        </section>
+      </div>
+    </section>
+  );
+}
+
 export function SettingsDialog({
   open,
   onOpenChange,
@@ -76,6 +134,11 @@ export function SettingsDialog({
   const cliUpdateQuery = useQuery({
     queryKey: ["cli-update", settings.cliPathOverride || settings.grokPath],
     queryFn: () => bridge.checkCliUpdate(settings.cliPathOverride || settings.grokPath || undefined),
+    enabled: open && tab === "diagnostics",
+  });
+  const harnessQuery = useQuery({
+    queryKey: ["harness-status"],
+    queryFn: () => bridge.getHarnessStatus(),
     enabled: open && tab === "diagnostics",
   });
   const policyRulesQuery = useQuery({
@@ -227,6 +290,7 @@ export function SettingsDialog({
                   <label className="gb-switch-row"><span>{t.keepCliUpdated}<small>{t.keepCliUpdatedHint}</small></span><input type="checkbox" checked={draft.autoUpdateCli} onChange={(event) => patch({ autoUpdateCli: event.target.checked })} /></label>
                   <details className="gb-advanced-settings"><summary>{t.advanced}</summary><label><span>{t.cliPathOverride}<small>{t.cliPathHint}</small></span><input value={draft.cliPathOverride} onChange={(event) => patch({ cliPathOverride: event.target.value, grokPath: event.target.value })} placeholder={t.autoDetect} /></label></details>
                 </section>
+                <RuntimeAdaptersPanel draft={draft} patch={patch} />
               </Tabs.Content>
               <Tabs.Content value="extensions">
                 <div className="gb-settings-section-head"><h3>{t.extensions}</h3><button type="button" className="gb-icon-button" aria-label={t.refreshExtensions} onClick={() => void capabilitiesQuery.refetch()}><RefreshCw size={14} /></button></div>
@@ -288,7 +352,32 @@ export function SettingsDialog({
                 <McpManager onReloadAgent={onReloadAgent} />
               </Tabs.Content>
               <Tabs.Content value="diagnostics">
-                <div className="gb-settings-section-head"><h3>{t.diagnostics}</h3><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => { void doctorQuery.refetch(); void cliUpdateQuery.refetch(); }}><RefreshCw size={14} /></button></div>
+                <div className="gb-settings-section-head"><h3>{t.diagnostics}</h3><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => { void doctorQuery.refetch(); void cliUpdateQuery.refetch(); void harnessQuery.refetch(); }}><RefreshCw size={14} /></button></div>
+                <div className="gb-capability-groups"><section>
+                  <header><strong>{t.harnessInspectorTitle}</strong><span>{draft.useHarness ? "on" : "off"}</span></header>
+                  <div>
+                    <span>
+                      <b>{draft.useHarness ? t.harnessInspectorOn : t.harnessInspectorOff}</b>
+                      <small>
+                        {harnessQuery.data?.resolved
+                          ? t.harnessInspectorPlugin
+                          : t.harnessInspectorRulesOnly}
+                      </small>
+                    </span>
+                    <i>{harnessQuery.data?.mode ?? "—"}</i>
+                  </div>
+                  {harnessQuery.data?.pluginPath && (
+                    <p className="gb-settings-copy mono">{harnessQuery.data.pluginPath}</p>
+                  )}
+                  <button
+                    type="button"
+                    className="gb-button"
+                    style={{ marginTop: 8 }}
+                    onClick={() => void harnessQuery.refetch()}
+                  >
+                    {t.harnessInspectorCheck}
+                  </button>
+                </section></div>
                 <div className="gb-capability-groups"><section>
                   <header><strong>{t.cliUpdateTitle}</strong><span>{cliUpdateQuery.data?.channel ?? "stable"}</span></header>
                   <div>

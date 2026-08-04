@@ -69,6 +69,12 @@ pub struct AppSettings {
     /// Remove video generation tools from the spawned agent process.
     #[serde(default)]
     pub disable_video_tools: bool,
+    /// Absolute path to a secondary ACP-compatible agent binary (W1-A).
+    #[serde(default)]
+    pub secondary_acp_path: String,
+    /// Preferred runtime adapter id: `grok-acp` (default) or `generic-acp`.
+    #[serde(default = "default_preferred_adapter_id")]
+    pub preferred_adapter_id: String,
     #[serde(default)]
     pub sandbox: SandboxMode,
     pub cwd: String,
@@ -131,6 +137,10 @@ struct AppSettingsFile {
     #[serde(default)]
     pub disable_video_tools: bool,
     #[serde(default)]
+    pub secondary_acp_path: String,
+    #[serde(default = "default_preferred_adapter_id")]
+    pub preferred_adapter_id: String,
+    #[serde(default)]
     pub sandbox: SandboxMode,
     pub cwd: String,
     pub onboarding_done: bool,
@@ -170,6 +180,8 @@ impl Default for AppSettings {
             combine_queued_prompts: false,
             disable_image_tools: false,
             disable_video_tools: false,
+            secondary_acp_path: String::new(),
+            preferred_adapter_id: default_preferred_adapter_id(),
             sandbox: SandboxMode::Workspace,
             cwd: String::new(),
             onboarding_done: false,
@@ -188,7 +200,11 @@ fn default_locale() -> String {
 }
 
 fn settings_schema_version() -> u32 {
-    9
+    10
+}
+
+fn default_preferred_adapter_id() -> String {
+    crate::adapter_registry::GROK_ADAPTER_ID.into()
 }
 
 fn default_mode() -> String {
@@ -324,6 +340,12 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
         combine_queued_prompts: file.combine_queued_prompts,
         disable_image_tools: file.disable_image_tools,
         disable_video_tools: file.disable_video_tools,
+        secondary_acp_path: file.secondary_acp_path,
+        preferred_adapter_id: if file.preferred_adapter_id.trim().is_empty() {
+            default_preferred_adapter_id()
+        } else {
+            file.preferred_adapter_id
+        },
         sandbox: file.sandbox,
         cwd: file.cwd,
         onboarding_done: file.onboarding_done,
@@ -364,6 +386,8 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), ConfigError> {
         combine_queued_prompts: settings.combine_queued_prompts,
         disable_image_tools: settings.disable_image_tools,
         disable_video_tools: settings.disable_video_tools,
+        secondary_acp_path: settings.secondary_acp_path.clone(),
+        preferred_adapter_id: settings.preferred_adapter_id.clone(),
         sandbox: settings.sandbox,
         cwd: settings.cwd.clone(),
         onboarding_done: settings.onboarding_done,
@@ -400,7 +424,7 @@ mod tests {
             "theme": "dark"
         }))
         .unwrap();
-        assert_eq!(file.schema_version, 9);
+        assert_eq!(file.schema_version, 10);
         assert!(!file.compact_mode);
         assert!(!file.multiline_mode);
         assert!(!file.show_timestamps);

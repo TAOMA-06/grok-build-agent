@@ -1,8 +1,10 @@
 mod acp;
+pub mod adapter_registry;
 pub mod agent_host;
 mod attachments;
 pub mod blob_store;
 mod cli_bridge;
+mod code_index;
 mod config;
 mod contracts;
 mod db;
@@ -125,6 +127,20 @@ async fn probe_grok(
     host_request(
         &state,
         "runtime.probe",
+        serde_json::json!({ "grokPath": grok_path }),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn list_runtime_adapters(
+    state: State<'_, AppState>,
+    grok_path: Option<String>,
+) -> Result<Vec<platform::AdapterCatalogEntry>, acp::AcpError> {
+    host_request(
+        &state,
+        "runtime.adapters.list",
         serde_json::json!({ "grokPath": grok_path }),
         None,
     )
@@ -880,6 +896,24 @@ async fn workspace_search(
 }
 
 #[tauri::command]
+async fn workspace_index_search(
+    state: State<'_, AppState>,
+    workspace_root: String,
+    query: String,
+    private_chat: Option<bool>,
+) -> Result<Vec<code_index::SymbolHit>, acp::AcpError> {
+    host_request(
+        &state,
+        "workspace.index.search",
+        serde_json::json!({
+            "workspaceRoot": workspace_root, "query": query, "privateChat": private_chat.unwrap_or(false)
+        }),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
 async fn workspace_read(
     state: State<'_, AppState>,
     workspace_root: String,
@@ -1045,6 +1079,88 @@ async fn run_verification(
             "command": command,
         }),
         Some(rpc_meta("verification-run", None)),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn list_memory_candidates(
+    state: State<'_, AppState>,
+    workspace_id: Option<String>,
+    memory_state: Option<String>,
+) -> Result<Vec<platform::MemoryCandidate>, acp::AcpError> {
+    host_request(
+        &state,
+        "memory.list",
+        serde_json::json!({
+            "workspaceId": workspace_id,
+            "state": memory_state,
+        }),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn upsert_memory_candidate(
+    state: State<'_, AppState>,
+    memory: platform::MemoryCandidate,
+) -> Result<(), acp::AcpError> {
+    host_request(
+        &state,
+        "memory.upsert",
+        serde_json::json!({ "memory": memory }),
+        Some(rpc_meta("memory", None)),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn review_memory_candidate(
+    state: State<'_, AppState>,
+    memory_id: String,
+    memory_state: String,
+) -> Result<serde_json::Value, acp::AcpError> {
+    host_request(
+        &state,
+        "memory.review",
+        serde_json::json!({
+            "memoryId": memory_id,
+            "state": memory_state,
+        }),
+        Some(rpc_meta("memory-review", None)),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn get_project_profile(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<platform::ProjectProfile, acp::AcpError> {
+    host_request(
+        &state,
+        "profile.get",
+        serde_json::json!({ "workspaceId": workspace_id }),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn save_project_profile(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    content: String,
+) -> Result<platform::ProjectProfile, acp::AcpError> {
+    host_request(
+        &state,
+        "profile.save",
+        serde_json::json!({
+            "workspaceId": workspace_id,
+            "content": content,
+        }),
+        Some(rpc_meta("profile", None)),
     )
     .await
 }
@@ -1520,6 +1636,30 @@ async fn validate_harness_plugin(
     .await
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HarnessStatus {
+    resolved: bool,
+    plugin_path: Option<String>,
+    mode: String,
+}
+
+#[tauri::command]
+fn harness_status() -> HarnessStatus {
+    match crate::acp::resolve_harness_plugin_dir() {
+        Some(path) => HarnessStatus {
+            resolved: true,
+            plugin_path: Some(path.display().to_string()),
+            mode: "plugin".into(),
+        },
+        None => HarnessStatus {
+            resolved: false,
+            plugin_path: None,
+            mode: "rules_only".into(),
+        },
+    }
+}
+
 #[tauri::command]
 async fn list_mcp_servers(
     state: State<'_, AppState>,
@@ -1722,6 +1862,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             probe_grok,
+            list_runtime_adapters,
             runtime_health,
             ensure_agent_host,
             agent_host_health,
@@ -1778,6 +1919,7 @@ pub fn run() {
             db_path,
             workspace_tree,
             workspace_search,
+            workspace_index_search,
             workspace_read,
             get_task,
             get_execution,
@@ -1789,6 +1931,11 @@ pub fn run() {
             list_verification_results,
             save_verification_result,
             run_verification,
+            list_memory_candidates,
+            upsert_memory_candidate,
+            review_memory_candidate,
+            get_project_profile,
+            save_project_profile,
             terminal_create,
             terminal_list,
             terminal_output,
@@ -1824,6 +1971,7 @@ pub fn run() {
             remove_mcp_server,
             doctor_mcp_server,
             set_mcp_server_enabled,
+            harness_status,
             check_cli_update,
             run_cli_update,
             run_cli_login,

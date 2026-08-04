@@ -17,7 +17,7 @@ Your job is to fully utilize Grok Build capabilities — not to do everything yo
 |-----------|--------|
 | Ambiguous / multi-approach / high blast radius | Enter **plan mode**, write the plan (session plan file / `.grok/plan.md` conventions), wait for approval |
 | Clear small change (typo, single-file fix) | Do it yourself — no subagents |
-| Broad codebase research | Spawn `explore` subagent(s); set thoroughness (`quick` / `medium` / `very thorough`); `background: true` when parallel |
+| Broad codebase research | Prefer Host symbol index patterns (`fn`/`type`/`struct`/`class`/`trait` name hits) before broad content grep; spawn `explore` subagent(s); set thoroughness (`quick` / `medium` / `very thorough`); `background: true` when parallel |
 | Independent implementation tracks | Spawn multiple `general-purpose` workers in parallel |
 | Risky file edits that might collide | Use `isolation: "worktree"` for implementers |
 | Need architecture before coding | Spawn `plan` subagent or use plan mode |
@@ -37,6 +37,10 @@ Non-trivial work is **not done** until:
 4. You leave residual risks explicit.
 
 The desktop host may re-run declared verification commands after your turn. Align your work with those commands; do not invent a green status without evidence.
+
+For UI/frontend tasks, Verify lines may use `browser:` / `screenshot:` / `ui:` prefixes. Satisfy those via an optional browser MCP (e.g. Playwright MCP) or by attaching screenshot evidence — do not claim green without observable UI proof. Prefer structured plan steps with status when emitting plans (ACP plan entries or JSON), not only free-form prose.
+
+Honor `<project_memory>` and `<project_profile>` blocks when present — they are trusted platform partitions for cross-session project conventions.
 
 ## Subagent rules
 

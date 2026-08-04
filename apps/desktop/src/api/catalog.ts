@@ -190,6 +190,20 @@ export async function workspaceSearch(
   return invoke("workspace_search", { workspaceRoot, query, privateChat });
 }
 
+export async function workspaceIndexSearch(
+  workspaceRoot: string,
+  query: string,
+  privateChat = false,
+): Promise<import("../contracts").SymbolHit[]> {
+  return invoke("workspace_index_search", { workspaceRoot, query, privateChat });
+}
+
+export async function listRuntimeAdapters(
+  grokPath?: string,
+): Promise<import("../contracts").AdapterCatalogEntry[]> {
+  return invoke("list_runtime_adapters", { grokPath: grokPath || null });
+}
+
 export async function workspaceRead(
   workspaceRoot: string,
   path: string,
@@ -282,6 +296,42 @@ export async function runVerification(
   command: string,
 ): Promise<import("../types").VerificationResult> {
   return invoke("run_verification", { taskId, workspaceRoot, command });
+}
+
+export async function listMemoryCandidates(
+  workspaceId?: string | null,
+  state?: string | null,
+): Promise<import("../types").MemoryCandidate[]> {
+  return invoke("list_memory_candidates", {
+    workspaceId: workspaceId ?? null,
+    memoryState: state ?? null,
+  });
+}
+
+export async function upsertMemoryCandidate(
+  memory: import("../types").MemoryCandidate,
+): Promise<void> {
+  return invoke("upsert_memory_candidate", { memory });
+}
+
+export async function reviewMemoryCandidate(
+  memoryId: string,
+  state: "candidate" | "accepted" | "rejected",
+): Promise<{ updated: boolean }> {
+  return invoke("review_memory_candidate", { memoryId, memoryState: state });
+}
+
+export async function getProjectProfile(
+  workspaceId: string,
+): Promise<import("../types").ProjectProfile> {
+  return invoke("get_project_profile", { workspaceId });
+}
+
+export async function saveProjectProfile(
+  workspaceId: string,
+  content: string,
+): Promise<import("../types").ProjectProfile> {
+  return invoke("save_project_profile", { workspaceId, content });
 }
 
 export type TerminalOutput = {
@@ -482,6 +532,17 @@ export async function validateHarnessPlugin(
     path,
     grokPath: grokPath || null,
   });
+}
+
+export type HarnessStatus = {
+  resolved: boolean;
+  pluginPath?: string | null;
+  mode: "plugin" | "rules_only" | string;
+};
+
+/** Resolve on-disk orchestrator harness package status (no secrets). */
+export async function getHarnessStatus(): Promise<HarnessStatus> {
+  return invoke("harness_status");
 }
 
 export async function listMcpServers(

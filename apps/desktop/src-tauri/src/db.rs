@@ -7,8 +7,8 @@ use crate::contracts::{
 use crate::platform::{
     AuditRecordInput, CompletionGate, ContextManifest, DispatchState, ExecutionEvent,
     ExecutionIntent, ExecutionIntentState, ExecutionRecoverySummary, ExecutionRun, ExecutionState,
-    PlatformEvent, ProjectionRebuildReport, PromptDispatch, TaskDefinition, TaskState,
-    VerificationResult, VerificationStatus,
+    MemoryCandidate, MemoryState, PlatformEvent, ProjectionRebuildReport, PromptDispatch,
+    TaskDefinition, TaskState, VerificationResult, VerificationStatus,
 };
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -1851,6 +1851,109 @@ impl Database {
         Ok(out)
     }
 
+    pub fn upsert_memory_candidate(&self, memory: &MemoryCandidate) -> Result<(), DbError> {
+        self.conn.lock().execute(
+            "INSERT INTO memory_candidates (
+                memory_id, workspace_id, kind, content, source_event_id, confidence,
+                state, created_at, reviewed_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
+             ON CONFLICT(memory_id) DO UPDATE SET
+                workspace_id=excluded.workspace_id,
+                kind=excluded.kind,
+                content=excluded.content,
+                source_event_id=excluded.source_event_id,
+                confidence=excluded.confidence,
+                state=excluded.state,
+                reviewed_at=excluded.reviewed_at",
+            params![
+                memory.memory_id,
+                memory.workspace_id,
+                memory.kind,
+                memory.content,
+                memory.source_event_id,
+                memory.confidence,
+                memory_state_str(memory.state),
+                memory.created_at,
+                memory.reviewed_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_memory_candidates(
+        &self,
+        workspace_id: Option<&str>,
+        state_filter: Option<&str>,
+    ) -> Result<Vec<MemoryCandidate>, DbError> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT memory_id, workspace_id, kind, content, source_event_id, confidence,
+             state, created_at, reviewed_at FROM memory_candidates
+             WHERE (?1 IS NULL OR workspace_id = ?1)
+               AND (?2 IS NULL OR state = ?2)
+             ORDER BY created_at DESC",
+        )?;
+        let rows = statement.query_map(params![workspace_id, state_filter], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, f64>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, Option<String>>(8)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (
+                memory_id,
+                workspace_id,
+                kind,
+                content,
+                source_event_id,
+                confidence,
+                state,
+                created_at,
+                reviewed_at,
+            ) = row?;
+            out.push(MemoryCandidate {
+                memory_id,
+                workspace_id,
+                kind,
+                content,
+                source_event_id,
+                confidence,
+                state: parse_memory_state(&state)?,
+                created_at,
+                reviewed_at,
+            });
+        }
+        Ok(out)
+    }
+
+    pub fn review_memory_candidate(
+        &self,
+        memory_id: &str,
+        state: MemoryState,
+        reviewed_at: &str,
+    ) -> Result<bool, DbError> {
+        let changed = self.conn.lock().execute(
+            "UPDATE memory_candidates SET state = ?1, reviewed_at = ?2 WHERE memory_id = ?3",
+            params![memory_state_str(state), reviewed_at, memory_id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn list_accepted_memories_for_workspace(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<MemoryCandidate>, DbError> {
+        self.list_memory_candidates(Some(workspace_id), Some("accepted"))
+    }
+
     pub fn save_verification_result(&self, result: &VerificationResult) -> Result<(), DbError> {
         self.conn.lock().execute(
             "INSERT INTO verification_results (verification_id, task_id, turn_id, command,
@@ -3201,6 +3304,23 @@ fn parse_verification_status(value: &str) -> Result<VerificationStatus, DbError>
     }
 }
 
+fn memory_state_str(state: MemoryState) -> &'static str {
+    match state {
+        MemoryState::Candidate => "candidate",
+        MemoryState::Accepted => "accepted",
+        MemoryState::Rejected => "rejected",
+    }
+}
+
+fn parse_memory_state(value: &str) -> Result<MemoryState, DbError> {
+    match value {
+        "candidate" => Ok(MemoryState::Candidate),
+        "accepted" => Ok(MemoryState::Accepted),
+        "rejected" => Ok(MemoryState::Rejected),
+        other => Err(DbError::Message(format!("unknown memory state {other}"))),
+    }
+}
+
 fn parse_dispatch_state(value: &str) -> Result<DispatchState, DbError> {
     match value {
         "prepared" => Ok(DispatchState::Prepared),
@@ -4248,6 +4368,39 @@ mod tests {
         assert!(!db.policy_rule_allows(&action).unwrap());
         action.risk = crate::platform::RiskLevel::Critical;
         assert!(db.save_policy_rule(&action, "project").is_err());
+    }
+
+    #[test]
+    fn memory_candidate_roundtrip_and_review() {
+        let db = temp_db();
+        let memory = crate::platform::MemoryCandidate {
+            memory_id: "m1".into(),
+            workspace_id: Some("/workspace".into()),
+            kind: "convention".into(),
+            content: "Prefer pnpm".into(),
+            source_event_id: "ui".into(),
+            confidence: 0.9,
+            state: crate::platform::MemoryState::Candidate,
+            created_at: "t0".into(),
+            reviewed_at: None,
+        };
+        db.upsert_memory_candidate(&memory).unwrap();
+        let listed = db
+            .list_memory_candidates(Some("/workspace"), None)
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].content, "Prefer pnpm");
+        assert!(db
+            .review_memory_candidate("m1", crate::platform::MemoryState::Accepted, "t1")
+            .unwrap());
+        let accepted = db
+            .list_accepted_memories_for_workspace("/workspace")
+            .unwrap();
+        assert_eq!(accepted.len(), 1);
+        assert!(matches!(
+            accepted[0].state,
+            crate::platform::MemoryState::Accepted
+        ));
     }
 
     #[test]

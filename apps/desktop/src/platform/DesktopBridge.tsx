@@ -142,6 +142,11 @@ export interface DesktopBridge {
     channel?: string | null;
   }>;
   runCliUpdate(grokPath?: string): Promise<string>;
+  getHarnessStatus(): Promise<{
+    resolved: boolean;
+    pluginPath?: string | null;
+    mode: string;
+  }>;
   gitReview(workspaceRoot: string, privateChat?: boolean): Promise<ReviewSnapshot>;
   gitFilePatch(workspaceRoot: string, path: string, staged: boolean, privateChat?: boolean): Promise<string>;
   gitFileAction(
@@ -175,6 +180,12 @@ export interface DesktopBridge {
     privateChat?: boolean,
   ): Promise<WorkspaceEntry[]>;
   workspaceSearch(workspaceRoot: string, query: string, privateChat?: boolean): Promise<WorkspaceEntry[]>;
+  workspaceIndexSearch(
+    workspaceRoot: string,
+    query: string,
+    privateChat?: boolean,
+  ): Promise<import("../contracts").SymbolHit[]>;
+  listRuntimeAdapters(grokPath?: string): Promise<import("../contracts").AdapterCatalogEntry[]>;
   workspaceRead(workspaceRoot: string, path: string, privateChat?: boolean): Promise<WorkspacePreview>;
   listPolicyRules(workspaceId?: string | null): Promise<StoredPolicyRule[]>;
   deletePolicyRule(ruleId: string): Promise<void>;
@@ -198,6 +209,11 @@ export interface DesktopBridge {
   listVerificationResults(taskId: string): Promise<VerificationResult[]>;
   saveVerificationResult(result: VerificationResult): Promise<void>;
   runVerification(taskId: string, workspaceRoot: string, command: string): Promise<VerificationResult>;
+  listMemoryCandidates(workspaceId?: string | null, state?: string | null): Promise<import("../types").MemoryCandidate[]>;
+  upsertMemoryCandidate(memory: import("../types").MemoryCandidate): Promise<void>;
+  reviewMemoryCandidate(memoryId: string, state: "candidate" | "accepted" | "rejected"): Promise<{ updated: boolean }>;
+  getProjectProfile(workspaceId: string): Promise<import("../types").ProjectProfile>;
+  saveProjectProfile(workspaceId: string, content: string): Promise<import("../types").ProjectProfile>;
   terminalCreate(taskId: string, workspaceRoot: string, command: string, args: string[]): Promise<{ terminalId: string; pid: number }>;
   terminalList(taskId: string): Promise<TerminalSummary[]>;
   terminalOutput(terminalId: string, offset?: number, limit?: number): Promise<TerminalOutput>;

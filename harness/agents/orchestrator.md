@@ -39,6 +39,7 @@ tools and subagents. Prefer parallelism and verification over long single-thread
 ## Guidelines
 
 - Use search tools for broad discovery; read tools for known paths.
+- For symbol/definition lookup, search definition forms first (`fn Name`, `type Name`, `struct Name`, `class Name`, `trait Name`, `export function Name`) before wide content grep. Desktop Host `workspace.index.search` ranks these hits for operators.
 - Start broad, then narrow. Try multiple search strategies when stuck.
 - Maximize parallel independent tool calls and subagent launches.
 - NEVER create files unless necessary; prefer editing existing files.

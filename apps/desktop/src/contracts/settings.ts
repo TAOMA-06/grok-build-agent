@@ -16,7 +16,7 @@ export type PrivacyMode = "strict" | "standard";
 
 export type Settings = {
   /** Versioned renderer/host settings contract. */
-  schemaVersion: 9;
+  schemaVersion: 10;
   grokPath: string;
   /** Optional advanced override. Empty means use CLI discovery. */
   cliPathOverride: string;
@@ -64,6 +64,13 @@ export type Settings = {
   disableImageTools: boolean;
   /** Strip video generation tools/slash commands from the spawned CLI process. */
   disableVideoTools: boolean;
+  /**
+   * Absolute path to a secondary ACP-compatible agent binary.
+   * Used when preferredAdapterId is `generic-acp`.
+   */
+  secondaryAcpPath: string;
+  /** Preferred runtime adapter: `grok-acp` (default) or `generic-acp`. */
+  preferredAdapterId: "grok-acp" | "generic-acp" | string;
   sandbox: SandboxMode;
   cwd: string;
   onboardingDone: boolean;
@@ -103,7 +110,7 @@ export type OnboardingStep =
 
 export function defaultSettings(): Settings {
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     grokPath: "",
     cliPathOverride: "",
     model: "grok-4.5",
@@ -122,6 +129,8 @@ export function defaultSettings(): Settings {
     combineQueuedPrompts: false,
     disableImageTools: false,
     disableVideoTools: false,
+    secondaryAcpPath: "",
+    preferredAdapterId: "grok-acp",
     sandbox: "workspace",
     cwd: "",
     onboardingDone: false,
@@ -168,8 +177,18 @@ export function normalizeSettings(settings: Settings): Settings {
     (settings as { disableImageTools?: boolean }).disableImageTools === true;
   const disableVideoTools =
     (settings as { disableVideoTools?: boolean }).disableVideoTools === true;
+  const secondaryAcpPath =
+    typeof (settings as { secondaryAcpPath?: string }).secondaryAcpPath === "string"
+      ? (settings as { secondaryAcpPath: string }).secondaryAcpPath
+      : "";
+  const preferredAdapterIdRaw =
+    typeof (settings as { preferredAdapterId?: string }).preferredAdapterId === "string"
+      ? (settings as { preferredAdapterId: string }).preferredAdapterId.trim()
+      : "";
+  const preferredAdapterId =
+    preferredAdapterIdRaw === "generic-acp" ? "generic-acp" : "grok-acp";
   if (
-    settings.schemaVersion === 9 &&
+    settings.schemaVersion === 10 &&
     defaultReasoningEffort === settings.defaultReasoningEffort &&
     focusMode === settings.focusMode &&
     privacyMode === settings.privacyMode &&
@@ -180,11 +199,13 @@ export function normalizeSettings(settings: Settings): Settings {
     strictTerminal === Boolean(settings.strictTerminal) &&
     combineQueuedPrompts === Boolean(settings.combineQueuedPrompts) &&
     disableImageTools === Boolean(settings.disableImageTools) &&
-    disableVideoTools === Boolean(settings.disableVideoTools)
+    disableVideoTools === Boolean(settings.disableVideoTools) &&
+    secondaryAcpPath === (settings.secondaryAcpPath ?? "") &&
+    preferredAdapterId === (settings.preferredAdapterId || "grok-acp")
   ) return settings;
   return {
     ...settings,
-    schemaVersion: 9,
+    schemaVersion: 10,
     defaultReasoningEffort,
     focusMode,
     privacyMode,
@@ -196,5 +217,20 @@ export function normalizeSettings(settings: Settings): Settings {
     combineQueuedPrompts,
     disableImageTools,
     disableVideoTools,
+    secondaryAcpPath,
+    preferredAdapterId,
   };
+}
+
+/**
+ * Resolve the ACP executable for the preferred runtime adapter.
+ * Secondary ACP uses `secondaryAcpPath`; primary uses CLI override / grok path.
+ */
+export function resolveAgentExecutable(settings: Settings): string | null {
+  if (settings.preferredAdapterId === "generic-acp") {
+    const secondary = settings.secondaryAcpPath.trim();
+    return secondary || null;
+  }
+  const primary = (settings.cliPathOverride || settings.grokPath).trim();
+  return primary || null;
 }

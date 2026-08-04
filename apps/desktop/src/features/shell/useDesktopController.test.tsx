@@ -807,11 +807,13 @@ describe("useDesktopController", () => {
       { wrapper: wrapper(bridge) },
     );
     await act(async () => {
-      await result.current.answerPlanApproval("approve");
+      await result.current.answerPlanApproval("approve", {
+        comments: ["Step 1: looks good"],
+      });
     });
     expect(respondServerRequest).toHaveBeenCalledWith("connection", "approval-request", {
       outcome: "approved",
-      comments: [],
+      comments: ["Step 1: looks good"],
     });
     expect(useAppStore.getState().sessions["approval-local"]?.summary.mode).toBe("agent");
     expect(useAppStore.getState().pendingPlanApproval).toBeNull();

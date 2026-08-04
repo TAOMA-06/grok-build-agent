@@ -1,5 +1,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { Activity, ArrowUpRight, CircleAlert, CircleCheck, CircleDot, Clock3, Plus, Radio } from "lucide-react";
+import { summarizeSubagentFleet } from "../../contracts/subagent";
 import type { SessionRuntime } from "../../store";
 import { t } from "../../i18n";
 
@@ -64,6 +65,19 @@ function workspaceName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+function fleetLabel(tools: SessionRuntime["tools"]): string | null {
+  const fleet = summarizeSubagentFleet(tools);
+  if (fleet.active <= 0) return null;
+  const roles = fleet.byRole
+    .filter((row) => row.active > 0)
+    .slice(0, 3)
+    .map((row) => `${row.role}×${row.active}`)
+    .join(" · ");
+  return roles
+    ? `${fleet.active} ${t.subagent} · ${roles}`
+    : `${fleet.active} ${t.subagent}`;
+}
+
 /**
  * A Host-state-driven overview. It does not invent runtime controls: selecting
  * a task takes the operator to the task's own ledger and approval surface.
@@ -90,6 +104,23 @@ export function MissionControlDialog({
     });
   const attentionCount = visibleSessions.filter((session) => missionState(session) === "attention").length;
   const workingCount = visibleSessions.filter((session) => missionState(session) === "working").length;
+  const fleet = visibleSessions.reduce(
+    (acc, session) => {
+      const summary = summarizeSubagentFleet(session.tools);
+      acc.active += summary.active;
+      for (const row of summary.byRole) {
+        if (row.active <= 0) continue;
+        acc.roles.set(row.role, (acc.roles.get(row.role) ?? 0) + row.active);
+      }
+      return acc;
+    },
+    { active: 0, roles: new Map<string, number>() },
+  );
+  const roleBreakdown = [...fleet.roles.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 4)
+    .map(([role, count]) => `${role}×${count}`)
+    .join(" · ");
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -114,6 +145,12 @@ export function MissionControlDialog({
             <span><b>{visibleSessions.length}</b>{t.missionControlTasks}</span>
             <span className={attentionCount ? "attention" : ""}><b>{attentionCount}</b>{t.missionControlAttention}</span>
             <span className={workingCount ? "working" : ""}><b>{workingCount}</b>{t.missionControlActive}</span>
+            <span className={fleet.active ? "working" : ""}><b>{fleet.active}</b>{t.missionControlSubagents}</span>
+            {roleBreakdown ? (
+              <span className="gb-mission-role-breakdown" title={t.missionControlSubagentRoles}>
+                {roleBreakdown}
+              </span>
+            ) : null}
             <small>{t.missionControlSignals}</small>
           </div>
 
@@ -121,6 +158,7 @@ export function MissionControlDialog({
             {visibleSessions.map((session) => {
               const state = missionState(session);
               const label = stateLabel(state);
+              const agents = fleetLabel(session.tools);
               return (
                 <button
                   type="button"
@@ -139,6 +177,7 @@ export function MissionControlDialog({
                   </span>
                   <span className="gb-mission-control-meta">
                     <em>{label}</em>
+                    {agents ? <em className="gb-mission-subagents">{agents}</em> : null}
                     <time dateTime={session.summary.updatedAt}><Clock3 size={11} /> {relativeTime(session.summary.updatedAt)}</time>
                   </span>
                   <ArrowUpRight className="gb-mission-control-open" size={15} aria-hidden />

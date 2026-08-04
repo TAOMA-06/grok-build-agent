@@ -141,6 +141,8 @@ export type {
   WorkspacePreview,
 } from "./contracts";
 
+export type { SymbolHit, AdapterCatalogEntry } from "./contracts";
+
 export type {
   TaskState,
   PlatformEvent,
@@ -167,4 +169,8 @@ export type {
   CompletionGate,
   ProjectionRebuildReport,
   DoctorStatus,
+  MemoryCandidate,
+  ProjectProfile,
 } from "./contracts";
+
+export type { MemoryKind, MemoryState } from "./contracts";

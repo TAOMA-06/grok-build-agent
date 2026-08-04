@@ -143,7 +143,10 @@ export function ThreadView({
   onLocalCommand: (command: string) => void;
   onRetryFailed: () => Promise<void>;
   onAnswerPermission: (optionId: string | null) => Promise<void>;
-  onPlanDecision: (action: "approve" | "revise") => Promise<void>;
+  onPlanDecision: (
+    action: "approve" | "revise",
+    options?: { comments?: string[]; reviseNote?: string },
+  ) => Promise<void>;
   onRename: (title: string) => Promise<void>;
   onArchive: () => Promise<void>;
   onDelete: () => Promise<void>;
@@ -290,22 +293,27 @@ export function ThreadView({
                 busy={Boolean(session?.busy)}
                 sessionId={session?.summary.sessionId ?? null}
                 planActionsEnabled={Boolean(pendingPlanApproval)}
-                onPlanAction={(action) => {
+                onPlanAction={(payload) => {
                   if (pendingPlanApproval) {
-                    void onPlanDecision(action).then(() => {
-                      if (action === "revise" && session) {
-                        useAppStore.getState().setSessionDraft(session.summary.sessionId, t.planFeedbackDraft);
+                    void onPlanDecision(payload.action, {
+                      comments: payload.comments,
+                      reviseNote: payload.reviseNote,
+                    }).then(() => {
+                      if (payload.action === "revise" && session) {
+                        const note = payload.reviseNote?.trim() || payload.comments?.join("\n") || t.planFeedbackDraft;
+                        useAppStore.getState().setSessionDraft(session.summary.sessionId, note);
                         window.dispatchEvent(new Event("grok:focus-composer"));
                       }
                     });
                     return;
                   }
-                  if (action === "approve") {
+                  if (payload.action === "approve") {
                     void onChooseMode("agent").then((result) => {
                       if (result.kind !== "unsupported") void onSend(t.planApprovedControl, [], "agent");
                     });
                   } else if (session) {
-                    useAppStore.getState().setSessionDraft(session.summary.sessionId, t.planFeedbackDraft);
+                    const note = payload.reviseNote?.trim() || payload.comments?.join("\n") || t.planFeedbackDraft;
+                    useAppStore.getState().setSessionDraft(session.summary.sessionId, note);
                     window.dispatchEvent(new Event("grok:focus-composer"));
                   }
                 }}

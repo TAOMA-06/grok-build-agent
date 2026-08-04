@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { buildPromptContent, seedTaskFromPrompt } from "../../contracts";
+import { buildPromptContent, seedTaskFromPrompt, resolveAgentExecutable } from "../../contracts";
 import { mergeSelectableModels, resolveEffortForModel } from "../../contracts/model";
 import { extractContextUsage } from "../../acp/client";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
@@ -33,7 +33,10 @@ export type DesktopController = {
   confirmModelFork(): Promise<void>;
   cancelModelFork(): void;
   answerPermission(optionId: string | null): Promise<void>;
-  answerPlanApproval(action: "approve" | "revise"): Promise<void>;
+  answerPlanApproval(
+    action: "approve" | "revise",
+    options?: { comments?: string[]; reviseNote?: string },
+  ): Promise<void>;
 };
 
 function promptTitle(text: string): string {
@@ -237,8 +240,7 @@ export function useDesktopController(
           privacyMode: state.settings.privacyMode,
           privateChat: isPrivateChatSession(state, sessionId),
           resumeSessionId: summary.remoteSessionId ?? null,
-          grokPath:
-            state.settings.cliPathOverride || state.settings.grokPath || null,
+          grokPath: resolveAgentExecutable(state.settings),
         });
         state.setStatus(status);
         if (status.model) {
@@ -671,7 +673,7 @@ export function useDesktopController(
         privacyMode: state.settings.privacyMode,
         privateChat: isPrivateChatSession(state, sessionId),
         resumeSessionId: summary.remoteSessionId ?? null,
-        grokPath: state.settings.cliPathOverride || state.settings.grokPath || null,
+        grokPath: resolveAgentExecutable(state.settings),
       });
       state.setStatus(status);
       const next = {
@@ -970,16 +972,25 @@ export function useDesktopController(
   );
 
   const answerPlanApproval = useCallback(
-    async (action: "approve" | "revise") => {
+    async (
+      action: "approve" | "revise",
+      options?: { comments?: string[]; reviseNote?: string },
+    ) => {
       const state = useAppStore.getState();
       const request = state.pendingPlanApproval;
       if (!request?.connectionId) return;
       const localSessionId = request.sessionId
         ? state.sessionOrder.find((id) => id === request.sessionId || state.sessions[id]?.summary.remoteSessionId === request.sessionId)
         : state.activeSessionId;
+      const comments = (options?.comments ?? [])
+        .map((item) => item.trim())
+        .filter(Boolean);
+      if (options?.reviseNote?.trim() && !comments.includes(options.reviseNote.trim())) {
+        comments.push(options.reviseNote.trim());
+      }
       await bridge.respondServerRequest(request.connectionId, request.id, {
         outcome: action === "approve" ? "approved" : "requested_changes",
-        comments: [],
+        comments,
       });
       state.setPlanApproval(null);
       if (!localSessionId) return;

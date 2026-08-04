@@ -435,6 +435,13 @@ export const mockDesktopBridge: DesktopBridge = {
   async runCliUpdate() {
     return "Already up to date";
   },
+  async getHarnessStatus() {
+    return {
+      resolved: true,
+      pluginPath: "/mock/harness",
+      mode: "plugin",
+    };
+  },
   async gitReview(root, _privateChat = false) {
     return mockReview(root);
   },
@@ -488,6 +495,36 @@ export const mockDesktopBridge: DesktopBridge = {
   async workspaceSearch(_workspaceRoot, query, _privateChat = false) {
     return [{ path: `src/${query}.ts`, name: `${query}.ts`, directory: false, size: 128 }];
   },
+  async workspaceIndexSearch(_workspaceRoot, query, _privateChat = false) {
+    return [{
+      path: `src/${query}.ts`,
+      name: query,
+      kind: "function",
+      line: 1,
+      score: 100,
+      snippet: `export function ${query}() {}`,
+    }];
+  },
+  async listRuntimeAdapters() {
+    return [
+      {
+        adapterId: "grok-acp",
+        label: "Grok Build ACP",
+        configured: true,
+        available: true,
+        models: [],
+        notes: "Primary runtime",
+      },
+      {
+        adapterId: "generic-acp",
+        label: "Secondary ACP",
+        configured: false,
+        available: false,
+        models: [],
+        notes: "Not configured",
+      },
+    ];
+  },
   async workspaceRead(_workspaceRoot, path, _privateChat = false) {
     return { path, content: "mock preview", binary: false, truncated: false, size: 12 };
   },
@@ -529,6 +566,15 @@ export const mockDesktopBridge: DesktopBridge = {
   async saveVerificationResult() {},
   async runVerification(taskId, _workspaceRoot, command) {
     return { verificationId: crypto.randomUUID(), taskId, turnId: "mock", command, status: "passed", summary: "mock verification", exitCode: 0, createdAt: new Date().toISOString() };
+  },
+  async listMemoryCandidates() { return []; },
+  async upsertMemoryCandidate() {},
+  async reviewMemoryCandidate() { return { updated: true }; },
+  async getProjectProfile(workspaceId) {
+    return { workspaceId, content: "", path: null, exists: false, updatedAt: null };
+  },
+  async saveProjectProfile(workspaceId, content) {
+    return { workspaceId, content, path: ".grok/profile.md", exists: true, updatedAt: new Date().toISOString() };
   },
   async terminalCreate() { return { terminalId: crypto.randomUUID(), pid: 1 }; },
   async terminalList() { return []; },

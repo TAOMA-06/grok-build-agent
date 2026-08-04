@@ -3,6 +3,7 @@ import * as Tabs from "@radix-ui/react-tabs";
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
+  Brain,
   Clipboard,
   ExternalLink,
   FileCode2,
@@ -21,11 +22,17 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore } from "../../store";
 import type { SessionRuntime } from "../../store";
 import type { GitCheckpoint, WorktreeApplyPreview } from "../../types";
+import {
+  BROWSER_MCP_TEMPLATE,
+  browserScreenshotEvidenceSummary,
+  isBrowserVerifyCommand,
+  parseBrowserVerifyCommands,
+} from "../../contracts/browserVerify";
 import { t, translate } from "../../i18n";
 
 function splitPatchHunks(patch: string): string[] {
@@ -75,6 +82,10 @@ export function ContextDrawer({
   const [explorerSearch, setExplorerSearch] = useState("");
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [verificationRunning, setVerificationRunning] = useState<string | null>(null);
+  const [memoryDraft, setMemoryDraft] = useState("");
+  const [memoryKind, setMemoryKind] = useState("convention");
+  const [profileDraft, setProfileDraft] = useState("");
+  const [memoryBusy, setMemoryBusy] = useState(false);
   const [terminalTabs, setTerminalTabs] = useState<Array<{ id: string; title: string; output: string; offset: number; exitCode: number | null }>>([]);
   const [activeTerminal, setActiveTerminal] = useState<string | null>(null);
   const [terminalInput, setTerminalInput] = useState("");
@@ -103,7 +114,30 @@ export function ContextDrawer({
   });
   const treeQuery = useQuery({ queryKey: ["workspace-tree", root, explorerPath, privateChat], queryFn: () => bridge.workspaceTree(root, explorerPath, privateChat) });
   const searchQuery = useQuery({ queryKey: ["workspace-search", root, explorerSearch, privateChat], queryFn: () => bridge.workspaceSearch(root, explorerSearch, privateChat), enabled: explorerSearch.trim().length > 1 });
+  const symbolQuery = useQuery({
+    queryKey: ["workspace-index", root, explorerSearch, privateChat],
+    queryFn: () => bridge.workspaceIndexSearch(root, explorerSearch, privateChat),
+    enabled: explorerSearch.trim().length > 1 && /^[\w./:-]+$/.test(explorerSearch.trim()),
+  });
   const previewQuery = useQuery({ queryKey: ["workspace-preview", root, previewPath, privateChat], queryFn: () => bridge.workspaceRead(root, previewPath!, privateChat), enabled: Boolean(previewPath) });
+  const workspaceId = session.summary.workspaceRoot;
+  const memoryQuery = useQuery({
+    queryKey: ["memory-candidates", workspaceId, privateChat],
+    queryFn: () => bridge.listMemoryCandidates(workspaceId),
+    enabled: !privateChat && Boolean(workspaceId),
+  });
+  const profileQuery = useQuery({
+    queryKey: ["project-profile", workspaceId, privateChat],
+    queryFn: () => bridge.getProjectProfile(workspaceId),
+    enabled: !privateChat && Boolean(workspaceId),
+  });
+  const browserVerifies = useMemo(
+    () => parseBrowserVerifyCommands(taskQuery.data?.verificationCommands ?? []),
+    [taskQuery.data?.verificationCommands],
+  );
+  useEffect(() => {
+    if (profileQuery.data) setProfileDraft(profileQuery.data.content);
+  }, [profileQuery.data]);
   const latestContext = contextQuery.data?.[0];
   const latestTaskFocus = latestContext?.entries.find((entry) => entry.kind === "task_contract");
   const latestFocusStrategy = focusStrategyLabel(latestTaskFocus?.metadata.strategy);
@@ -213,6 +247,60 @@ export function ContextDrawer({
       await completionQuery.refetch();
     } finally {
       setVerificationRunning(null);
+    }
+  }
+
+  async function recordBrowserScreenshot(command: string) {
+    const note = window.prompt(t.browserVerifyRecord, "")?.trim();
+    if (note === undefined) return;
+    await bridge.saveVerificationResult({
+      verificationId: crypto.randomUUID(),
+      taskId,
+      turnId: "browser",
+      command,
+      status: "passed",
+      summary: browserScreenshotEvidenceSummary({
+        url: parseBrowserVerifyCommands([command])[0]?.target,
+        note: note || "manual screenshot",
+      }),
+      exitCode: 0,
+      createdAt: new Date().toISOString(),
+    });
+    await verificationQuery.refetch();
+    await completionQuery.refetch();
+  }
+
+  async function addMemory() {
+    const content = memoryDraft.trim();
+    if (!content || memoryBusy) return;
+    setMemoryBusy(true);
+    try {
+      await bridge.upsertMemoryCandidate({
+        memoryId: crypto.randomUUID(),
+        workspaceId,
+        kind: memoryKind as import("../../types").MemoryCandidate["kind"],
+        content,
+        sourceEventId: "ui",
+        confidence: 0.8,
+        state: "accepted",
+        createdAt: new Date().toISOString(),
+        reviewedAt: new Date().toISOString(),
+      });
+      setMemoryDraft("");
+      await memoryQuery.refetch();
+    } finally {
+      setMemoryBusy(false);
+    }
+  }
+
+  async function saveProfile() {
+    if (memoryBusy) return;
+    setMemoryBusy(true);
+    try {
+      await bridge.saveProjectProfile(workspaceId, profileDraft);
+      await profileQuery.refetch();
+    } finally {
+      setMemoryBusy(false);
     }
   }
 
@@ -341,6 +429,7 @@ export function ContextDrawer({
           <Tabs.Trigger value="activity"><Activity size={14} /> {t.tasks} <span>{session.tools.length}</span></Tabs.Trigger>
           {!privateChat && <Tabs.Trigger value="context"><Eye size={14} /> Context <span>{contextQuery.data?.length ?? 0}</span></Tabs.Trigger>}
           {!privateChat && <Tabs.Trigger value="verification"><ListChecks size={14} /> Verify <span>{verificationQuery.data?.length ?? 0}</span></Tabs.Trigger>}
+          {!privateChat && <Tabs.Trigger value="memory"><Brain size={14} /> {t.memoryTab} <span>{memoryQuery.data?.length ?? 0}</span></Tabs.Trigger>}
           <Tabs.Trigger value="files"><Folder size={14} /> Files</Tabs.Trigger>
           <Tabs.Trigger value="terminal"><TerminalSquare size={14} /> Terminal <span>{terminalTabs.length}</span></Tabs.Trigger>
         </Tabs.List>
@@ -465,10 +554,86 @@ export function ContextDrawer({
           {(taskQuery.data?.verificationCommands.length ?? 0) > 0 && completionQuery.data && !completionQuery.data.ready && (
             <div className="gb-apply-status blocked"><strong>{t.verificationRequiredBanner}</strong><span>{t.completionGateBlocked}</span></div>
           )}
-          {taskQuery.data?.verificationCommands.map((command) => <div className="gb-drawer-activity" key={command}><div><strong>{command}</strong><small>Required verification</small></div><div><button type="button" className="gb-review-button" disabled={verificationRunning !== null} onClick={() => void executeVerification(command)}>{verificationRunning === command ? "Running…" : "Run"}</button><button type="button" className="gb-icon-button" title="Not run" onClick={() => void recordVerification(command, "not_run")}>–</button><button type="button" className="gb-icon-button" title="Blocked" onClick={() => void recordVerification(command, "blocked")}>!</button></div></div>)}
+          {browserVerifies.length > 0 && (
+            <div className="gb-apply-status">
+              <strong>{t.browserVerifyHint}</strong>
+              <button
+                type="button"
+                className="gb-review-button"
+                onClick={() => void bridge.copyText(JSON.stringify(BROWSER_MCP_TEMPLATE, null, 2))}
+              >
+                {t.browserMcpTemplate}
+              </button>
+            </div>
+          )}
+          {taskQuery.data?.verificationCommands.map((command) => (
+            <div className="gb-drawer-activity" key={command}>
+              <div>
+                <strong>{command}</strong>
+                <small>{isBrowserVerifyCommand(command) ? "Browser verification" : "Required verification"}</small>
+              </div>
+              <div>
+                {isBrowserVerifyCommand(command) ? (
+                  <button type="button" className="gb-review-button" onClick={() => void recordBrowserScreenshot(command)}>{t.browserVerifyRecord}</button>
+                ) : (
+                  <button type="button" className="gb-review-button" disabled={verificationRunning !== null} onClick={() => void executeVerification(command)}>{verificationRunning === command ? "Running…" : "Run"}</button>
+                )}
+                <button type="button" className="gb-icon-button" title="Not run" onClick={() => void recordVerification(command, "not_run")}>–</button>
+                <button type="button" className="gb-icon-button" title="Blocked" onClick={() => void recordVerification(command, "blocked")}>!</button>
+              </div>
+            </div>
+          ))}
           {completionQuery.data && <div className={completionQuery.data.ready ? "gb-apply-status ready" : "gb-apply-status blocked"}><strong>{completionQuery.data.ready ? t.completionGateReady : t.completionGateBlocked}</strong><span>{completionQuery.data.blockers.join(" · ") || "No unresolved platform blockers."}</span></div>}
           {completionQuery.data?.ready && taskQuery.data?.state === "verifying" && <button type="button" className="gb-review-button" onClick={() => void bridge.completeTask(taskId).then(() => { void taskQuery.refetch(); void completionQuery.refetch(); })}>Mark task completed</button>}
           {verificationQuery.data?.map((result) => <div className="gb-drawer-activity" key={result.verificationId}><span className={`gb-status-dot ${result.status === "passed" ? "idle" : "running"}`} /><div><strong>{result.command}</strong><small>{result.status}{result.summary ? ` · ${result.summary}` : ""}</small></div></div>)}
+        </Tabs.Content>}
+        {!privateChat && <Tabs.Content value="memory" className="gb-drawer-content">
+          <div className="gb-drawer-toolbar">
+            <span>{t.projectProfile}</span>
+            <button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => { void profileQuery.refetch(); void memoryQuery.refetch(); }}><RefreshCw size={14} /></button>
+          </div>
+          <div className="gb-task-contract">
+            <label>
+              {t.projectProfileHint}
+              <textarea value={profileDraft} onChange={(event) => setProfileDraft(event.target.value)} rows={5} />
+            </label>
+            <button type="button" className="gb-review-button" disabled={memoryBusy} onClick={() => void saveProfile()}>{t.projectProfileSave}</button>
+          </div>
+          <div className="gb-drawer-toolbar"><span>{t.memoryTab}</span></div>
+          <div className="gb-task-contract">
+            <label>
+              {t.memoryKind}
+              <select value={memoryKind} onChange={(event) => setMemoryKind(event.target.value)}>
+                <option value="convention">convention</option>
+                <option value="preference">preference</option>
+                <option value="fact">fact</option>
+                <option value="warning">warning</option>
+              </select>
+            </label>
+            <label>
+              {t.memoryContentHint}
+              <textarea value={memoryDraft} onChange={(event) => setMemoryDraft(event.target.value)} rows={3} />
+            </label>
+            <button type="button" className="gb-review-button" disabled={memoryBusy || !memoryDraft.trim()} onClick={() => void addMemory()}>{t.memoryAdd}</button>
+          </div>
+          {(memoryQuery.data?.length ?? 0) === 0 && <div className="gb-drawer-empty">{t.memoryEmpty}</div>}
+          {memoryQuery.data?.map((memory) => (
+            <div className="gb-drawer-activity" key={memory.memoryId}>
+              <span className={`gb-status-dot ${memory.state === "accepted" ? "idle" : "running"}`} />
+              <div>
+                <strong>[{memory.kind}] {memory.content}</strong>
+                <small>{memory.state} · {(memory.confidence * 100).toFixed(0)}%</small>
+              </div>
+              <div>
+                {memory.state !== "accepted" && (
+                  <button type="button" className="gb-icon-button" title={t.memoryAccept} onClick={() => void bridge.reviewMemoryCandidate(memory.memoryId, "accepted").then(() => memoryQuery.refetch())}>✓</button>
+                )}
+                {memory.state !== "rejected" && (
+                  <button type="button" className="gb-icon-button" title={t.memoryReject} onClick={() => void bridge.reviewMemoryCandidate(memory.memoryId, "rejected").then(() => memoryQuery.refetch())}>×</button>
+                )}
+              </div>
+            </div>
+          ))}
         </Tabs.Content>}
         <Tabs.Content value="terminal" className="gb-drawer-content">
           <div className="gb-drawer-toolbar"><span>Task terminals</span><button type="button" className="gb-icon-button" aria-label="New terminal" onClick={() => void createTerminal()}><Plus size={14} /></button></div>
@@ -486,6 +651,22 @@ export function ContextDrawer({
         <Tabs.Content value="files" className="gb-drawer-content">
           <div className="gb-drawer-toolbar"><button type="button" className="gb-icon-button" disabled={!explorerPath} title="Parent directory" aria-label="Parent directory" onClick={() => setExplorerPath(explorerPath?.split("/").slice(0, -1).join("/") || null)}>↑</button><span>{explorerPath || "."}</span><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => void treeQuery.refetch()}><RefreshCw size={14} /></button></div>
           <label className="gb-explorer-search"><Search size={13} /><input value={explorerSearch} placeholder="Search names and content" onChange={(event) => setExplorerSearch(event.target.value)} /></label>
+          {(symbolQuery.data?.length ?? 0) > 0 && (
+            <div className="gb-symbol-hits">
+              <strong>{t.symbolHits}</strong>
+              {symbolQuery.data?.map((hit) => (
+                <button
+                  type="button"
+                  className="gb-file-row"
+                  key={`${hit.path}:${hit.line}:${hit.name}`}
+                  onClick={() => setPreviewPath(hit.path)}
+                >
+                  <span>{hit.name} <i>· {hit.kind}</i></span>
+                  <small>{hit.path}:{hit.line}</small>
+                </button>
+              ))}
+            </div>
+          )}
           {(searchQuery.data ?? treeQuery.data)?.map((entry) => <button type="button" className="gb-file-row" key={entry.path} onClick={() => entry.directory ? setExplorerPath(entry.path) : setPreviewPath(entry.path)}><span>{entry.directory ? "▸ " : ""}{entry.path}</span><small>{entry.size ?? ""}</small></button>)}
           {previewPath && <div className="gb-patch-panel"><div className="gb-patch-head"><span>{previewPath}</span><button type="button" className="gb-icon-button" aria-label="Close preview" onClick={() => setPreviewPath(null)}><X size={13} /></button></div>{previewQuery.data?.binary ? <div className="gb-drawer-empty">Binary file · {previewQuery.data.size} bytes</div> : <pre>{previewQuery.data?.content}{previewQuery.data?.truncated ? "\n… [preview truncated]" : ""}</pre>}</div>}
         </Tabs.Content>

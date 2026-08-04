@@ -6,7 +6,10 @@ import {
   extractPermissionOptions,
   isPermissionMethod,
   isSessionEventEnvelope,
+  parsePlanDocument,
+  planDocumentToMarkdown,
 } from "../contracts";
+import { isSubagentTool, parseSubagentMeta } from "../contracts/subagent";
 import type {
   AgentStatus,
   GrokProbe,
@@ -496,13 +499,29 @@ export function handleSessionUpdate(
     case "tool_call": {
       flushStreams();
       const id = String(u.toolCallId ?? u.tool_call_id ?? crypto.randomUUID());
+      const title = String(u.title ?? u.kind ?? "tool");
+      const kind = u.kind ? String(u.kind) : undefined;
+      const status = String(u.status ?? "running");
+      const rawInput = u.rawInput ?? u.input ?? u.raw_input;
       store.upsertTool(sid, {
         id,
-        title: String(u.title ?? u.kind ?? "tool"),
-        kind: u.kind ? String(u.kind) : undefined,
-        status: String(u.status ?? "running"),
-        input: u.rawInput ?? u.input ?? u.raw_input,
+        title,
+        kind,
+        status,
+        input: rawInput,
       });
+      // Grok parallel workers often arrive as tool_call, not a dedicated update kind.
+      if (isSubagentTool({ title, kind, rawInput })) {
+        const meta = parseSubagentMeta({ title, kind, rawInput, status });
+        store.upsertSubtask(sid, {
+          toolCallId: id,
+          title: meta.title,
+          status,
+          role: meta.role,
+          model: meta.model,
+          detail: meta.detail,
+        });
+      }
       store.setInspector(sid, { kind: "tool", toolCallId: id });
       store.setRightPanel("tasks");
       break;
@@ -511,24 +530,65 @@ export function handleSessionUpdate(
       flushStreams();
       const id = String(u.toolCallId ?? u.tool_call_id ?? "");
       if (!id) break;
+      const title = String(u.title ?? "tool");
+      const kind = u.kind ? String(u.kind) : undefined;
+      const status = String(u.status ?? "updated");
+      const rawInput = u.rawInput ?? u.input;
       store.upsertTool(sid, {
         id,
-        title: String(u.title ?? "tool"),
-        kind: u.kind ? String(u.kind) : undefined,
-        status: String(u.status ?? "updated"),
-        input: u.rawInput ?? u.input,
+        title,
+        kind,
+        status,
+        input: rawInput,
         output: u.rawOutput ?? u.output ?? u.raw_output,
       });
+      if (isSubagentTool({ title, kind, rawInput })) {
+        const meta = parseSubagentMeta({ title, kind, rawInput, status });
+        store.upsertSubtask(sid, {
+          toolCallId: id,
+          title: meta.title,
+          status,
+          role: meta.role,
+          model: meta.model,
+          detail: meta.detail,
+        });
+      } else {
+        // Status updates may omit kind/title; refresh existing subtask by id.
+        const existing = store.sessions[sid]?.blocks.find(
+          (b) => b.type === "subtask" && b.toolCallId === id,
+        );
+        if (existing && existing.type === "subtask") {
+          store.upsertSubtask(sid, {
+            toolCallId: id,
+            title: existing.title,
+            status,
+            role: existing.role,
+            model: existing.model,
+            detail: existing.detail,
+          });
+        }
+      }
       break;
     }
     case "plan": {
       flushStreams();
+      const structured =
+        u.plan && typeof u.plan === "object"
+          ? parsePlanDocument(u.plan)
+          : Array.isArray(u.entries)
+            ? parsePlanDocument({ entries: u.entries, title: u.title })
+            : null;
+      const hasStructured = Boolean(structured && structured.steps.length > 0);
       const text =
-        extractText(u.content) ||
-        (typeof u.plan === "string"
-          ? u.plan
-          : JSON.stringify(u.plan ?? u, null, 2));
-      store.setPlan(sid, text);
+        extractText(u.content)
+        || (typeof u.plan === "string" ? u.plan : "")
+        || (hasStructured ? planDocumentToMarkdown(structured!) : "")
+        || (typeof u.plan === "object" ? JSON.stringify(u.plan ?? u, null, 2) : "")
+        || JSON.stringify(u, null, 2);
+      const document = hasStructured
+        ? structured!
+        : parsePlanDocument(text);
+      store.setPlan(sid, text, document.steps.length > 0 ? document : undefined);
       store.updateSummary(sid, {
         runState: "awaiting_plan",
         attentionRequired: true,
@@ -765,12 +825,26 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
           const params = routedRequest.params && typeof routedRequest.params === "object"
             ? routedRequest.params as Record<string, unknown>
             : {};
+          const structured =
+            params.plan && typeof params.plan === "object"
+              ? parsePlanDocument(params.plan)
+              : Array.isArray(params.entries)
+                ? parsePlanDocument({ entries: params.entries, title: params.title })
+                : null;
+          const hasStructured = Boolean(structured && structured.steps.length > 0);
           const planText = extractText(
             (params.planContent ?? params.plan_content ?? params.content) as Parameters<typeof extractText>[0],
           )
             || (typeof params.plan === "string" ? params.plan : "")
+            || (hasStructured ? planDocumentToMarkdown(structured!) : "")
             || t.planReadyFallback;
-          useAppStore.getState().setPlan(sid, planText);
+          useAppStore.getState().setPlan(
+            sid,
+            planText,
+            hasStructured ? structured! : parsePlanDocument(planText).steps.length
+              ? parsePlanDocument(planText)
+              : undefined,
+          );
           useAppStore.getState().setPlanApproval(routedRequest);
           useAppStore.getState().updateSummary(sid, {
             runState: "awaiting_plan",

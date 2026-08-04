@@ -167,6 +167,62 @@ pub fn search(root: &str, query: &str) -> Result<Vec<WorkspaceEntry>, WorkspaceE
     Ok(results)
 }
 
+const PROFILE_RELATIVE: &str = ".grok/profile.md";
+const MAX_PROFILE_BYTES: usize = 64 * 1024;
+
+pub fn get_project_profile(
+    workspace_id: &str,
+) -> Result<crate::platform::ProjectProfile, WorkspaceError> {
+    let root = canonical_root(workspace_id)?;
+    let path = root.join(PROFILE_RELATIVE);
+    if !path.exists() {
+        return Ok(crate::platform::ProjectProfile {
+            workspace_id: workspace_id.into(),
+            content: String::new(),
+            path: Some(path.to_string_lossy().into()),
+            exists: false,
+            updated_at: None,
+        });
+    }
+    let preview = read(workspace_id, PROFILE_RELATIVE)?;
+    let content = preview.content.unwrap_or_default();
+    Ok(crate::platform::ProjectProfile {
+        workspace_id: workspace_id.into(),
+        content,
+        path: Some(path.to_string_lossy().into()),
+        exists: true,
+        updated_at: Some(crate::acp::iso_now()),
+    })
+}
+
+pub fn save_project_profile(
+    workspace_id: &str,
+    content: &str,
+) -> Result<crate::platform::ProjectProfile, WorkspaceError> {
+    if content.len() > MAX_PROFILE_BYTES {
+        return Err(WorkspaceError::Message(
+            "project profile exceeds 64KB limit".into(),
+        ));
+    }
+    let root = canonical_root(workspace_id)?;
+    let path = root.join(PROFILE_RELATIVE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    // Ensure final path stays under workspace (no symlink escape on parent).
+    let parent = path
+        .parent()
+        .ok_or_else(|| WorkspaceError::Message("invalid profile path".into()))?;
+    let parent_canon = std::fs::canonicalize(parent)?;
+    if !parent_canon.starts_with(&root) {
+        return Err(WorkspaceError::Message(
+            "workspace path escaped root".into(),
+        ));
+    }
+    std::fs::write(&path, content.as_bytes())?;
+    get_project_profile(workspace_id)
+}
+
 fn canonical_root(root: &str) -> Result<PathBuf, WorkspaceError> {
     let root = std::fs::canonicalize(root)?;
     if !root.is_dir() {
@@ -194,4 +250,27 @@ fn resolve_existing(root: &Path, relative: &str) -> Result<PathBuf, WorkspaceErr
         ));
     }
     Ok(resolved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use uuid::Uuid;
+
+    #[test]
+    fn project_profile_roundtrip() {
+        let root = std::env::temp_dir().join(format!("gbd-profile-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.to_string_lossy().to_string();
+        let missing = get_project_profile(&path).unwrap();
+        assert!(!missing.exists);
+        assert!(missing.content.is_empty());
+        let saved = save_project_profile(&path, "# Conventions\nPrefer pnpm\n").unwrap();
+        assert!(saved.exists);
+        assert!(saved.content.contains("Prefer pnpm"));
+        let loaded = get_project_profile(&path).unwrap();
+        assert_eq!(loaded.content, saved.content);
+        let _ = fs::remove_dir_all(&root);
+    }
 }
