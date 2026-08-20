@@ -81,6 +81,9 @@ const DOCUMENTED_UNSUPPORTED = [
   "/config-agents", "/personas", "/feedback", "/privacy",
   // Grok Build 0.2.112+: opt-in TUI onboarding tour.
   "/tutorial",
+  // Grok Build 1.0+: workflow dashboard / named runs are TUI surfaces.
+  "/workflows",
+  "/workflow",
 ] as const;
 
 const CAPABILITY_GATED = [

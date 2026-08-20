@@ -83,6 +83,8 @@ describe("slash command catalog", () => {
     const catalog = buildCommandCatalog([], []);
     expect(parseSlashCommand("/share", catalog)?.descriptor).toMatchObject({ available: false, execution: "unsupported" });
     expect(parseSlashCommand("/tutorial", catalog)?.descriptor).toMatchObject({ available: false, execution: "unsupported" });
+    expect(parseSlashCommand("/workflows", catalog)?.descriptor).toMatchObject({ available: false, execution: "unsupported" });
+    expect(parseSlashCommand("/workflow", catalog)?.descriptor).toMatchObject({ available: false, execution: "unsupported" });
     expect(parseSlashCommand("/does-not-exist", catalog)).toBeNull();
   });
 

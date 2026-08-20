@@ -3,6 +3,11 @@ import {
   defaultSettings,
   normalizeSettings,
   resolveAgentExecutable,
+  resolveFallbackAgentExecutable,
+  adapterFallbackLabel,
+  resolveTurnLadderStep,
+  resolveTurnLadderSteps,
+  isTurnLadderEligibleError,
   type Settings,
 } from "./settings";
 
@@ -20,6 +25,7 @@ describe("settings agent defaults", () => {
     expect(settings.privacyMode).toBe("strict");
     expect(settings.preferredAdapterId).toBe("grok-acp");
     expect(settings.secondaryAcpPath).toBe("");
+    expect(settings.mixedPlanning).toBe(false);
   });
 
   it("does not change account privacy or harness preferences for legacy settings", () => {
@@ -49,6 +55,17 @@ describe("settings agent defaults", () => {
     expect(normalized.codingDataPrivacyConfigured).toBe(true);
     expect(normalized.privateChat).toBe(true);
     expect(normalized.useHarness).toBe(false);
+    expect(normalized.mixedPlanning).toBe(false);
+  });
+
+  it("preserves mixed planning when a planner path is set", () => {
+    const normalized = normalizeSettings({
+      ...defaultSettings(),
+      mixedPlanning: true,
+      secondaryAcpPath: "/usr/local/bin/codex",
+    });
+    expect(normalized.mixedPlanning).toBe(true);
+    expect(normalized.secondaryAcpPath).toBe("/usr/local/bin/codex");
   });
 
   it("recognizes an existing account privacy preference when the sync marker is absent", () => {
@@ -77,5 +94,71 @@ describe("settings agent defaults", () => {
         cliPathOverride: "/usr/local/bin/grok",
       }),
     ).toBe("/usr/local/bin/grok");
+  });
+
+  it("resolves a one-shot fallback executable when the alternate is configured", () => {
+    expect(resolveFallbackAgentExecutable(defaultSettings())).toBeNull();
+    expect(
+      resolveFallbackAgentExecutable({
+        ...defaultSettings(),
+        cliPathOverride: "/usr/local/bin/grok",
+        secondaryAcpPath: "/tmp/mock-acp",
+      }),
+    ).toBe("/tmp/mock-acp");
+    expect(
+      resolveFallbackAgentExecutable({
+        ...defaultSettings(),
+        preferredAdapterId: "generic-acp",
+        secondaryAcpPath: "/tmp/mock-acp",
+        cliPathOverride: "/usr/local/bin/grok",
+      }),
+    ).toBe("/usr/local/bin/grok");
+    expect(
+      resolveFallbackAgentExecutable({
+        ...defaultSettings(),
+        preferredAdapterId: "generic-acp",
+        secondaryAcpPath: "/tmp/mock-acp",
+      }),
+    ).toBeNull();
+    expect(adapterFallbackLabel(defaultSettings())).toContain("secondary");
+  });
+
+  it("resolves multi-step turn ladder adapter then model, and skips cancel noise", () => {
+    expect(
+      resolveTurnLadderSteps({
+        ...defaultSettings(),
+        cliPathOverride: "/usr/local/bin/grok",
+        secondaryAcpPath: "/tmp/mock-acp",
+        fallbackModelId: "grok-4",
+        model: "grok-4.5",
+      }),
+    ).toEqual([
+      { kind: "adapter", grokPath: "/tmp/mock-acp", label: expect.stringContaining("secondary") },
+      { kind: "model", modelId: "grok-4" },
+    ]);
+    expect(
+      resolveTurnLadderStep({
+        ...defaultSettings(),
+        cliPathOverride: "/usr/local/bin/grok",
+        secondaryAcpPath: "/tmp/mock-acp",
+        fallbackModelId: "grok-4",
+      }),
+    ).toMatchObject({ kind: "adapter", grokPath: "/tmp/mock-acp" });
+    expect(
+      resolveTurnLadderSteps({
+        ...defaultSettings(),
+        model: "grok-4.5",
+        fallbackModelId: "grok-4",
+      }),
+    ).toEqual([{ kind: "model", modelId: "grok-4" }]);
+    expect(
+      resolveTurnLadderSteps({
+        ...defaultSettings(),
+        model: "grok-4",
+        fallbackModelId: "grok-4",
+      }),
+    ).toEqual([]);
+    expect(isTurnLadderEligibleError(new Error("spawn failed"))).toBe(true);
+    expect(isTurnLadderEligibleError(new Error("cancelled by user"))).toBe(false);
   });
 });

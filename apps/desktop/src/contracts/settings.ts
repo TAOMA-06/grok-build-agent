@@ -66,11 +66,22 @@ export type Settings = {
   disableVideoTools: boolean;
   /**
    * Absolute path to a secondary ACP-compatible agent binary.
-   * Used when preferredAdapterId is `generic-acp`.
+   * Mixed planning uses this as the Plan-mode planner (typically Codex).
+   * Preferred runtime `generic-acp` uses it for the whole task.
    */
   secondaryAcpPath: string;
   /** Preferred runtime adapter: `grok-acp` (default) or `generic-acp`. */
   preferredAdapterId: "grok-acp" | "generic-acp" | string;
+  /**
+   * When true, Plan-mode tasks start on the secondary ACP (planner, e.g. Codex)
+   * and Grok implements after approval. Executor for Agent/Goal stays Grok.
+   */
+  mixedPlanning: boolean;
+  /**
+   * Optional alternate model id for one-shot turn recovery when adapter
+   * fallback is unavailable. Session-scoped only — never writes Settings.model.
+   */
+  fallbackModelId: string;
   sandbox: SandboxMode;
   cwd: string;
   onboardingDone: boolean;
@@ -131,6 +142,8 @@ export function defaultSettings(): Settings {
     disableVideoTools: false,
     secondaryAcpPath: "",
     preferredAdapterId: "grok-acp",
+    mixedPlanning: false,
+    fallbackModelId: "",
     sandbox: "workspace",
     cwd: "",
     onboardingDone: false,
@@ -187,6 +200,11 @@ export function normalizeSettings(settings: Settings): Settings {
       : "";
   const preferredAdapterId =
     preferredAdapterIdRaw === "generic-acp" ? "generic-acp" : "grok-acp";
+  const fallbackModelId =
+    typeof (settings as { fallbackModelId?: string }).fallbackModelId === "string"
+      ? (settings as { fallbackModelId: string }).fallbackModelId.trim()
+      : "";
+  const mixedPlanning = (settings as { mixedPlanning?: boolean }).mixedPlanning === true;
   if (
     settings.schemaVersion === 10 &&
     defaultReasoningEffort === settings.defaultReasoningEffort &&
@@ -201,7 +219,9 @@ export function normalizeSettings(settings: Settings): Settings {
     disableImageTools === Boolean(settings.disableImageTools) &&
     disableVideoTools === Boolean(settings.disableVideoTools) &&
     secondaryAcpPath === (settings.secondaryAcpPath ?? "") &&
-    preferredAdapterId === (settings.preferredAdapterId || "grok-acp")
+    preferredAdapterId === (settings.preferredAdapterId || "grok-acp") &&
+    mixedPlanning === Boolean(settings.mixedPlanning) &&
+    fallbackModelId === ((settings as { fallbackModelId?: string }).fallbackModelId ?? "").trim()
   ) return settings;
   return {
     ...settings,
@@ -219,6 +239,8 @@ export function normalizeSettings(settings: Settings): Settings {
     disableVideoTools,
     secondaryAcpPath,
     preferredAdapterId,
+    mixedPlanning,
+    fallbackModelId,
   };
 }
 
@@ -233,4 +255,74 @@ export function resolveAgentExecutable(settings: Settings): string | null {
   }
   const primary = (settings.cliPathOverride || settings.grokPath).trim();
   return primary || null;
+}
+
+/**
+ * One-shot fallback executable when the preferred adapter fails to start.
+ * Returns null when no alternate path is configured or it matches the preferred path.
+ */
+export function resolveFallbackAgentExecutable(settings: Settings): string | null {
+  const preferred = resolveAgentExecutable(settings);
+  if (settings.preferredAdapterId === "generic-acp") {
+    const primary = (settings.cliPathOverride || settings.grokPath).trim();
+    if (!primary || primary === preferred) return null;
+    return primary;
+  }
+  const secondary = settings.secondaryAcpPath.trim();
+  if (!secondary || secondary === preferred) return null;
+  return secondary;
+}
+
+/** Short label for timeline notes when a start falls back. */
+export function adapterFallbackLabel(settings: Settings): string {
+  if (settings.preferredAdapterId === "generic-acp") {
+    return "primary Grok ACP";
+  }
+  return "secondary ACP";
+}
+
+export type TurnLadderStep =
+  | { kind: "adapter"; grokPath: string; label: string }
+  | { kind: "model"; modelId: string };
+
+/**
+ * Ordered turn recovery steps: secondary ACP first (when configured), then
+ * fallback model. Never mutates Settings — caller applies session overrides.
+ */
+export function resolveTurnLadderSteps(
+  settings: Settings,
+  currentModel?: string | null,
+): TurnLadderStep[] {
+  const steps: TurnLadderStep[] = [];
+  const fallbackExe = resolveFallbackAgentExecutable(settings);
+  if (fallbackExe) {
+    steps.push({
+      kind: "adapter",
+      grokPath: fallbackExe,
+      label: adapterFallbackLabel(settings),
+    });
+  }
+  const fallbackModel = settings.fallbackModelId.trim();
+  const current = (currentModel || settings.model).trim();
+  if (fallbackModel && fallbackModel !== current) {
+    steps.push({ kind: "model", modelId: fallbackModel });
+  }
+  return steps;
+}
+
+/** First ladder step only — prefer `resolveTurnLadderSteps` for multi-step recovery. */
+export function resolveTurnLadderStep(
+  settings: Settings,
+  currentModel?: string | null,
+): TurnLadderStep | null {
+  return resolveTurnLadderSteps(settings, currentModel)[0] ?? null;
+}
+
+/** Skip ladder for cancel / permission noise — those are not runtime failures. */
+export function isTurnLadderEligibleError(error: unknown): boolean {
+  const text = String(error);
+  if (!text.trim()) return false;
+  if (/cancelled|canceled|aborted|user stop/i.test(text)) return false;
+  if (/permission|not allowed|denied by policy/i.test(text)) return false;
+  return true;
 }

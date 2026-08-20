@@ -89,6 +89,7 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
                 "strictNetworkIsolation": false,
                 "pendingPermissions": state.db.list_permission_requests(true).map(|items| items.len()).unwrap_or(0),
                 "blobBytes": state.blobs.disk_usage().unwrap_or(0),
+                "github": crate::git_ops::github_status(),
             }))
         }
         "doctor.rebuildProjections" => state
@@ -574,6 +575,42 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
         )
         .map_err(|error| error.to_string())
         .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "workspace.index.references" => crate::code_index::search_references(
+            request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
+            request.params.get("query").and_then(Value::as_str).unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "workspace.index.callGraph" => crate::code_index::search_call_graph(
+            request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
+            request.params.get("query").and_then(Value::as_str).unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "workspace.index.invalidate" => {
+            let paths = request
+                .params
+                .get("paths")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                });
+            crate::code_index::invalidate_symbol_cache(
+                request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
+                paths.as_deref(),
+            )
+            .map_err(|error| error.to_string())
+            .map(|removed| json!({ "removed": removed }))
+        }
+        "workspace.index.rebuild" => crate::code_index::rebuild_symbol_cache(
+            request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())
+        .map(|indexed| json!({ "indexed": indexed })),
         "workspace.read" => crate::workspace_ops::read(
             request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
             request.params.get("path").and_then(Value::as_str).unwrap_or_default(),
@@ -654,6 +691,14 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
         )
         .map_err(|error| error.to_string())
         .and_then(|request| crate::git_ops::commit(&request).map_err(|error| error.to_string()))
+        .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "git.pr.create" => serde_json::from_value::<crate::git_ops::GitPrCreateRequest>(
+            request.params.get("request").cloned().unwrap_or(Value::Null),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|request| {
+            crate::git_ops::create_pull_request(&request).map_err(|error| error.to_string())
+        })
         .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
         "git.checkpoint.create" => crate::git_ops::create_checkpoint(
             request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
@@ -840,11 +885,46 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
         "session.prompt" => prompt(state, request.params).await,
         "session.cancel" => match serde_json::from_value::<SessionRoute>(request.params) {
             Ok(route) => {
+                let scoped_subtree = route
+                    .tool_call_ids
+                    .as_ref()
+                    .is_some_and(|ids| !ids.is_empty());
                 let result = state
                     .runtime
-                    .cancel_session(&route.connection_id, &route.session_id)
+                    .cancel_session(
+                        &route.connection_id,
+                        &route.session_id,
+                        route.tool_call_ids.as_deref(),
+                    )
                     .map_err(|e| e.to_string());
-                if result.is_ok() {
+                // Subtree-scoped cancel is a soft hint for the runtime. Keep the
+                // Host execution ledger and task alive so the turn can continue.
+                // Also synthesize cancelled tool updates so the control plane stays
+                // coherent when the runtime ignores `_meta.toolCallIds`.
+                if result.is_ok() && scoped_subtree {
+                    let ids = route.tool_call_ids.clone().unwrap_or_default();
+                    let private_chat = state
+                        .private_sessions
+                        .lock()
+                        .contains_key(&route.session_id)
+                        || state
+                            .private_connections
+                            .lock()
+                            .contains(&route.connection_id);
+                    let bus: SharedEventBus = Arc::new(HostEventBus {
+                        db: state.db.clone(),
+                        events: state.events.clone(),
+                        pending_actions: state.pending_actions.clone(),
+                        private_chat,
+                    });
+                    let _ = state.runtime.emit_host_subtree_cancelled(
+                        &route.connection_id,
+                        &route.session_id,
+                        &ids,
+                        &bus,
+                    );
+                }
+                if result.is_ok() && !scoped_subtree {
                     if let Some(task_id) = private_task_for_session(state, &route.session_id) {
                         state.terminals.cancel_task(&task_id);
                         state.private_task_roots.lock().remove(&task_id);

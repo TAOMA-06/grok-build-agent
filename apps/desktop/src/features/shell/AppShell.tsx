@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore, type SessionRuntime } from "../../store";
 import { mergeSelectableModels } from "../../contracts/model";
+import { collectSubtreeToolCallIds, listSubagents } from "../../contracts/subagent";
 import type { Settings } from "../../types";
-import { t } from "../../i18n";
+import { t, translate } from "../../i18n";
 import { ContextDrawer } from "./ContextDrawer";
 import { DirtyWorktreeDialog } from "./DirtyWorktreeDialog";
 import { MissionControlDialog } from "./MissionControlDialog";
@@ -463,12 +464,65 @@ export function AppShell() {
           setDrawerOpen(false);
         }}
         onNewTask={newTask}
+        onStopSessionWorkers={async (sessionId, toolCallId) => {
+          setActiveSession(sessionId);
+          const session = useAppStore.getState().sessions[sessionId];
+          let toolCallIds: string[] | undefined;
+          if (session && toolCallId) {
+            toolCallIds = collectSubtreeToolCallIds(
+              listSubagents(session.tools),
+              toolCallId,
+            );
+            const ids = new Set(toolCallIds);
+            for (const tool of session.tools) {
+              if (!ids.has(tool.id)) continue;
+              useAppStore.getState().upsertTool(sessionId, {
+                ...tool,
+                status: "cancelled",
+              });
+            }
+          }
+          await controller.cancelWorkers({ toolCallIds });
+          if (!toolCallIds?.length) return;
+          const pendingIds = [...toolCallIds];
+          window.setTimeout(() => {
+            const live = useAppStore.getState().sessions[sessionId];
+            if (!live) return;
+            const stillActive = new Set(
+              ["pending", "running", "unknown"],
+            );
+            let forced = 0;
+            for (const tool of live.tools) {
+              if (!pendingIds.includes(tool.id)) continue;
+              if (!stillActive.has(tool.status)) continue;
+              useAppStore.getState().upsertTool(sessionId, {
+                ...tool,
+                status: "cancelled",
+              });
+              forced += 1;
+            }
+            if (forced > 0) {
+              useAppStore.getState().addBlock(sessionId, {
+                id: crypto.randomUUID(),
+                type: "system",
+                level: "warn",
+                text: translate("softCancelForced", { count: String(forced) }),
+              });
+            }
+          }, 4_000);
+        }}
       />
       {drawerOpen && activeSession && <ContextDrawer session={activeSession} onClose={() => setDrawerOpen(false)} />}
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         initialTab={settingsTab}
+        onInsertCapabilityDraft={(draft) => {
+          const sessionId = useAppStore.getState().activeSessionId;
+          if (!sessionId) return;
+          useAppStore.getState().setSessionDraft(sessionId, draft);
+          window.dispatchEvent(new Event("grok:focus-composer"));
+        }}
         onReloadAgent={async () => {
           // Tool definitions are part of the provider-cached prefix. Apply MCP
           // changes to a fresh task so an existing history keeps its warm cache.

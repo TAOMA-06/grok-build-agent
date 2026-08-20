@@ -231,8 +231,13 @@ export async function prepareAttachments(
 export async function cancelPrompt(
   connectionId: string,
   sessionId: string,
+  toolCallIds?: string[] | null,
 ): Promise<void> {
-  return invoke("cancel_prompt", { connectionId, sessionId });
+  return invoke("cancel_prompt", {
+    connectionId,
+    sessionId,
+    toolCallIds: toolCallIds?.length ? toolCallIds : null,
+  });
 }
 
 export async function respondServerRequest(
@@ -530,17 +535,22 @@ export function handleSessionUpdate(
       flushStreams();
       const id = String(u.toolCallId ?? u.tool_call_id ?? "");
       if (!id) break;
-      const title = String(u.title ?? "tool");
-      const kind = u.kind ? String(u.kind) : undefined;
+      const existingTool = store.sessions[sid]?.tools.find((tool) => tool.id === id);
+      const title = u.title != null && String(u.title).length > 0
+        ? String(u.title)
+        : (existingTool?.title ?? "tool");
+      const kind = u.kind != null
+        ? String(u.kind)
+        : existingTool?.kind;
       const status = String(u.status ?? "updated");
-      const rawInput = u.rawInput ?? u.input;
+      const rawInput = u.rawInput ?? u.input ?? existingTool?.input;
       store.upsertTool(sid, {
         id,
         title,
         kind,
         status,
         input: rawInput,
-        output: u.rawOutput ?? u.output ?? u.raw_output,
+        output: u.rawOutput ?? u.output ?? u.raw_output ?? existingTool?.output,
       });
       if (isSubagentTool({ title, kind, rawInput })) {
         const meta = parseSubagentMeta({ title, kind, rawInput, status });

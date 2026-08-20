@@ -85,6 +85,11 @@ export type DoctorStatus = {
   strictNetworkIsolation: boolean;
   pendingPermissions: number;
   blobBytes: number;
+  github?: {
+    found: boolean;
+    authenticated: boolean;
+    detail: string;
+  } | null;
 };
 
 export type PlatformEvent<TPayload = unknown> = {

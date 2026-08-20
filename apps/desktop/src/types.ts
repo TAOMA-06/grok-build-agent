@@ -126,6 +126,7 @@ export type {
   GitCheckpoint,
   GitMutationResult,
   GitCommitResult,
+  GitPrCreateResult,
   GitCheckpointRestorePreview,
 } from "./contracts";
 

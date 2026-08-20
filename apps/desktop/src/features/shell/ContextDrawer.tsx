@@ -10,6 +10,7 @@ import {
   GitBranch,
   GitMerge,
   GitCommitHorizontal,
+  GitPullRequest,
   RefreshCw,
   RotateCcw,
   ListPlus,
@@ -29,10 +30,21 @@ import type { SessionRuntime } from "../../store";
 import type { GitCheckpoint, WorktreeApplyPreview } from "../../types";
 import {
   BROWSER_MCP_TEMPLATE,
+  browserEvidenceTimelineNote,
   browserScreenshotEvidenceSummary,
+  buildBrowserVerifyRunbook,
+  findBrowserLikeMcpServer,
+  getMcpTemplate,
   isBrowserVerifyCommand,
+  isScreenshotAttachment,
   parseBrowserVerifyCommands,
-} from "../../contracts/browserVerify";
+  templateToMcpServerInput,
+} from "../../contracts";
+import {
+  appendMemoryToProfile,
+  extractMemoryProposalsFromBlocks,
+  filterNewMemoryProposals,
+} from "../../contracts/memory";
 import { t, translate } from "../../i18n";
 
 function splitPatchHunks(patch: string): string[] {
@@ -86,6 +98,8 @@ export function ContextDrawer({
   const [memoryKind, setMemoryKind] = useState("convention");
   const [profileDraft, setProfileDraft] = useState("");
   const [memoryBusy, setMemoryBusy] = useState(false);
+  const [indexBusy, setIndexBusy] = useState(false);
+  const [indexNote, setIndexNote] = useState<string | null>(null);
   const [terminalTabs, setTerminalTabs] = useState<Array<{ id: string; title: string; output: string; offset: number; exitCode: number | null }>>([]);
   const [activeTerminal, setActiveTerminal] = useState<string | null>(null);
   const [terminalInput, setTerminalInput] = useState("");
@@ -119,6 +133,16 @@ export function ContextDrawer({
     queryFn: () => bridge.workspaceIndexSearch(root, explorerSearch, privateChat),
     enabled: explorerSearch.trim().length > 1 && /^[\w./:-]+$/.test(explorerSearch.trim()),
   });
+  const referenceQuery = useQuery({
+    queryKey: ["workspace-index-refs", root, explorerSearch, privateChat],
+    queryFn: () => bridge.workspaceIndexReferences(root, explorerSearch, privateChat),
+    enabled: explorerSearch.trim().length > 1 && /^[A-Za-z_][\w']*$/.test(explorerSearch.trim()),
+  });
+  const callGraphQuery = useQuery({
+    queryKey: ["workspace-index-calls", root, explorerSearch, privateChat],
+    queryFn: () => bridge.workspaceIndexCallGraph(root, explorerSearch, privateChat),
+    enabled: explorerSearch.trim().length > 1 && /^[A-Za-z_][\w']*$/.test(explorerSearch.trim()),
+  });
   const previewQuery = useQuery({ queryKey: ["workspace-preview", root, previewPath, privateChat], queryFn: () => bridge.workspaceRead(root, previewPath!, privateChat), enabled: Boolean(previewPath) });
   const workspaceId = session.summary.workspaceRoot;
   const memoryQuery = useQuery({
@@ -134,6 +158,28 @@ export function ContextDrawer({
   const browserVerifies = useMemo(
     () => parseBrowserVerifyCommands(taskQuery.data?.verificationCommands ?? []),
     [taskQuery.data?.verificationCommands],
+  );
+  const settings = useAppStore((state) => state.settings);
+  const setAgentReloadRequired = useAppStore((state) => state.setAgentReloadRequired);
+  const mcpServersQuery = useQuery({
+    queryKey: ["mcp-servers-browser", settings.grokPath, root, privateChat],
+    queryFn: () => bridge.listMcpServers(settings.grokPath || undefined, root || null),
+    enabled: !privateChat && browserVerifies.length > 0,
+  });
+  const browserMcp = useMemo(
+    () => findBrowserLikeMcpServer(mcpServersQuery.data?.servers ?? []),
+    [mcpServersQuery.data?.servers],
+  );
+  const screenshotAttachments = useMemo(
+    () => session.attachments.filter((item) => isScreenshotAttachment(item)),
+    [session.attachments],
+  );
+  const pendingMemoryProposals = useMemo(
+    () => filterNewMemoryProposals(
+      extractMemoryProposalsFromBlocks(session.blocks),
+      memoryQuery.data ?? [],
+    ),
+    [session.blocks, memoryQuery.data],
   );
   useEffect(() => {
     if (profileQuery.data) setProfileDraft(profileQuery.data.content);
@@ -250,24 +296,167 @@ export function ContextDrawer({
     }
   }
 
-  async function recordBrowserScreenshot(command: string) {
-    const note = window.prompt(t.browserVerifyRecord, "")?.trim();
+  async function recordBrowserScreenshot(command: string, attachmentName?: string) {
+    const note = attachmentName
+      ?? window.prompt(t.browserVerifyRecord, "")?.trim();
     if (note === undefined) return;
+    const summary = browserScreenshotEvidenceSummary({
+      url: parseBrowserVerifyCommands([command])[0]?.target,
+      note: note || "manual screenshot",
+    });
     await bridge.saveVerificationResult({
       verificationId: crypto.randomUUID(),
       taskId,
       turnId: "browser",
       command,
       status: "passed",
-      summary: browserScreenshotEvidenceSummary({
-        url: parseBrowserVerifyCommands([command])[0]?.target,
-        note: note || "manual screenshot",
-      }),
+      summary,
       exitCode: 0,
       createdAt: new Date().toISOString(),
     });
+    useAppStore.getState().addBlock(taskId, {
+      type: "system",
+      id: crypto.randomUUID(),
+      text: browserEvidenceTimelineNote(summary),
+      level: "info",
+      at: new Date().toISOString(),
+    });
     await verificationQuery.refetch();
     await completionQuery.refetch();
+  }
+
+  function injectBrowserRunbook() {
+    const runbook = buildBrowserVerifyRunbook(browserVerifies);
+    useAppStore.getState().setSessionDraft(session.summary.sessionId, `${runbook}\n\n`);
+    onClose();
+  }
+
+  async function applyBrowserMcpTemplate() {
+    const template = getMcpTemplate("browser");
+    if (!template) return;
+    const scope = root?.trim() ? "project" as const : "user" as const;
+    try {
+      await bridge.upsertMcpServer(
+        templateToMcpServerInput(template, scope, root || null),
+        settings.grokPath || undefined,
+      );
+      setAgentReloadRequired(true);
+      await mcpServersQuery.refetch();
+    } catch (error) {
+      useAppStore.getState().addBlock(taskId, {
+        type: "system",
+        id: crypto.randomUUID(),
+        text: String(error),
+        level: "error",
+        at: new Date().toISOString(),
+      });
+    }
+  }
+
+  async function enableBrowserMcp() {
+    if (!browserMcp) return;
+    try {
+      await bridge.setMcpServerEnabled(browserMcp.name, true, {
+        grokPath: settings.grokPath || undefined,
+        workspaceRoot: root || null,
+      });
+      setAgentReloadRequired(true);
+      await mcpServersQuery.refetch();
+    } catch (error) {
+      useAppStore.getState().addBlock(taskId, {
+        type: "system",
+        id: crypto.randomUUID(),
+        text: String(error),
+        level: "error",
+        at: new Date().toISOString(),
+      });
+    }
+  }
+
+  async function refreshFilesAndIndex() {
+    if (indexBusy) return;
+    setIndexBusy(true);
+    setIndexNote(null);
+    try {
+      const result = await bridge.workspaceIndexInvalidate(root, null, privateChat);
+      setIndexNote(translate("symbolIndexInvalidated", { count: String(result.removed) }));
+      await Promise.all([
+        treeQuery.refetch(),
+        symbolQuery.refetch(),
+        referenceQuery.refetch(),
+        callGraphQuery.refetch(),
+      ]);
+    } catch (error) {
+      setIndexNote(String(error));
+    } finally {
+      setIndexBusy(false);
+    }
+  }
+
+  async function rebuildSymbolIndex() {
+    if (indexBusy) return;
+    setIndexBusy(true);
+    setIndexNote(null);
+    try {
+      const result = await bridge.workspaceIndexRebuild(root, privateChat);
+      setIndexNote(`${t.symbolIndexRebuilt} · ${result.indexed}`);
+      await Promise.all([
+        symbolQuery.refetch(),
+        referenceQuery.refetch(),
+        callGraphQuery.refetch(),
+      ]);
+    } catch (error) {
+      setIndexNote(String(error));
+    } finally {
+      setIndexBusy(false);
+    }
+  }
+
+  async function acceptMemory(memory: import("../../types").MemoryCandidate, toProfile: boolean) {
+    if (memoryBusy) return;
+    setMemoryBusy(true);
+    try {
+      await bridge.reviewMemoryCandidate(memory.memoryId, "accepted");
+      if (toProfile) {
+        const next = appendMemoryToProfile(profileDraft, memory);
+        setProfileDraft(next);
+        await bridge.saveProjectProfile(workspaceId, next);
+        await profileQuery.refetch();
+        setIndexNote(t.memoryAcceptedToProfile);
+      }
+      await memoryQuery.refetch();
+    } finally {
+      setMemoryBusy(false);
+    }
+  }
+
+  async function scanTranscriptForMemories() {
+    if (privateChat || memoryBusy) return;
+    const proposals = pendingMemoryProposals.slice(0, 12);
+    if (proposals.length === 0) {
+      window.alert(t.memoryScanEmpty);
+      return;
+    }
+    setMemoryBusy(true);
+    try {
+      const now = new Date().toISOString();
+      for (const proposal of proposals) {
+        await bridge.upsertMemoryCandidate({
+          memoryId: crypto.randomUUID(),
+          workspaceId,
+          kind: proposal.kind,
+          content: proposal.content,
+          sourceEventId: proposal.sourceEventId,
+          confidence: proposal.confidence,
+          state: "candidate",
+          createdAt: now,
+          reviewedAt: null,
+        });
+      }
+      await memoryQuery.refetch();
+    } finally {
+      setMemoryBusy(false);
+    }
   }
 
   async function addMemory() {
@@ -371,6 +560,42 @@ export function ContextDrawer({
       await bridge.gitCommit(root, commitMessage, privateChat);
       setCommitMessage("");
       setSelectedPath(null);
+      await reviewQuery.refetch();
+    } catch (error) {
+      setGitError(`${t.gitActionFailed}: ${String(error)}`);
+    } finally {
+      setGitBusy(false);
+    }
+  }
+
+  async function openPullRequest() {
+    if (gitBusy || privateChat) return;
+    if (!window.confirm(t.createPullRequestConfirm)) return;
+    setGitBusy(true);
+    setGitError(null);
+    try {
+      const result = await bridge.gitCreatePullRequest(
+        root,
+        session.summary.title || undefined,
+        undefined,
+        true,
+        privateChat,
+      );
+      if (result.url) {
+        await bridge.copyText(result.url);
+        try {
+          await bridge.openPath(result.url);
+        } catch {
+          window.open(result.url, "_blank", "noopener,noreferrer");
+        }
+      }
+      setGitError(null);
+      useAppStore.getState().addBlock(session.summary.sessionId, {
+        id: crypto.randomUUID(),
+        type: "system",
+        level: "info",
+        text: translate("pullRequestOpened", { url: result.url }),
+      });
       await reviewQuery.refetch();
     } catch (error) {
       setGitError(`${t.gitActionFailed}: ${String(error)}`);
@@ -484,26 +709,29 @@ export function ContextDrawer({
               <button type="button" className="gb-review-button" disabled={gitBusy || !commitMessage.trim()} onClick={() => void commitStaged()}><GitCommitHorizontal size={14} /> {t.commitChanges}</button>
             </div>
           )}
-          {(reviewQuery.data?.files.length ?? 0) > 0 && (
+          {((reviewQuery.data?.files.length ?? 0) > 0
+            || (!privateChat && reviewQuery.data && reviewQuery.data.state !== "not_a_repo" && reviewQuery.data.state !== "error")) && (
             <div className="gb-drawer-actions">
-              <button
-                type="button"
-                className="gb-review-button"
-                onClick={() => {
-                  useAppStore.getState().setSessionDraft(
-                    session.summary.sessionId,
-                    `<review_feedback>\n${JSON.stringify({
-                      workspaceRoot: root,
-                      paths: selectedPath ? [selectedPath] : reviewQuery.data?.files.map((file) => file.path) ?? [],
-                      note: selectedPath ? translate("reviewFilePrompt", { path: selectedPath }) : t.reviewAllPrompt,
-                      includePatch: true,
-                    }, null, 2)}\n</review_feedback>\n`,
-                  );
-                  onClose();
-                }}
-              >
-                {t.sendReviewRequest}
-              </button>
+              {(reviewQuery.data?.files.length ?? 0) > 0 && (
+                <button
+                  type="button"
+                  className="gb-review-button"
+                  onClick={() => {
+                    useAppStore.getState().setSessionDraft(
+                      session.summary.sessionId,
+                      `<review_feedback>\n${JSON.stringify({
+                        workspaceRoot: root,
+                        paths: selectedPath ? [selectedPath] : reviewQuery.data?.files.map((file) => file.path) ?? [],
+                        note: selectedPath ? translate("reviewFilePrompt", { path: selectedPath }) : t.reviewAllPrompt,
+                        includePatch: true,
+                      }, null, 2)}\n</review_feedback>\n`,
+                    );
+                    onClose();
+                  }}
+                >
+                  {t.sendReviewRequest}
+                </button>
+              )}
               {applyRequest && (
                 <button
                   type="button"
@@ -513,6 +741,18 @@ export function ContextDrawer({
                 >
                   <GitMerge size={14} />
                   {session.summary.appliedAt ? t.appliedToProject : t.applyToProject}
+                </button>
+              )}
+              {!privateChat && reviewQuery.data && reviewQuery.data.state !== "not_a_repo" && reviewQuery.data.state !== "error" && (
+                <button
+                  type="button"
+                  className="gb-review-button"
+                  disabled={gitBusy}
+                  title={t.createPullRequestHint}
+                  onClick={() => void openPullRequest()}
+                >
+                  <GitPullRequest size={14} />
+                  {t.createPullRequest}
                 </button>
               )}
             </div>
@@ -557,24 +797,97 @@ export function ContextDrawer({
           {browserVerifies.length > 0 && (
             <div className="gb-apply-status">
               <strong>{t.browserVerifyHint}</strong>
-              <button
-                type="button"
-                className="gb-review-button"
-                onClick={() => void bridge.copyText(JSON.stringify(BROWSER_MCP_TEMPLATE, null, 2))}
-              >
-                {t.browserMcpTemplate}
-              </button>
+              <span>
+                {browserMcp
+                  ? browserMcp.enabled === false
+                    ? t.browserMcpDisabled
+                    : t.browserMcpReady
+                  : t.browserMcpMissing}
+                {browserMcp ? ` · ${browserMcp.name}` : ""}
+              </span>
+              <div className="gb-mission-job-actions">
+                {!browserMcp && (
+                  <button
+                    type="button"
+                    className="gb-review-button"
+                    onClick={() => void applyBrowserMcpTemplate()}
+                  >
+                    {t.browserMcpApply}
+                  </button>
+                )}
+                {browserMcp && browserMcp.enabled === false && (
+                  <button
+                    type="button"
+                    className="gb-review-button"
+                    onClick={() => void enableBrowserMcp()}
+                  >
+                    {t.browserMcpEnable}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="gb-review-button"
+                  onClick={() => void bridge.copyText(JSON.stringify(BROWSER_MCP_TEMPLATE, null, 2))}
+                >
+                  {t.browserMcpTemplate}
+                </button>
+                <button
+                  type="button"
+                  className="gb-review-button"
+                  onClick={() => injectBrowserRunbook()}
+                >
+                  {t.browserVerifyRunbook}
+                </button>
+              </div>
             </div>
           )}
-          {taskQuery.data?.verificationCommands.map((command) => (
+          {browserVerifies.length > 0 && screenshotAttachments.length > 0 && (
+            <div className="gb-apply-status ready">
+              <strong>{t.browserVerifyAttachmentHint}</strong>
+              <span>
+                {screenshotAttachments.map((item) => item.name).join(" · ")}
+              </span>
+            </div>
+          )}
+          {taskQuery.data?.verificationCommands.map((command) => {
+            const browserDecl = browserVerifies.find((item) => item.command === command);
+            const target = browserDecl?.target?.trim() ?? "";
+            const openable = /^https?:\/\//i.test(target);
+            return (
             <div className="gb-drawer-activity" key={command}>
               <div>
                 <strong>{command}</strong>
-                <small>{isBrowserVerifyCommand(command) ? "Browser verification" : "Required verification"}</small>
+                <small>
+                  {browserDecl
+                    ? `${browserDecl.kind} · ${browserDecl.hint}`
+                    : "Required verification"}
+                </small>
               </div>
               <div>
                 {isBrowserVerifyCommand(command) ? (
-                  <button type="button" className="gb-review-button" onClick={() => void recordBrowserScreenshot(command)}>{t.browserVerifyRecord}</button>
+                  <>
+                    {openable && (
+                      <button
+                        type="button"
+                        className="gb-icon-button"
+                        title={t.browserVerifyOpenTarget}
+                        aria-label={t.browserVerifyOpenTarget}
+                        onClick={() => void bridge.openPath(target)}
+                      >
+                        <ExternalLink size={12} />
+                      </button>
+                    )}
+                    {screenshotAttachments[0] && (
+                      <button
+                        type="button"
+                        className="gb-review-button"
+                        onClick={() => void recordBrowserScreenshot(command, screenshotAttachments[0]!.name)}
+                      >
+                        {t.browserVerifyUseAttachment}
+                      </button>
+                    )}
+                    <button type="button" className="gb-review-button" onClick={() => void recordBrowserScreenshot(command)}>{t.browserVerifyRecord}</button>
+                  </>
                 ) : (
                   <button type="button" className="gb-review-button" disabled={verificationRunning !== null} onClick={() => void executeVerification(command)}>{verificationRunning === command ? "Running…" : "Run"}</button>
                 )}
@@ -582,7 +895,8 @@ export function ContextDrawer({
                 <button type="button" className="gb-icon-button" title="Blocked" onClick={() => void recordVerification(command, "blocked")}>!</button>
               </div>
             </div>
-          ))}
+            );
+          })}
           {completionQuery.data && <div className={completionQuery.data.ready ? "gb-apply-status ready" : "gb-apply-status blocked"}><strong>{completionQuery.data.ready ? t.completionGateReady : t.completionGateBlocked}</strong><span>{completionQuery.data.blockers.join(" · ") || "No unresolved platform blockers."}</span></div>}
           {completionQuery.data?.ready && taskQuery.data?.state === "verifying" && <button type="button" className="gb-review-button" onClick={() => void bridge.completeTask(taskId).then(() => { void taskQuery.refetch(); void completionQuery.refetch(); })}>Mark task completed</button>}
           {verificationQuery.data?.map((result) => <div className="gb-drawer-activity" key={result.verificationId}><span className={`gb-status-dot ${result.status === "passed" ? "idle" : "running"}`} /><div><strong>{result.command}</strong><small>{result.status}{result.summary ? ` · ${result.summary}` : ""}</small></div></div>)}
@@ -599,7 +913,31 @@ export function ContextDrawer({
             </label>
             <button type="button" className="gb-review-button" disabled={memoryBusy} onClick={() => void saveProfile()}>{t.projectProfileSave}</button>
           </div>
-          <div className="gb-drawer-toolbar"><span>{t.memoryTab}</span></div>
+          <div className="gb-drawer-toolbar">
+            <span>{t.memoryTab}</span>
+            <button
+              type="button"
+              className="gb-review-button"
+              disabled={memoryBusy || pendingMemoryProposals.length === 0}
+              title={t.memoryScanHint}
+              onClick={() => void scanTranscriptForMemories()}
+            >
+              {t.memoryScanTranscript}
+              {pendingMemoryProposals.length > 0 ? ` (${pendingMemoryProposals.length})` : ""}
+            </button>
+          </div>
+          {pendingMemoryProposals.length > 0 && (
+            <div className="gb-apply-status">
+              <strong>{t.memoryScanPending}</strong>
+              <span>
+                {pendingMemoryProposals
+                  .slice(0, 3)
+                  .map((item) => item.content)
+                  .join(" · ")}
+                {pendingMemoryProposals.length > 3 ? "…" : ""}
+              </span>
+            </div>
+          )}
           <div className="gb-task-contract">
             <label>
               {t.memoryKind}
@@ -626,7 +964,10 @@ export function ContextDrawer({
               </div>
               <div>
                 {memory.state !== "accepted" && (
-                  <button type="button" className="gb-icon-button" title={t.memoryAccept} onClick={() => void bridge.reviewMemoryCandidate(memory.memoryId, "accepted").then(() => memoryQuery.refetch())}>✓</button>
+                  <>
+                    <button type="button" className="gb-icon-button" title={t.memoryAccept} onClick={() => void acceptMemory(memory, false)}>✓</button>
+                    <button type="button" className="gb-icon-button" title={t.memoryAcceptToProfile} onClick={() => void acceptMemory(memory, true)}>✎</button>
+                  </>
                 )}
                 {memory.state !== "rejected" && (
                   <button type="button" className="gb-icon-button" title={t.memoryReject} onClick={() => void bridge.reviewMemoryCandidate(memory.memoryId, "rejected").then(() => memoryQuery.refetch())}>×</button>
@@ -649,7 +990,15 @@ export function ContextDrawer({
           {terminalError && <div className="gb-apply-status blocked"><span>{terminalError}</span></div>}
         </Tabs.Content>
         <Tabs.Content value="files" className="gb-drawer-content">
-          <div className="gb-drawer-toolbar"><button type="button" className="gb-icon-button" disabled={!explorerPath} title="Parent directory" aria-label="Parent directory" onClick={() => setExplorerPath(explorerPath?.split("/").slice(0, -1).join("/") || null)}>↑</button><span>{explorerPath || "."}</span><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => void treeQuery.refetch()}><RefreshCw size={14} /></button></div>
+          <div className="gb-drawer-toolbar">
+            <button type="button" className="gb-icon-button" disabled={!explorerPath} title="Parent directory" aria-label="Parent directory" onClick={() => setExplorerPath(explorerPath?.split("/").slice(0, -1).join("/") || null)}>↑</button>
+            <span>{explorerPath || "."}</span>
+            <button type="button" className="gb-review-button" disabled={indexBusy} onClick={() => void rebuildSymbolIndex()}>
+              {indexBusy ? t.symbolIndexRebuilding : t.symbolIndexRebuild}
+            </button>
+            <button type="button" className="gb-icon-button" aria-label={t.refresh} disabled={indexBusy} onClick={() => void refreshFilesAndIndex()}><RefreshCw size={14} /></button>
+          </div>
+          {indexNote && <div className="gb-apply-status"><span>{indexNote}</span></div>}
           <label className="gb-explorer-search"><Search size={13} /><input value={explorerSearch} placeholder="Search names and content" onChange={(event) => setExplorerSearch(event.target.value)} /></label>
           {(symbolQuery.data?.length ?? 0) > 0 && (
             <div className="gb-symbol-hits">
@@ -658,10 +1007,56 @@ export function ContextDrawer({
                 <button
                   type="button"
                   className="gb-file-row"
-                  key={`${hit.path}:${hit.line}:${hit.name}`}
+                  key={`def:${hit.path}:${hit.line}:${hit.name}`}
                   onClick={() => setPreviewPath(hit.path)}
                 >
                   <span>{hit.name} <i>· {hit.kind}</i></span>
+                  <small>{hit.path}:{hit.line}</small>
+                </button>
+              ))}
+            </div>
+          )}
+          {(referenceQuery.data?.length ?? 0) > 0 && (
+            <div className="gb-symbol-hits">
+              <strong>{t.symbolReferences}</strong>
+              {referenceQuery.data?.slice(0, 24).map((hit) => (
+                <button
+                  type="button"
+                  className="gb-file-row"
+                  key={`ref:${hit.path}:${hit.line}:${hit.kind}`}
+                  onClick={() => setPreviewPath(hit.path)}
+                  title={hit.snippet}
+                >
+                  <span>{hit.name} <i>· {hit.kind}</i></span>
+                  <small>{hit.path}:{hit.line}</small>
+                </button>
+              ))}
+            </div>
+          )}
+          {callGraphQuery.data && (callGraphQuery.data.definitions.length > 0 || callGraphQuery.data.callers.length > 0) && (
+            <div className="gb-symbol-hits">
+              <strong>{t.symbolCallGraph} · {callGraphQuery.data.symbol}</strong>
+              {callGraphQuery.data.definitions.slice(0, 8).map((hit) => (
+                <button
+                  type="button"
+                  className="gb-file-row"
+                  key={`cg-def:${hit.path}:${hit.line}`}
+                  onClick={() => setPreviewPath(hit.path)}
+                  title={hit.snippet}
+                >
+                  <span>def · {hit.name}</span>
+                  <small>{hit.path}:{hit.line}</small>
+                </button>
+              ))}
+              {callGraphQuery.data.callers.slice(0, 16).map((hit) => (
+                <button
+                  type="button"
+                  className="gb-file-row"
+                  key={`cg-call:${hit.path}:${hit.line}`}
+                  onClick={() => setPreviewPath(hit.path)}
+                  title={hit.snippet}
+                >
+                  <span>caller · {hit.name}</span>
                   <small>{hit.path}:{hit.line}</small>
                 </button>
               ))}

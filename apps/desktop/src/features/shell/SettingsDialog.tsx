@@ -5,6 +5,7 @@ import { Bot, Ghost, Info, Puzzle, RefreshCw, Settings2, ShieldCheck, Stethoscop
 import { useRef, useState } from "react";
 import { useEffect } from "react";
 import { McpManager } from "../mcp/McpManager";
+import { CapabilityOrchestrator } from "./CapabilityOrchestrator";
 import { applyLocalePreference, t } from "../../i18n";
 import { GbButton } from "../../components/ui/GbButton";
 import { normalizeSettings } from "../../contracts";
@@ -46,6 +47,13 @@ function RuntimeAdaptersPanel({
     queryKey: ["runtime-adapters", draft.cliPathOverride || draft.grokPath, draft.secondaryAcpPath],
     queryFn: () => bridge.listRuntimeAdapters(draft.cliPathOverride || draft.grokPath || undefined),
   });
+  const modelsQuery = useQuery({
+    queryKey: ["runtime-fallback-models", draft.cliPathOverride || draft.grokPath],
+    queryFn: () => bridge.listModels(draft.cliPathOverride || draft.grokPath || undefined),
+  });
+  const modelOptions = modelsQuery.data ?? [];
+  const fallbackConfigured = draft.fallbackModelId.trim();
+  const fallbackInList = modelOptions.some((model) => model.id === fallbackConfigured);
 
   return (
     <section className="gb-settings-panel">
@@ -65,8 +73,36 @@ function RuntimeAdaptersPanel({
         <input
           value={draft.secondaryAcpPath}
           onChange={(event) => patch({ secondaryAcpPath: event.target.value })}
-          placeholder="/path/to/acp-agent"
+          placeholder="/path/to/codex-acp"
         />
+      </label>
+      <label className="gb-settings-toggle">
+        <input
+          type="checkbox"
+          checked={draft.mixedPlanning}
+          onChange={(event) => patch({ mixedPlanning: event.target.checked })}
+        />
+        <span>{t.mixedPlanning}<small>{t.mixedPlanningHint}</small></span>
+      </label>
+      {draft.mixedPlanning && !draft.secondaryAcpPath.trim() && (
+        <p className="gb-settings-warning" role="status">{t.mixedPlanningNeedsPath}</p>
+      )}
+      <label>
+        <span>{t.fallbackModelId}<small>{t.fallbackModelIdHint}</small></span>
+        <select
+          value={draft.fallbackModelId}
+          onChange={(event) => patch({ fallbackModelId: event.target.value })}
+        >
+          <option value="">{t.fallbackModelUnset}</option>
+          {fallbackConfigured && !fallbackInList && (
+            <option value={fallbackConfigured}>{fallbackConfigured}</option>
+          )}
+          {modelOptions.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.name || model.id}
+            </option>
+          ))}
+        </select>
       </label>
       {draft.preferredAdapterId === "generic-acp" && !draft.secondaryAcpPath.trim() && (
         <p className="gb-settings-warning" role="status">{t.adapterUnavailable}</p>
@@ -97,11 +133,14 @@ export function SettingsDialog({
   onOpenChange,
   initialTab = "general",
   onReloadAgent,
+  onInsertCapabilityDraft,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialTab?: SettingsTab;
   onReloadAgent?: () => void | Promise<void>;
+  /** Insert a Skills/Hooks orchestration draft into the active composer. */
+  onInsertCapabilityDraft?: (draft: string) => void;
 }) {
   const bridge = useDesktopBridge();
   const settings = useAppStore((state) => state.settings);
@@ -297,6 +336,14 @@ export function SettingsDialog({
                 {capabilitiesQuery.isLoading && <div className="gb-settings-placeholder"><Puzzle size={24} /><strong>{t.readingCapabilities}</strong></div>}
                 {capabilitiesQuery.data && (
                   <div className="gb-capability-groups">
+                    <CapabilityOrchestrator
+                      skills={capabilitiesQuery.data.skills}
+                      hooks={capabilitiesQuery.data.hooks}
+                      onInsertDraft={(draft) => {
+                        onInsertCapabilityDraft?.(draft);
+                        onOpenChange(false);
+                      }}
+                    />
                     {([
                       [t.skills, capabilitiesQuery.data.skills],
                       [t.agentTypes, capabilitiesQuery.data.agents],
@@ -369,6 +416,13 @@ export function SettingsDialog({
                   {harnessQuery.data?.pluginPath && (
                     <p className="gb-settings-copy mono">{harnessQuery.data.pluginPath}</p>
                   )}
+                  <p className="gb-settings-copy">
+                    {t.harnessInspectorTrackedCli}
+                    {harnessQuery.data?.trackedCli ? ` (${harnessQuery.data.trackedCli})` : ""}
+                  </p>
+                  {draft.useHarness && harnessQuery.data?.configOverlay !== false && (
+                    <p className="gb-settings-copy">{t.harnessInspectorOverlay}</p>
+                  )}
                   <button
                     type="button"
                     className="gb-button"
@@ -435,6 +489,19 @@ export function SettingsDialog({
                   <div><span><b>Permissions</b><small>Pending requests</small></span><i>{doctorQuery.data.pendingPermissions}</i></div>
                   <div><span><b>Blob storage</b><small>Content-addressed artifacts</small></span><i>{doctorQuery.data.blobBytes} bytes</i></div>
                   <div><span><b>Strict network isolation</b><small>Grok cannot attest enforceable isolation</small></span><i>{doctorQuery.data.strictNetworkIsolation ? "protected" : "unavailable"}</i></div>
+                  <div>
+                    <span>
+                      <b>{t.githubCli}</b>
+                      <small>{doctorQuery.data.github?.detail || (doctorQuery.data.github?.found ? "" : t.githubCliMissing)}</small>
+                    </span>
+                    <i>
+                      {doctorQuery.data.github?.authenticated
+                        ? t.adapterConfigured
+                        : doctorQuery.data.github?.found
+                          ? t.githubCliUnauthenticated
+                          : t.githubCliMissing}
+                    </i>
+                  </div>
                 </section></div>}
                 {doctorQuery.isError && <div className="gb-settings-placeholder"><Stethoscope size={24} /><strong>{t.capabilitiesUnavailable}</strong><p>{String(doctorQuery.error)}</p></div>}
                 <div className="gb-settings-section-head"><h3>Recovery</h3><div><button type="button" className="gb-button" onClick={() => {

@@ -1,4 +1,4 @@
-# Code review role — write review notes only; high reasoning
+# Code review role — write review notes only
 description = "Code reviewer that writes structured notes for implementer handoff"
 default_capability_mode = "read-write"
 reasoning_effort = "high"

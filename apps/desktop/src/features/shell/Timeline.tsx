@@ -17,6 +17,7 @@ import {
   summarizePlanProgress,
   type PlanDocument,
 } from "../../contracts/planSteps";
+import { PLANNER_ADAPTER_ID } from "../../contracts";
 import type { ChatBlock } from "../../types";
 import { t, useTranslation } from "../../i18n";
 import { useAppStore } from "../../store";
@@ -240,12 +241,14 @@ export function Timeline({
   onPlanAction,
   planActionsEnabled = false,
   sessionId = null,
+  adapterId = null,
 }: {
   blocks: ChatBlock[];
   busy?: boolean;
   onPlanAction: (payload: PlanActionPayload) => void;
   planActionsEnabled?: boolean;
   sessionId?: string | null;
+  adapterId?: string | null;
 }) {
   const setSessionDraft = useAppStore((state) => state.setSessionDraft);
   const removeBlock = useAppStore((state) => state.removeBlock);
@@ -299,7 +302,7 @@ export function Timeline({
         if (block.type === "assistant") {
           return (
             <section key={block.id} className="gb-turn gb-agent-turn">
-              <div className="gb-agent-mark"><span>G</span></div><Timestamp at={block.at} />
+              <div className="gb-agent-mark"><span>{adapterId === PLANNER_ADAPTER_ID ? "P" : "G"}</span></div><Timestamp at={block.at} />
               <div className="gb-markdown"><MarkdownBody>{block.text}</MarkdownBody></div>
             </section>
           );

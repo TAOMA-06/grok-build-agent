@@ -105,3 +105,8 @@ export type GitCommitResult = {
   commit: string;
   summary: string;
 };
+
+export type GitPrCreateResult = {
+  url: string;
+  pushed: boolean;
+};

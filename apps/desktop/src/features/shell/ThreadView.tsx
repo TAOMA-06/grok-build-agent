@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ComposerAttachment, ModeSwitchResult, SelectableModel, ServerRequest, TaskMode } from "../../types";
 import type { SessionRuntime } from "../../store";
 import { classifyPermissionCategory, type PermissionRiskCategory } from "../../contracts/permission";
+import { PLANNER_ADAPTER_ID, shouldHandoffPlannerToGrok } from "../../contracts";
 import { CommandComposer } from "./CommandComposer";
 import { EmptyTaskState } from "./EmptyTaskState";
 import { ExecutionFlightDeck } from "./ExecutionFlightDeck";
@@ -193,6 +194,13 @@ export function ThreadView({
   const visibleMode = session?.summary.mode ?? session?.modeState.currentMode ?? "agent";
   const isEmpty = !session?.blocks.length;
   const isNewTask = !session;
+  const mixedSettings = useAppStore((state) => state.settings);
+  const plannerHandoffReady = Boolean(
+    session
+    && !session.busy
+    && shouldHandoffPlannerToGrok(mixedSettings, session.summary),
+  );
+  const plannerActive = session?.summary.adapterId === PLANNER_ADAPTER_ID;
 
   const composer = (
     <div className={`gb-composer-dock${isEmpty ? " is-empty" : ""}`}>
@@ -210,6 +218,12 @@ export function ThreadView({
               <button type="button" onClick={() => void onSend(session.busy ? "/goal pause" : "/goal resume", [], "goal")}>{session.busy ? t.pause : t.resume}</button>
               <button type="button" onClick={() => void onSend("/goal clear", [], "goal")}>{t.clear}</button>
             </div>
+          </div>
+        )}
+        {plannerHandoffReady && (
+          <div className="gb-composer-plan" role="status">
+            <span>{t.plannerActive}</span>
+            <p>{t.plannerBanner}</p>
           </div>
         )}
         <CommandComposer
@@ -249,6 +263,11 @@ export function ThreadView({
               {session.summary.mode === "plan" && (
                 <span className="gb-plan-pill" title={t.planModeBannerDetail}>
                   <ShieldAlert size={12} /> {t.modePlan}
+                </span>
+              )}
+              {plannerActive && (
+                <span className="gb-planner-pill" title={t.plannerBanner}>
+                  <FileCode2 size={12} /> {t.plannerActive}
                 </span>
               )}
               {session.privateChat && <span className="gb-private-chat-pill" title={t.privateChatLocalOnly}><Ghost size={12} /> {t.privateChatActive}</span>}
@@ -292,7 +311,8 @@ export function ThreadView({
                 blocks={session!.blocks}
                 busy={Boolean(session?.busy)}
                 sessionId={session?.summary.sessionId ?? null}
-                planActionsEnabled={Boolean(pendingPlanApproval)}
+                adapterId={session?.summary.adapterId}
+                planActionsEnabled={Boolean(pendingPlanApproval) || plannerHandoffReady}
                 onPlanAction={(payload) => {
                   if (pendingPlanApproval) {
                     void onPlanDecision(payload.action, {
@@ -309,7 +329,8 @@ export function ThreadView({
                   }
                   if (payload.action === "approve") {
                     void onChooseMode("agent").then((result) => {
-                      if (result.kind !== "unsupported") void onSend(t.planApprovedControl, [], "agent");
+                      if (result.kind === "unsupported" && !plannerHandoffReady) return;
+                      void onSend(t.planApprovedControl, [], "agent");
                     });
                   } else if (session) {
                     const note = payload.reviseNote?.trim() || payload.comments?.join("\n") || t.planFeedbackDraft;

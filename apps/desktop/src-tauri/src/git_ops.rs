@@ -906,6 +906,142 @@ pub fn commit(req: &GitCommitRequest) -> Result<GitCommitResult, GitError> {
     Ok(GitCommitResult { commit, summary })
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubStatus {
+    pub found: bool,
+    pub authenticated: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrCreateRequest {
+    pub workspace_root: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub push: bool,
+    #[serde(default)]
+    pub private_chat: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrCreateResult {
+    pub url: String,
+    pub pushed: bool,
+}
+
+pub(crate) fn pull_request_gh_args(title: Option<&str>, body: Option<&str>) -> Vec<String> {
+    let mut args = vec!["pr".to_string(), "create".to_string()];
+    let title = title.map(str::trim).filter(|value| !value.is_empty());
+    let body = body.map(str::trim).filter(|value| !value.is_empty());
+    match (title, body) {
+        (None, None) => args.push("--fill".into()),
+        (Some(title), None) => {
+            args.push("--title".into());
+            args.push(title.to_string());
+            args.push("--body".into());
+            args.push("Opened from Grok Build Desktop.".into());
+        }
+        (None, Some(body)) => {
+            args.push("--fill".into());
+            args.push("--body".into());
+            args.push(body.to_string());
+        }
+        (Some(title), Some(body)) => {
+            args.push("--title".into());
+            args.push(title.to_string());
+            args.push("--body".into());
+            args.push(body.to_string());
+        }
+    }
+    args
+}
+
+fn gh(cwd: &Path, args: &[&str]) -> Result<String, GitError> {
+    let output = Command::new("gh")
+        .args(args)
+        .current_dir(cwd)
+        .env("GH_PROMPT_DISABLED", "1")
+        .output()?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(GitError::Message(if err.is_empty() {
+            format!("gh {:?} failed", args)
+        } else {
+            err
+        }));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+pub fn github_status() -> GitHubStatus {
+    match Command::new("gh").args(["auth", "status"]).output() {
+        Err(_) => GitHubStatus {
+            found: false,
+            authenticated: false,
+            detail: "gh CLI not found on PATH".into(),
+        },
+        Ok(output) => {
+            let detail = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .trim()
+            .to_string();
+            GitHubStatus {
+                found: true,
+                authenticated: output.status.success(),
+                detail,
+            }
+        }
+    }
+}
+
+pub fn create_pull_request(req: &GitPrCreateRequest) -> Result<GitPrCreateResult, GitError> {
+    if req.private_chat {
+        return Err(GitError::Message(
+            "GitHub pull requests are disabled in Private Chat".into(),
+        ));
+    }
+    let root = Path::new(&req.workspace_root);
+    if !root.is_dir() {
+        return Err(GitError::Message("workspace is not a directory".into()));
+    }
+    let status = github_status();
+    if !status.found {
+        return Err(GitError::Message(
+            "gh CLI not found. Install GitHub CLI (`gh`) and retry.".into(),
+        ));
+    }
+    if !status.authenticated {
+        return Err(GitError::Message(
+            "GitHub CLI is not authenticated. Run `gh auth login`.".into(),
+        ));
+    }
+    let mut pushed = false;
+    if req.push {
+        git(root, &["push", "-u", "origin", "HEAD"])?;
+        pushed = true;
+    }
+    let args = pull_request_gh_args(req.title.as_deref(), req.body.as_deref());
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = gh(root, &arg_refs)?;
+    let url = out
+        .lines()
+        .rev()
+        .find(|line| line.contains("http"))
+        .unwrap_or(out.trim())
+        .trim()
+        .to_string();
+    Ok(GitPrCreateResult { url, pushed })
+}
+
 pub fn create_checkpoint(workspace_root: &str) -> Result<GitCheckpoint, GitError> {
     const MAX_CHECKPOINT_BYTES: u64 = 100 * 1024 * 1024;
     const MAX_UNTRACKED_FILES: usize = 1_000;
@@ -1357,5 +1493,42 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("requested file"));
+    }
+
+    #[test]
+    fn pull_request_refuses_private_chat_and_missing_workspace() {
+        let error = create_pull_request(&GitPrCreateRequest {
+            workspace_root: "/tmp".into(),
+            title: None,
+            body: None,
+            push: false,
+            private_chat: true,
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("Private Chat"));
+        let error = create_pull_request(&GitPrCreateRequest {
+            workspace_root: "/this/path/does/not/exist-grok-build".into(),
+            title: None,
+            body: None,
+            push: false,
+            private_chat: false,
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("not a directory"));
+    }
+
+    #[test]
+    fn pull_request_args_always_supply_fill_or_body() {
+        assert_eq!(
+            pull_request_gh_args(None, None),
+            vec!["pr", "create", "--fill"]
+        );
+        let titled = pull_request_gh_args(Some("Fix login"), None);
+        assert!(titled.contains(&"--title".into()));
+        assert!(titled.contains(&"--body".into()));
+        assert!(!titled.iter().any(|arg| arg == "--fill"));
+        let filled = pull_request_gh_args(None, Some("Please review."));
+        assert!(filled.contains(&"--fill".into()));
+        assert!(filled.contains(&"--body".into()));
     }
 }

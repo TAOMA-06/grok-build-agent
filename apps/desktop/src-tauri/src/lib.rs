@@ -914,6 +914,80 @@ async fn workspace_index_search(
 }
 
 #[tauri::command]
+async fn workspace_index_references(
+    state: State<'_, AppState>,
+    workspace_root: String,
+    query: String,
+    private_chat: Option<bool>,
+) -> Result<Vec<code_index::SymbolHit>, acp::AcpError> {
+    host_request(
+        &state,
+        "workspace.index.references",
+        serde_json::json!({
+            "workspaceRoot": workspace_root, "query": query, "privateChat": private_chat.unwrap_or(false)
+        }),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn workspace_index_call_graph(
+    state: State<'_, AppState>,
+    workspace_root: String,
+    query: String,
+    private_chat: Option<bool>,
+) -> Result<code_index::CallGraphSlice, acp::AcpError> {
+    host_request(
+        &state,
+        "workspace.index.callGraph",
+        serde_json::json!({
+            "workspaceRoot": workspace_root, "query": query, "privateChat": private_chat.unwrap_or(false)
+        }),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn workspace_index_invalidate(
+    state: State<'_, AppState>,
+    workspace_root: String,
+    paths: Option<Vec<String>>,
+    private_chat: Option<bool>,
+) -> Result<serde_json::Value, acp::AcpError> {
+    host_request(
+        &state,
+        "workspace.index.invalidate",
+        serde_json::json!({
+            "workspaceRoot": workspace_root,
+            "paths": paths,
+            "privateChat": private_chat.unwrap_or(false)
+        }),
+        Some(rpc_meta("workspace-index", None)),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn workspace_index_rebuild(
+    state: State<'_, AppState>,
+    workspace_root: String,
+    private_chat: Option<bool>,
+) -> Result<serde_json::Value, acp::AcpError> {
+    host_request(
+        &state,
+        "workspace.index.rebuild",
+        serde_json::json!({
+            "workspaceRoot": workspace_root,
+            "privateChat": private_chat.unwrap_or(false)
+        }),
+        Some(rpc_meta("workspace-index", None)),
+    )
+    .await
+}
+
+#[tauri::command]
 async fn workspace_read(
     state: State<'_, AppState>,
     workspace_root: String,
@@ -955,6 +1029,48 @@ async fn get_execution(
         "execution.get",
         serde_json::json!({ "taskId": task_id }),
         None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn list_jobs(
+    state: State<'_, AppState>,
+    workspace_id: Option<String>,
+) -> Result<Vec<serde_json::Value>, acp::AcpError> {
+    host_request(
+        &state,
+        "jobs.list",
+        serde_json::json!({ "workspaceId": workspace_id }),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn cancel_job(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> Result<serde_json::Value, acp::AcpError> {
+    host_request(
+        &state,
+        "jobs.cancel",
+        serde_json::json!({ "jobId": job_id }),
+        Some(rpc_meta(&job_id, None)),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn upsert_job(
+    state: State<'_, AppState>,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, acp::AcpError> {
+    host_request(
+        &state,
+        "jobs.upsert",
+        payload,
+        Some(rpc_meta("jobs", None)),
     )
     .await
 }
@@ -1418,6 +1534,20 @@ async fn git_commit(
 }
 
 #[tauri::command]
+async fn git_create_pull_request(
+    state: State<'_, AppState>,
+    req: git_ops::GitPrCreateRequest,
+) -> Result<git_ops::GitPrCreateResult, acp::AcpError> {
+    host_request(
+        &state,
+        "git.pr.create",
+        serde_json::json!({ "request": req }),
+        Some(rpc_meta("git", None)),
+    )
+    .await
+}
+
+#[tauri::command]
 async fn git_create_checkpoint(
     state: State<'_, AppState>,
     workspace_root: String,
@@ -1642,6 +1772,8 @@ struct HarnessStatus {
     resolved: bool,
     plugin_path: Option<String>,
     mode: String,
+    tracked_cli: String,
+    config_overlay: bool,
 }
 
 #[tauri::command]
@@ -1651,11 +1783,15 @@ fn harness_status() -> HarnessStatus {
             resolved: true,
             plugin_path: Some(path.display().to_string()),
             mode: "plugin".into(),
+            tracked_cli: crate::acp::TRACKED_CLI_VERSION.into(),
+            config_overlay: true,
         },
         None => HarnessStatus {
             resolved: false,
             plugin_path: None,
             mode: "rules_only".into(),
+            tracked_cli: crate::acp::TRACKED_CLI_VERSION.into(),
+            config_overlay: true,
         },
     }
 }
@@ -1824,16 +1960,23 @@ fn official_install_url() -> String {
 }
 
 /// Cancel the exact prompt session. ACP defines this as a notification.
+/// Optional `tool_call_ids` are forwarded in `_meta` as a subtree cancel hint;
+/// current Grok ACP still treats cancel as session-scoped.
 #[tauri::command]
 async fn cancel_prompt(
     state: State<'_, AppState>,
     connection_id: String,
     session_id: String,
+    tool_call_ids: Option<Vec<String>>,
 ) -> Result<(), acp::AcpError> {
     host_request(
         &state,
         "session.cancel",
-        serde_json::json!({ "connectionId": connection_id, "sessionId": session_id }),
+        serde_json::json!({
+            "connectionId": connection_id,
+            "sessionId": session_id,
+            "toolCallIds": tool_call_ids.unwrap_or_default(),
+        }),
         Some(rpc_meta(&session_id, None)),
     )
     .await
@@ -1920,9 +2063,16 @@ pub fn run() {
             workspace_tree,
             workspace_search,
             workspace_index_search,
+            workspace_index_references,
+            workspace_index_call_graph,
+            workspace_index_invalidate,
+            workspace_index_rebuild,
             workspace_read,
             get_task,
             get_execution,
+            list_jobs,
+            cancel_job,
+            upsert_job,
             list_execution_events,
             resume_execution,
             upsert_task,
@@ -1952,6 +2102,7 @@ pub fn run() {
             git_file_action,
             git_hunk_action,
             git_commit,
+            git_create_pull_request,
             git_create_checkpoint,
             git_checkpoint_restore_preview,
             git_restore_checkpoint,

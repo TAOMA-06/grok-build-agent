@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { buildPromptContent, seedTaskFromPrompt, resolveAgentExecutable } from "../../contracts";
+import { buildPromptContent, seedTaskFromPrompt, resolveAgentExecutable, resolveFallbackAgentExecutable, adapterFallbackLabel, resolveTurnLadderSteps, isTurnLadderEligibleError, shouldStartWithPlanner, shouldHandoffPlannerToGrok, resolvePlannerExecutable, resolveExecutorExecutable, latestPlanText, buildGrokImplementPrompt, usesGrokControlCommands, isPlannerSession, GROK_ADAPTER_ID, PLANNER_ADAPTER_ID } from "../../contracts";
 import { mergeSelectableModels, resolveEffortForModel } from "../../contracts/model";
 import { extractContextUsage } from "../../acp/client";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
@@ -25,6 +25,8 @@ export type DesktopController = {
   send(text: string, attachments: ComposerAttachment[], mode: TaskMode): Promise<void>;
   retryFailed(): Promise<void>;
   cancel(): Promise<void>;
+  /** Soft session/cancel for Mission Control workers — optional toolCallIds hint, no hard stop. */
+  cancelWorkers(options?: { toolCallIds?: string[] }): Promise<void>;
   reloadActiveAgent(): Promise<void>;
   chooseModel(modelId: string): Promise<void>;
   chooseEffort(effort: string): Promise<void>;
@@ -112,6 +114,8 @@ export function useDesktopController(
   const submissionsInFlightBySessionRef = useRef(new Map<string, number>());
   /** `performance.now()` when a task first became busy — gates premature cancel. */
   const sendBusyAtBySessionRef = useRef(new Map<string, number>());
+  /** `${sessionId}:${messageBlockId}` → this turn already consumed one ladder retry. */
+  const turnLadderAttemptedRef = useRef(new Set<string>());
 
   const chooseWorkspace = useCallback(async () => {
     const path = await bridge.chooseDirectory();
@@ -218,19 +222,51 @@ export function useDesktopController(
   );
 
   const connect = useCallback(
-    async (sessionId: string, prompt: string): Promise<AgentStatus> => {
+    async (
+      sessionId: string,
+      prompt: string,
+      options?: {
+        grokPathOverride?: string | null;
+        modelOverride?: string | null;
+        /** When true, do not attempt preferred→fallback start dance. */
+        forcePath?: boolean;
+        /** Drop the remote ACP session id (planner → Grok handoff). */
+        resetRemote?: boolean;
+      },
+    ): Promise<AgentStatus> => {
       const state = useAppStore.getState();
       let summary = await prepareExecution(sessionId, prompt);
+      if (options?.modelOverride?.trim()) {
+        summary = {
+          ...summary,
+          model: options.modelOverride.trim(),
+          updatedAt: new Date().toISOString(),
+        };
+        state.updateSummary(sessionId, summary);
+      }
       setConnectingSessionId(sessionId);
       try {
         const policy = summary.permissionPolicy ?? state.settings.permissionPolicy;
-        const status = await bridge.startAgent({
+        const mode = summary.mode ?? "agent";
+        const startWithPlanner = Boolean(
+          !options?.resetRemote
+          && options?.grokPathOverride === undefined
+          && shouldStartWithPlanner(state.settings, mode),
+        );
+        const plannerPath = resolvePlannerExecutable(state.settings);
+        const preferredPath = options?.grokPathOverride !== undefined
+          ? options.grokPathOverride
+          : startWithPlanner
+            ? plannerPath
+            : resolveAgentExecutable(state.settings);
+        let usedPath = preferredPath;
+        const startArgs = {
           taskId: sessionId,
           cwd: summary.executionRoot || summary.worktreePath || summary.workspaceRoot,
           model: summary.model || state.effectiveModelId() || null,
           reasoningEffort: resolveRuntimeEffort(state, summary),
           alwaysApprove: permissionAlwaysApprove(policy),
-          useHarness: state.settings.useHarness,
+          useHarness: startWithPlanner ? false : state.settings.useHarness,
           strictTerminal: state.settings.strictTerminal,
           disallowedTools: [
             ...(state.settings.disableImageTools ? ["image_gen", "image_edit"] : []),
@@ -239,9 +275,35 @@ export function useDesktopController(
           sandbox: summary.sandbox ?? state.settings.sandbox,
           privacyMode: state.settings.privacyMode,
           privateChat: isPrivateChatSession(state, sessionId),
-          resumeSessionId: summary.remoteSessionId ?? null,
-          grokPath: resolveAgentExecutable(state.settings),
-        });
+          resumeSessionId: options?.resetRemote || startWithPlanner
+            ? null
+            : summary.remoteSessionId ?? null,
+        };
+        let status: AgentStatus;
+        try {
+          status = await bridge.startAgent({
+            ...startArgs,
+            grokPath: preferredPath,
+          });
+        } catch (error) {
+          if (options?.forcePath) throw error;
+          const fallback = resolveFallbackAgentExecutable(state.settings);
+          if (!fallback || fallback === preferredPath) throw error;
+          usedPath = fallback;
+          status = await bridge.startAgent({
+            ...startArgs,
+            grokPath: fallback,
+          });
+          useAppStore.getState().addBlock(sessionId, {
+            id: crypto.randomUUID(),
+            type: "system",
+            level: "warn",
+            text: translate("adapterFallbackUsed", {
+              label: adapterFallbackLabel(state.settings),
+              reason: String(error),
+            }),
+          });
+        }
         state.setStatus(status);
         if (status.model) {
           state.setGlobalModelState(status.model);
@@ -260,10 +322,21 @@ export function useDesktopController(
           ...summary,
           connectionId: status.connectionId ?? null,
           remoteSessionId: status.sessionId ?? summary.remoteSessionId ?? null,
+          adapterId: usedPath && plannerPath && usedPath === plannerPath
+            ? PLANNER_ADAPTER_ID
+            : GROK_ADAPTER_ID,
           runState: "idle",
           updatedAt: new Date().toISOString(),
         };
         state.updateSummary(sessionId, summary);
+        if (startWithPlanner && summary.adapterId === PLANNER_ADAPTER_ID) {
+          useAppStore.getState().addBlock(sessionId, {
+            id: crypto.randomUUID(),
+            type: "system",
+            level: "info",
+            text: t.plannerStarted,
+          });
+        }
         if (!isPrivateChatSession(state, sessionId)) await bridge.upsertSession(summary);
         return status;
       } finally {
@@ -279,6 +352,7 @@ export function useDesktopController(
       attachments: ComposerAttachment[],
       mode: TaskMode,
       reuseBlockId?: string,
+      options?: { ladderStepIndex?: number },
     ) => {
       const text = rawText.trim();
       if (!text && attachments.length === 0) return;
@@ -296,11 +370,17 @@ export function useDesktopController(
       const displayText = text || `[${attachments.length} attachments]`;
       const previousMode = session.summary.mode ?? "agent";
       const enteringMode = firstTurn || previousMode !== mode;
-      const promptText = enteringMode && mode === "goal" && !text.startsWith("/goal")
-        ? `/goal ${text}`.trim()
-        : enteringMode && mode === "plan" && !text.startsWith("/plan")
-          ? `/plan ${text}`.trim()
-          : text;
+      const plannerHandoff = mode === "agent" && shouldHandoffPlannerToGrok(state.settings, session.summary);
+      const grokControls = usesGrokControlCommands(state.settings, session.summary, mode);
+      let promptText = text;
+      if (grokControls && enteringMode && mode === "goal" && !text.startsWith("/goal")) {
+        promptText = `/goal ${text}`.trim();
+      } else if (grokControls && enteringMode && mode === "plan" && !text.startsWith("/plan")) {
+        promptText = `/plan ${text}`.trim();
+      }
+      if (plannerHandoff) {
+        promptText = buildGrokImplementPrompt(latestPlanText(session.blocks), text);
+      }
       const summary: SessionSummary = {
         ...session.summary,
         title: firstTurn ? promptTitle(displayText) : session.summary.title,
@@ -327,6 +407,14 @@ export function useDesktopController(
           at: new Date().toISOString(),
         });
       }
+      if (plannerHandoff) {
+        state.addBlock(sessionId, {
+          id: crypto.randomUUID(),
+          type: "system",
+          level: "info",
+          text: t.handoffToGrok,
+        });
+      }
       const submissionCount = submissionsInFlightBySessionRef.current.get(sessionId) ?? 0;
       submissionsInFlightBySessionRef.current.set(sessionId, submissionCount + 1);
       if (submissionCount === 0) {
@@ -338,6 +426,12 @@ export function useDesktopController(
       state.setSessionAttachments(sessionId, []);
       state.clearProvisionalDraft();
       const wasCancelled = () => cancelEpochRef.current !== epochAtStart;
+      const ladderKey = `${sessionId}:${messageBlockId}`;
+      let pendingLadder: {
+        step: ReturnType<typeof resolveTurnLadderSteps>[number];
+        nextStepIndex: number;
+        reason: string;
+      } | null = null;
 
       try {
         if (!privateChat) await bridge.upsertSession(summary);
@@ -387,9 +481,20 @@ export function useDesktopController(
           && runtimeStatus.connectionId
           && runtimeStatus.connectionId === target?.connectionId,
         );
-        if (!target?.connectionId || !target.remoteSessionId || !connectionIsLive) {
+        const needsConnect = plannerHandoff
+          || !target?.connectionId
+          || !target.remoteSessionId
+          || !connectionIsLive;
+        if (needsConnect) {
           if (wasCancelled()) return;
-          await connect(sessionId, displayText);
+          const executorPath = resolveExecutorExecutable(state.settings);
+          await connect(
+            sessionId,
+            displayText,
+            plannerHandoff
+              ? { grokPathOverride: executorPath, forcePath: true, resetRemote: true }
+              : undefined,
+          );
           if (wasCancelled()) {
             // connect() may have written runState:idle after cancel cleared busy.
             useAppStore.getState().updateSummary(sessionId, { runState: "cancelled" });
@@ -467,7 +572,12 @@ export function useDesktopController(
           });
         }
         if (wasCancelled()) return;
-        if (enteringMode && target.connectionId && target.remoteSessionId) {
+        if (
+          enteringMode
+          && target.connectionId
+          && target.remoteSessionId
+          && target.adapterId !== PLANNER_ADAPTER_ID
+        ) {
           const modeState = await bridge.confirmSessionMode(
             target.connectionId,
             target.remoteSessionId,
@@ -488,33 +598,49 @@ export function useDesktopController(
           useAppStore.getState().updateSummary(sessionId, next);
           if (!privateChat) await bridge.upsertSession(next);
         }
+        turnLadderAttemptedRef.current.delete(ladderKey);
       } catch (error) {
         if (wasCancelled()) return;
-        const current = useAppStore.getState().sessions[sessionId];
-        if (current && current.draft === "" && current.attachments.length === 0) {
-          state.setSessionDraft(sessionId, rawText);
-          state.setSessionAttachments(sessionId, attachments);
-          if (!privateChat) await bridge.saveDraft(sessionId, rawText).catch(() => undefined);
+        const settingsNow = useAppStore.getState().settings;
+        const currentModel = useAppStore.getState().sessions[sessionId]?.summary.model;
+        const ladderIndex = options?.ladderStepIndex ?? 0;
+        const steps = isTurnLadderEligibleError(error)
+          ? resolveTurnLadderSteps(settingsNow, currentModel)
+          : [];
+        const step = steps[ladderIndex] ?? null;
+        if (step) {
+          pendingLadder = {
+            step,
+            nextStepIndex: ladderIndex + 1,
+            reason: String(error),
+          };
+        } else {
+          const current = useAppStore.getState().sessions[sessionId];
+          if (current && current.draft === "" && current.attachments.length === 0) {
+            state.setSessionDraft(sessionId, rawText);
+            state.setSessionAttachments(sessionId, attachments);
+            if (!privateChat) await bridge.saveDraft(sessionId, rawText).catch(() => undefined);
+          }
+          state.updateBlock(sessionId, messageBlockId, {
+            type: "user",
+            delivery: "failed",
+          });
+          state.setFailedSubmission(sessionId, {
+            messageBlockId,
+            text: rawText,
+            attachments,
+            mode,
+            modelId: state.sessions[sessionId]?.summary.model ?? null,
+            error: String(error),
+          });
+          state.addBlock(sessionId, {
+            id: crypto.randomUUID(),
+            type: "system",
+            level: "error",
+            text: String(error),
+          });
+          state.updateSummary(sessionId, { runState: "error" });
         }
-        state.updateBlock(sessionId, messageBlockId, {
-          type: "user",
-          delivery: "failed",
-        });
-        state.setFailedSubmission(sessionId, {
-          messageBlockId,
-          text: rawText,
-          attachments,
-          mode,
-          modelId: state.sessions[sessionId]?.summary.model ?? null,
-          error: String(error),
-        });
-        state.addBlock(sessionId, {
-          id: crypto.randomUUID(),
-          type: "system",
-          level: "error",
-          text: String(error),
-        });
-        state.updateSummary(sessionId, { runState: "error" });
       } finally {
         const remainingSubmissions = Math.max(
           0,
@@ -523,10 +649,72 @@ export function useDesktopController(
         if (remainingSubmissions === 0) {
           submissionsInFlightBySessionRef.current.delete(sessionId);
           sendBusyAtBySessionRef.current.delete(sessionId);
-          if (!wasCancelled()) state.setSessionBusy(sessionId, false);
+          if (!wasCancelled() && !pendingLadder) state.setSessionBusy(sessionId, false);
         } else {
           submissionsInFlightBySessionRef.current.set(sessionId, remainingSubmissions);
         }
+      }
+
+      if (!pendingLadder || wasCancelled()) return;
+      turnLadderAttemptedRef.current.add(ladderKey);
+      const { step, nextStepIndex, reason } = pendingLadder;
+      useAppStore.getState().addBlock(sessionId, {
+        id: crypto.randomUUID(),
+        type: "system",
+        level: "warn",
+        text: step.kind === "adapter"
+          ? translate("turnLadderAdapter", { label: step.label, reason })
+          : translate("turnLadderModel", { model: step.modelId, reason }),
+      });
+      useAppStore.getState().setSessionBusy(sessionId, true);
+      try {
+        await bridge.stopAgent().catch(() => undefined);
+        useAppStore.getState().updateSummary(sessionId, {
+          connectionId: null,
+          remoteSessionId: null,
+          ...(step.kind === "model" ? { model: step.modelId } : {}),
+          runState: "streaming",
+          updatedAt: new Date().toISOString(),
+        });
+        await connect(
+          sessionId,
+          displayText,
+          step.kind === "adapter"
+            ? { grokPathOverride: step.grokPath, forcePath: true }
+            : { modelOverride: step.modelId, forcePath: true },
+        );
+        if (wasCancelled()) return;
+        await sendInternal(rawText, attachments, mode, messageBlockId, {
+          ladderStepIndex: nextStepIndex,
+        });
+      } catch (ladderError) {
+        if (wasCancelled()) return;
+        const current = useAppStore.getState().sessions[sessionId];
+        if (current && current.draft === "" && current.attachments.length === 0) {
+          useAppStore.getState().setSessionDraft(sessionId, rawText);
+          useAppStore.getState().setSessionAttachments(sessionId, attachments);
+          if (!privateChat) await bridge.saveDraft(sessionId, rawText).catch(() => undefined);
+        }
+        useAppStore.getState().updateBlock(sessionId, messageBlockId, {
+          type: "user",
+          delivery: "failed",
+        });
+        useAppStore.getState().setFailedSubmission(sessionId, {
+          messageBlockId,
+          text: rawText,
+          attachments,
+          mode,
+          modelId: useAppStore.getState().sessions[sessionId]?.summary.model ?? null,
+          error: String(ladderError),
+        });
+        useAppStore.getState().addBlock(sessionId, {
+          id: crypto.randomUUID(),
+          type: "system",
+          level: "error",
+          text: String(ladderError),
+        });
+        useAppStore.getState().updateSummary(sessionId, { runState: "error" });
+        useAppStore.getState().setSessionBusy(sessionId, false);
       }
     },
     [bridge, connect, createThread],
@@ -648,6 +836,46 @@ export function useDesktopController(
     }
   }, [bridge]);
 
+  const cancelWorkers = useCallback(async (options?: { toolCallIds?: string[] }) => {
+    const state = useAppStore.getState();
+    const sessionId = state.activeSessionId;
+    if (!sessionId) return;
+    const session = state.sessions[sessionId];
+    const summary = session?.summary;
+    const liveConnectionId = state.status.running
+      ? (state.status.connectionId ?? summary?.connectionId ?? null)
+      : (summary?.connectionId ?? null);
+    const liveRemoteSessionId = state.status.running
+      ? (state.status.sessionId ?? summary?.remoteSessionId ?? null)
+      : (summary?.remoteSessionId ?? null);
+    if (!liveConnectionId || !liveRemoteSessionId) {
+      useAppStore.getState().addBlock(sessionId, {
+        id: crypto.randomUUID(),
+        type: "system",
+        level: "warn",
+        text: t.missionControlStopUnavailable,
+      });
+      return;
+    }
+    try {
+      await bridge.cancelPrompt(
+        liveConnectionId,
+        liveRemoteSessionId,
+        options?.toolCallIds?.length ? options.toolCallIds : null,
+      );
+    } catch (error) {
+      const reason = String(error);
+      if (!/not running|NotRunning/i.test(reason)) {
+        useAppStore.getState().addBlock(sessionId, {
+          id: crypto.randomUUID(),
+          type: "system",
+          level: "warn",
+          text: translate("cancelFailed", { reason }),
+        });
+      }
+    }
+  }, [bridge]);
+
   const reloadActiveAgent = useCallback(async () => {
     const state = useAppStore.getState();
     const sessionId = state.activeSessionId;
@@ -655,7 +883,7 @@ export function useDesktopController(
     if (!sessionId || !summary || state.sessions[sessionId]?.busy) return;
     setConnectingSessionId(sessionId);
     try {
-      const status = await bridge.restartAgent({
+      const restartArgs = {
         taskId: sessionId,
         cwd: summary.executionRoot || summary.worktreePath || summary.workspaceRoot,
         model: summary.model || state.settings.model,
@@ -673,8 +901,35 @@ export function useDesktopController(
         privacyMode: state.settings.privacyMode,
         privateChat: isPrivateChatSession(state, sessionId),
         resumeSessionId: summary.remoteSessionId ?? null,
-        grokPath: resolveAgentExecutable(state.settings),
-      });
+      };
+      const plannerPath = resolvePlannerExecutable(state.settings);
+      const restartPath = summary.adapterId === PLANNER_ADAPTER_ID
+        ? (plannerPath ?? resolveAgentExecutable(state.settings))
+        : resolveAgentExecutable(state.settings);
+      let status: AgentStatus;
+      try {
+        status = await bridge.restartAgent({
+          ...restartArgs,
+          grokPath: restartPath,
+          useHarness: summary.adapterId === PLANNER_ADAPTER_ID ? false : restartArgs.useHarness,
+        });
+      } catch (error) {
+        const fallback = resolveFallbackAgentExecutable(state.settings);
+        if (!fallback) throw error;
+        status = await bridge.restartAgent({
+          ...restartArgs,
+          grokPath: fallback,
+        });
+        useAppStore.getState().addBlock(sessionId, {
+          id: crypto.randomUUID(),
+          type: "system",
+          level: "warn",
+          text: translate("adapterFallbackUsed", {
+            label: adapterFallbackLabel(state.settings),
+            reason: String(error),
+          }),
+        });
+      }
       state.setStatus(status);
       const next = {
         ...summary,
@@ -800,6 +1055,22 @@ export function useDesktopController(
         return { kind: "unsupported", reason: t.taskBusy };
       }
       let summary = session.summary;
+      if (isPlannerSession(summary)) {
+        state.setEffectiveMode(mode);
+        const modeState = {
+          ...session.modeState,
+          currentMode: mode,
+          liveSwitchSupported: false,
+          source: "desktop" as const,
+        };
+        state.setSessionModeState(sessionId, modeState);
+        state.updateSummary(sessionId, { mode, updatedAt: new Date().toISOString() });
+        const next = useAppStore.getState().sessions[sessionId]?.summary;
+        if (next && !isPrivateChatSession(useAppStore.getState(), sessionId)) {
+          await bridge.upsertSession(next).catch(() => undefined);
+        }
+        return { kind: "switched", state: modeState };
+      }
       const connectionIsLive = Boolean(
         state.status.running
         && state.status.connectionId
@@ -996,6 +1267,28 @@ export function useDesktopController(
       if (!localSessionId) return;
       if (action === "approve") {
         const previous = state.sessions[localSessionId]?.modeState;
+        const summaryNow = state.sessions[localSessionId]?.summary;
+        if (summaryNow && shouldHandoffPlannerToGrok(state.settings, summaryNow)) {
+          state.setSessionModeState(localSessionId, {
+            currentMode: "agent",
+            availableModes: previous?.availableModes ?? [],
+            liveSwitchSupported: false,
+            source: "desktop",
+          });
+          state.updateSummary(localSessionId, {
+            mode: "agent",
+            runState: "idle",
+            attentionRequired: false,
+            updatedAt: new Date().toISOString(),
+          });
+          state.setSessionBusy(localSessionId, false);
+          const next = useAppStore.getState().sessions[localSessionId]?.summary;
+          if (next && !isPrivateChatSession(useAppStore.getState(), localSessionId)) {
+            await bridge.upsertSession(next);
+          }
+          await sendInternal(t.planApprovedControl, [], "agent");
+          return;
+        }
         state.setSessionModeState(localSessionId, {
           currentMode: "agent",
           availableModes: previous?.availableModes ?? [],
@@ -1023,7 +1316,7 @@ export function useDesktopController(
         await bridge.upsertSession(next);
       }
     },
-    [bridge],
+    [bridge, sendInternal],
   );
 
   return {
@@ -1033,6 +1326,7 @@ export function useDesktopController(
     send,
     retryFailed,
     cancel,
+    cancelWorkers,
     reloadActiveAgent,
     chooseModel,
     chooseEffort,

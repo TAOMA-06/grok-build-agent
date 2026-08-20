@@ -151,6 +151,18 @@ export async function gitCommit(
   return invoke("git_commit", { req: { workspaceRoot, message, privateChat } });
 }
 
+export async function gitCreatePullRequest(
+  workspaceRoot: string,
+  title?: string | null,
+  body?: string | null,
+  push = true,
+  privateChat = false,
+): Promise<import("../types").GitPrCreateResult> {
+  return invoke("git_create_pull_request", {
+    req: { workspaceRoot, title: title ?? null, body: body ?? null, push, privateChat },
+  });
+}
+
 export async function gitCreateCheckpoint(
   workspaceRoot: string,
   privateChat = false,
@@ -196,6 +208,41 @@ export async function workspaceIndexSearch(
   privateChat = false,
 ): Promise<import("../contracts").SymbolHit[]> {
   return invoke("workspace_index_search", { workspaceRoot, query, privateChat });
+}
+
+export async function workspaceIndexReferences(
+  workspaceRoot: string,
+  query: string,
+  privateChat = false,
+): Promise<import("../contracts").SymbolHit[]> {
+  return invoke("workspace_index_references", { workspaceRoot, query, privateChat });
+}
+
+export async function workspaceIndexCallGraph(
+  workspaceRoot: string,
+  query: string,
+  privateChat = false,
+): Promise<import("../contracts").CallGraphSlice> {
+  return invoke("workspace_index_call_graph", { workspaceRoot, query, privateChat });
+}
+
+export async function workspaceIndexInvalidate(
+  workspaceRoot: string,
+  paths?: string[] | null,
+  privateChat = false,
+): Promise<{ removed: number }> {
+  return invoke("workspace_index_invalidate", {
+    workspaceRoot,
+    paths: paths ?? null,
+    privateChat,
+  });
+}
+
+export async function workspaceIndexRebuild(
+  workspaceRoot: string,
+  privateChat = false,
+): Promise<{ indexed: number }> {
+  return invoke("workspace_index_rebuild", { workspaceRoot, privateChat });
 }
 
 export async function listRuntimeAdapters(
@@ -268,6 +315,26 @@ export async function resumeExecution(
   sessionId: string,
 ): Promise<{ scheduled: boolean; reason?: string }> {
   return invoke("resume_execution", { taskId, connectionId, sessionId });
+}
+
+export async function listJobs(
+  workspaceId?: string | null,
+): Promise<import("../contracts").HostJob[]> {
+  return invoke("list_jobs", { workspaceId: workspaceId ?? null });
+}
+
+export async function cancelJob(jobId: string): Promise<{ cancelled: boolean }> {
+  return invoke("cancel_job", { jobId });
+}
+
+export async function upsertJob(
+  job: Partial<import("../contracts").HostJob> & {
+    workspaceId: string;
+    kind?: string;
+    state?: string;
+  },
+): Promise<import("../contracts").HostJob> {
+  return invoke("upsert_job", { payload: job });
 }
 
 export async function upsertTask(task: import("../types").TaskDefinition): Promise<void> {
@@ -538,6 +605,10 @@ export type HarnessStatus = {
   resolved: boolean;
   pluginPath?: string | null;
   mode: "plugin" | "rules_only" | string;
+  /** Desktop-tracked Grok Build CLI version (e.g. 1.0.5). */
+  trackedCli?: string | null;
+  /** Host injects GROK_CONFIG overlay (codebase indexing) for harness sessions. */
+  configOverlay?: boolean;
 };
 
 /** Resolve on-disk orchestrator harness package status (no secrets). */

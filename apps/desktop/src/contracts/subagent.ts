@@ -11,6 +11,7 @@ export type SubagentMeta = {
   role: string | null;
   model: string | null;
   detail: string | null;
+  parentToolCallId?: string | null;
 };
 
 export type SubagentStatus =
@@ -26,6 +27,13 @@ export type SubagentRecord = SubagentMeta & {
   status: SubagentStatus;
   /** True when recognition came from structured meta, not title heuristics. */
   structured: boolean;
+  /** Parent tool/subagent id when the runtime advertises a tree. */
+  parentToolCallId?: string | null;
+};
+
+export type SubagentTreeNode = SubagentRecord & {
+  children: SubagentTreeNode[];
+  depth: number;
 };
 
 export type SubagentFleetSummary = {
@@ -82,8 +90,14 @@ export function extractStructuredSubagent(rawInput: unknown): Partial<SubagentMe
   const model = stringField(fromMeta, ["model", "model_slug", "modelSlug"]);
   const title = stringField(fromMeta, ["title", "name", "description"]);
   const detail = stringField(fromMeta, ["detail", "prompt", "task"]);
-  if (!role && !model && !title) return null;
-  return { role, model, title: title ?? undefined, detail };
+  const parentToolCallId = stringField(fromMeta, [
+    "parentToolCallId",
+    "parent_tool_call_id",
+    "parentId",
+    "parent_id",
+  ]);
+  if (!role && !model && !title && !parentToolCallId) return null;
+  return { role, model, title: title ?? undefined, detail, parentToolCallId };
 }
 
 /** True when a tool_call looks like a Grok parallel/subagent worker. */
@@ -144,11 +158,20 @@ export function parseSubagentMeta(input: {
     ?? stringField(input.rawInput, ["model", "model_slug", "modelSlug"]);
   const cleanTitle = titleBase.replace(ROLE_TAG_RE, "").trim() || titleBase;
   const detail = description && description !== cleanTitle ? description : null;
+  const parentToolCallId =
+    structured?.parentToolCallId
+    ?? stringField(input.rawInput, [
+      "parentToolCallId",
+      "parent_tool_call_id",
+      "parentId",
+      "parent_id",
+    ]);
   return {
     title: role ? `[${role}] ${cleanTitle.replace(/^\[.*?\]\s*/, "")}` : cleanTitle,
     role,
     model,
     detail,
+    parentToolCallId,
     structured: !!structured,
   };
 }
@@ -208,9 +231,87 @@ export function listSubagents(tools: SubagentToolLike[]): SubagentRecord[] {
       detail: meta.detail,
       status: normalizeSubagentStatus(tool.status),
       structured: meta.structured,
+      parentToolCallId: meta.parentToolCallId ?? null,
     });
   }
   return records;
+}
+
+/**
+ * Build a depth-1+ tree from parentToolCallId links.
+ * Orphans (missing parent) become roots. Cycle-safe.
+ */
+export function buildSubagentTree(records: SubagentRecord[]): SubagentTreeNode[] {
+  const byId = new Map(records.map((record) => [record.toolCallId, record]));
+  const children = new Map<string, SubagentRecord[]>();
+  const roots: SubagentRecord[] = [];
+  for (const record of records) {
+    const parentId = record.parentToolCallId;
+    if (parentId && byId.has(parentId) && parentId !== record.toolCallId) {
+      const bucket = children.get(parentId) ?? [];
+      bucket.push(record);
+      children.set(parentId, bucket);
+    } else {
+      roots.push(record);
+    }
+  }
+  const visit = (record: SubagentRecord, depth: number, stack: Set<string>): SubagentTreeNode => {
+    const nextStack = new Set(stack);
+    nextStack.add(record.toolCallId);
+    const kids = (children.get(record.toolCallId) ?? [])
+      .filter((child) => !nextStack.has(child.toolCallId))
+      .map((child) => visit(child, depth + 1, nextStack));
+    return { ...record, depth, children: kids };
+  };
+  return roots.map((root) => visit(root, 0, new Set()));
+}
+
+/** Flatten tree for Mission Control rows (depth-first). */
+export function flattenSubagentTree(nodes: SubagentTreeNode[]): SubagentTreeNode[] {
+  const out: SubagentTreeNode[] = [];
+  const walk = (items: SubagentTreeNode[]) => {
+    for (const node of items) {
+      out.push(node);
+      if (node.children.length) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+/**
+ * Desktop sends optional toolCallIds in session/cancel `_meta` as a subtree hint.
+ * ACP cancel remains session-scoped unless the runtime honors `_meta.toolCallIds`.
+ * Mission Control Stop uses soft cancel (no hard runtime stop) so the turn can continue.
+ */
+export function subagentCancelScopeNote(): string {
+  return "Stop sends ACP session/cancel. Choosing one worker marks its subtree cancelled locally and attaches toolCallIds in _meta as a soft hint — Grok still treats cancel as session-wide unless the runtime honors the hint. Mission Control Stop does not hard-kill the Host runtime.";
+}
+
+/** Collect a worker id and all descendants via parentToolCallId links. */
+export function collectSubtreeToolCallIds(
+  records: SubagentRecord[],
+  rootId: string,
+): string[] {
+  const children = new Map<string, string[]>();
+  for (const record of records) {
+    const parentId = record.parentToolCallId;
+    if (!parentId || parentId === record.toolCallId) continue;
+    const bucket = children.get(parentId) ?? [];
+    bucket.push(record.toolCallId);
+    children.set(parentId, bucket);
+  }
+  const out: string[] = [];
+  const stack = [rootId];
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    for (const child of children.get(id) ?? []) stack.push(child);
+  }
+  return out;
 }
 
 export function summarizeSubagentFleet(tools: SubagentToolLike[]): SubagentFleetSummary {

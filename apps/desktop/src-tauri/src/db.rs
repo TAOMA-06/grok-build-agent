@@ -440,6 +440,7 @@ impl Database {
         ensure_session_column(&conn, "archived", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_session_column(&conn, "attention_required", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_session_column(&conn, "applied_at", "TEXT")?;
+        ensure_session_column(&conn, "adapter_id", "TEXT")?;
         migrate_legacy_event_cache(&conn)?;
         let schema_version: i64 =
             conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -770,8 +771,8 @@ impl Database {
                 session_id, connection_id, workspace_root, title, created_at, updated_at,
                 last_message_preview, run_state, remote_session_id, worktree_path, model,
                 always_approve, draft, execution_root, base_commit, mode, permission_policy,
-                sandbox, archived, attention_required, applied_at
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)
+                sandbox, archived, attention_required, applied_at, adapter_id
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)
              ON CONFLICT(session_id) DO UPDATE SET
                 connection_id=excluded.connection_id,
                 workspace_root=excluded.workspace_root,
@@ -791,7 +792,8 @@ impl Database {
                 sandbox=excluded.sandbox,
                 archived=excluded.archived,
                 attention_required=excluded.attention_required,
-                applied_at=excluded.applied_at",
+                applied_at=excluded.applied_at,
+                adapter_id=excluded.adapter_id",
             params![
                 summary.session_id,
                 summary.connection_id,
@@ -814,6 +816,7 @@ impl Database {
                 if summary.archived { 1 } else { 0 },
                 if summary.attention_required { 1 } else { 0 },
                 summary.applied_at,
+                summary.adapter_id,
             ],
         )?;
         // Ensure UI row exists.
@@ -875,7 +878,7 @@ impl Database {
                 "SELECT session_id, connection_id, workspace_root, title, created_at, updated_at,
                         last_message_preview, run_state, remote_session_id, worktree_path, model,
                         always_approve, draft, execution_root, base_commit, mode, permission_policy,
-                        sandbox, archived, attention_required, applied_at
+                        sandbox, archived, attention_required, applied_at, adapter_id
                  FROM sessions WHERE workspace_root = ?1 ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map(params![ws], map_session_row)?;
@@ -887,7 +890,7 @@ impl Database {
                 "SELECT session_id, connection_id, workspace_root, title, created_at, updated_at,
                         last_message_preview, run_state, remote_session_id, worktree_path, model,
                         always_approve, draft, execution_root, base_commit, mode, permission_policy,
-                        sandbox, archived, attention_required, applied_at
+                        sandbox, archived, attention_required, applied_at, adapter_id
                  FROM sessions ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], map_session_row)?;
@@ -905,7 +908,7 @@ impl Database {
                 "SELECT session_id, connection_id, workspace_root, title, created_at, updated_at,
                         last_message_preview, run_state, remote_session_id, worktree_path, model,
                         always_approve, draft, execution_root, base_commit, mode, permission_policy,
-                        sandbox, archived, attention_required, applied_at
+                        sandbox, archived, attention_required, applied_at, adapter_id
                  FROM sessions WHERE session_id = ?1",
                 params![session_id],
                 map_session_row,
@@ -4067,6 +4070,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummary> 
         archived: row.get::<_, i64>(18)? != 0,
         attention_required: row.get::<_, i64>(19)? != 0,
         applied_at: row.get(20)?,
+        adapter_id: row.get(21)?,
     })
 }
 
@@ -4116,12 +4120,14 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: Some("draft text".into()),
+            adapter_id: Some("generic-acp".into()),
         };
         db.upsert_session(&summary).unwrap();
         db.save_draft("s1", "updated draft").unwrap();
         let loaded = db.get_session("s1").unwrap().unwrap();
         assert_eq!(loaded.draft.as_deref(), Some("updated draft"));
         assert_eq!(loaded.mode, TaskMode::Plan);
+        assert_eq!(loaded.adapter_id.as_deref(), Some("generic-acp"));
         assert_eq!(loaded.permission_policy, PermissionPolicy::WorkspaceEdit);
         let schema_version: i64 = db
             .conn
@@ -4199,6 +4205,7 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: None,
+            adapter_id: None,
         };
         db.upsert_session(&summary).unwrap();
         for i in 0..250 {
@@ -4275,6 +4282,7 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: None,
+            adapter_id: None,
         };
         db.upsert_session(&summary).unwrap();
         db.upsert_task(&TaskDefinition {
@@ -4466,6 +4474,7 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: None,
+            adapter_id: None,
         };
         db.upsert_session(&summary).unwrap();
         let prepared = db
@@ -4551,6 +4560,7 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: None,
+            adapter_id: None,
         };
         db.upsert_session(&summary).unwrap();
         let first_input = ExecutionIntentInput {
@@ -4635,6 +4645,7 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: None,
+            adapter_id: None,
         })
         .unwrap();
         let intent = db

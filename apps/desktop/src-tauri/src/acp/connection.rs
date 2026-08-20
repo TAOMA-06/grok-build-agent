@@ -493,6 +493,9 @@ pub async fn spawn_connection(
     };
     cmd.env("GROK_SANDBOX", sandbox);
     apply_strict_privacy_environment(&mut cmd, config.privacy_mode);
+    if let Some(overlay) = super::grok_config_overlay(&config) {
+        cmd.env("GROK_CONFIG", overlay);
+    }
 
     let mut child = cmd
         .spawn()

@@ -110,3 +110,45 @@ export function browserScreenshotEvidenceSummary(input: {
   if (input.note?.trim()) parts.push(input.note.trim());
   return parts.join(" · ");
 }
+
+/** Timeline-facing note when screenshot evidence is recorded into CompletionGate. */
+export function browserEvidenceTimelineNote(summary: string): string {
+  const trimmed = summary.trim() || "browser screenshot evidence";
+  return `Browser verify evidence recorded · ${trimmed}`;
+}
+
+/** True when an attachment looks like screenshot evidence for browser verify. */
+export function isScreenshotAttachment(input: {
+  name?: string | null;
+  mimeType?: string | null;
+}): boolean {
+  const mime = input.mimeType?.toLowerCase() ?? "";
+  if (mime.startsWith("image/")) return true;
+  const name = input.name?.toLowerCase() ?? "";
+  return /\.(png|jpe?g|webp|gif)$/i.test(name) || /screenshot|screen.?shot/i.test(name);
+}
+
+/**
+ * Composer runbook for satisfying browser Verify lines via MCP (no embedded Chromium).
+ */
+export function buildBrowserVerifyRunbook(
+  declarations: BrowserVerifyDeclaration[],
+): string {
+  if (declarations.length === 0) {
+    return [
+      "Enable a browser MCP (Playwright) and verify the UI acceptance checks.",
+      "After screenshots, record evidence in Desktop CompletionGate.",
+    ].join("\n");
+  }
+  const steps = declarations.map((item, index) => {
+    const target = item.target ? ` → ${item.target}` : "";
+    return `${index + 1}. [${item.kind}] ${item.command}${target}\n   ${item.hint}`;
+  });
+  return [
+    "Run the browser verification checklist using browser MCP tools (Desktop does not launch Chromium).",
+    "",
+    ...steps,
+    "",
+    "When done, record screenshot evidence in the Verification tab so CompletionGate can pass.",
+  ].join("\n");
+}

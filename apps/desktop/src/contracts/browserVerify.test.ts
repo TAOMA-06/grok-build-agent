@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   BROWSER_MCP_TEMPLATE,
+  browserEvidenceTimelineNote,
   browserScreenshotEvidenceSummary,
+  buildBrowserVerifyRunbook,
   isBrowserVerifyCommand,
+  isScreenshotAttachment,
   parseBrowserVerifyCommands,
 } from "./browserVerify";
 
@@ -37,5 +40,27 @@ describe("browser verify", () => {
       url: "http://localhost:3000",
       note: "header ok",
     })).toContain("url=http://localhost:3000");
+  });
+
+  it("builds a timeline note for recorded browser evidence", () => {
+    expect(browserEvidenceTimelineNote("browser screenshot evidence · header ok"))
+      .toContain("Browser verify evidence recorded");
+  });
+
+  it("detects screenshot-like attachments", () => {
+    expect(isScreenshotAttachment({ mimeType: "image/png", name: "a.png" })).toBe(true);
+    expect(isScreenshotAttachment({ name: "Screen Shot 2026.png" })).toBe(true);
+    expect(isScreenshotAttachment({ name: "notes.txt", mimeType: "text/plain" })).toBe(false);
+  });
+
+  it("builds an MCP runbook from declarations", () => {
+    const decls = parseBrowserVerifyCommands([
+      "browser: https://example.test",
+      "screenshot: /settings",
+    ]);
+    const runbook = buildBrowserVerifyRunbook(decls);
+    expect(runbook).toContain("browser MCP");
+    expect(runbook).toContain("CompletionGate");
+    expect(runbook).toContain("https://example.test");
   });
 });

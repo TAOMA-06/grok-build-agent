@@ -224,6 +224,11 @@ struct PromptParams {
 struct SessionRoute {
     connection_id: String,
     session_id: String,
+    /// Optional soft-cancel hint for runtimes that understand subtree cancel.
+    /// ACP `session/cancel` remains session-scoped; Desktop still marks the
+    /// subtree cancelled locally when these ids are present.
+    #[serde(default)]
+    tool_call_ids: Option<Vec<String>>,
 }
 
 /// Explicitly binds recoverable queued work to a live ACP route. The Host never

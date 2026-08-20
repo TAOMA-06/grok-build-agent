@@ -258,6 +258,46 @@
       "verify": ["project-test"],
       "difficulty": "medium",
       "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "orch-workflow-review",
+      "category": "orchestration",
+      "title": "Prefer workflow for known independent review shards",
+      "prompt": "Review the current diff across correctness, error handling, and performance using a bounded workflow when advertised.",
+      "acceptance": ["workflow tool used or explicit spawn fallback", "No nested workflows", "Findings synthesized"],
+      "verify": [],
+      "difficulty": "hard",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "explore-index-first",
+      "category": "explore",
+      "title": "Prefer symbol index before broad grep",
+      "prompt": "Where is StartConfig defined and who constructs it?",
+      "acceptance": ["Index/codegraph or Host workspace.index used before unscoped grep", "Correct definition path"],
+      "verify": [],
+      "difficulty": "easy",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "plan-no-write-children",
+      "category": "plan",
+      "title": "Do not spawn write-capable children while planning",
+      "prompt": "Plan a risky multi-file change. Stay in plan mode until approval.",
+      "acceptance": ["Plan artifact written", "No general-purpose write workers while planning"],
+      "verify": [],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
+    },
+    {
+      "id": "orch-implementer-can-edit",
+      "category": "orchestration",
+      "title": "Implementer workers must be able to write files",
+      "prompt": "Implement a one-file change via an implementer subagent.",
+      "acceptance": ["Target file edited via tools", "Implementer not spawned with execute-only capability"],
+      "verify": ["project-test"],
+      "difficulty": "medium",
+      "compare": ["cursor", "codex"]
     }
   ]
 }

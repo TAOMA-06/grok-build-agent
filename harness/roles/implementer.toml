@@ -1,5 +1,5 @@
-# Implementer role — edit + verify; not unrestricted "all"
+# Implementer role — must write files; never `execute` (that mode blocks edits)
 description = "Implementer that edits code and addresses review notes"
-default_capability_mode = "execute"
+default_capability_mode = "all"
 reasoning_effort = "high"
 default_fork_context = true

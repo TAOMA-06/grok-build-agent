@@ -3,7 +3,7 @@ import { Dialog } from "../../components/ui/Dialog";
 import { Field } from "../../components/ui/Field";
 import { KeyValueEditor } from "../../components/ui/KeyValueEditor";
 import { StatusBanner } from "../../components/ui/StatusBanner";
-import { emptyMcpServerInput } from "../../contracts";
+import { emptyMcpServerInput, MCP_TEMPLATES, templateToMcpServerInput } from "../../contracts";
 import { t, translate } from "../../i18n";
 import { useAppStore } from "../../store";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
@@ -207,6 +207,44 @@ export function McpManager({
     }
   }
 
+  async function applyTemplate(templateId: string) {
+    const template = MCP_TEMPLATES.find((item) => item.id === templateId);
+    if (!template) return;
+    const scope: McpScope = settings.cwd?.trim() ? "project" : "user";
+    if (scope === "project") {
+      const path =
+        projectConfigPath ||
+        (settings.cwd ? `${settings.cwd}/.grok/config.toml` : ".grok/config.toml");
+      const ok = window.confirm(
+        `${t.mcpTemplateHint}\n\n${t.mcpProjectPath}: ${path}\n\n${t.mcpProjectWarn}`,
+      );
+      if (!ok) return;
+    }
+    setBusy(true);
+    try {
+      const input = templateToMcpServerInput(template, scope, settings.cwd || null);
+      await bridge.upsertMcpServer(input, settings.grokPath || undefined);
+      setAgentReloadRequired(true);
+      setMsg(`${t.mcpTemplateApplied}: ${template.label}`);
+      await refresh();
+      try {
+        const results = await bridge.doctorMcpServer(template.name, {
+          grokPath: settings.grokPath || undefined,
+          workspaceRoot: settings.cwd || null,
+        });
+        const map = { ...doctorByName };
+        for (const r of results) map[r.name] = r;
+        setDoctorByName(map);
+      } catch {
+        // doctor is best-effort after template write
+      }
+    } catch (e) {
+      setMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const anyBusySession = Object.values(useAppStore.getState().sessions).some(
     (s) => s.busy,
   );
@@ -224,6 +262,22 @@ export function McpManager({
       </div>
 
       <StatusBanner kind="info">{t.mcpTrustHint}</StatusBanner>
+      <p className="hint">{t.mcpTemplateHint}</p>
+      <div className="row-actions" style={{ marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <span className="meta">{t.mcpUseTemplate}</span>
+        {MCP_TEMPLATES.map((template) => (
+          <button
+            key={template.id}
+            type="button"
+            className="ghost"
+            disabled={busy}
+            title={template.description}
+            onClick={() => void applyTemplate(template.id)}
+          >
+            {template.label}
+          </button>
+        ))}
+      </div>
       <p className="hint mono">
         {t.mcpScopeUser}: {userConfigPath || "~/.grok/config.toml"}
         {projectConfigPath ? (

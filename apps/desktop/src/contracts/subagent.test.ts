@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSubagentTree,
   countActiveSubagents,
+  collectSubtreeToolCallIds,
   extractStructuredSubagent,
+  flattenSubagentTree,
   isSubagentTool,
   listSubagents,
   parseSubagentMeta,
+  subagentCancelScopeNote,
   summarizeSubagentFleet,
 } from "./subagent";
 
@@ -102,5 +106,39 @@ describe("subagent detection", () => {
         input: { description: "[explore] a" },
       },
     ])).toHaveLength(1);
+  });
+
+  it("builds a parent/child cancel tree from structured meta", () => {
+    const records = listSubagents([
+      {
+        id: "root",
+        title: "spawn_subagent",
+        status: "running",
+        rawInput: {
+          _meta: { subagent: { role: "plan", title: "orchestrate" } },
+        },
+      },
+      {
+        id: "child",
+        title: "spawn_subagent",
+        status: "running",
+        rawInput: {
+          _meta: {
+            subagent: {
+              role: "explore",
+              title: "scan",
+              parentToolCallId: "root",
+            },
+          },
+        },
+      },
+    ]);
+    const tree = buildSubagentTree(records);
+    expect(tree).toHaveLength(1);
+    expect(tree[0]?.children).toHaveLength(1);
+    expect(tree[0]?.children[0]?.role).toBe("explore");
+    expect(flattenSubagentTree(tree).map((n) => n.depth)).toEqual([0, 1]);
+    expect(collectSubtreeToolCallIds(records, "root").sort()).toEqual(["child", "root"]);
+    expect(subagentCancelScopeNote()).toContain("session/cancel");
   });
 });

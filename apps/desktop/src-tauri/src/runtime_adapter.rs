@@ -233,7 +233,7 @@ impl RuntimeAdapter for GrokAcpAdapter {
         session_id: &str,
     ) -> Result<(), PlatformContractError> {
         self.runtime
-            .cancel_session(&instance.connection_id, session_id)
+            .cancel_session(&instance.connection_id, session_id, None)
             .map_err(|error| PlatformContractError::Adapter(error.to_string()))
     }
 

@@ -7,7 +7,9 @@ import {
   Layers,
   ListTree,
 } from "lucide-react";
+import { mixedPlanningReady } from "../../contracts";
 import { t } from "../../i18n";
+import { useAppStore } from "../../store";
 import type { TaskMode } from "../../types";
 import { Stagger, StaggerItem } from "./motion";
 import { RocketLineArt } from "./RocketLineArt";
@@ -17,12 +19,21 @@ export function EmptyTaskState({
 }: {
   onSuggest: (prompt: string, mode: TaskMode) => void;
 }) {
+  const mixedPlanning = mixedPlanningReady(useAppStore((state) => state.settings));
   const chips: Array<{
     label: string;
     prompt: string;
     mode: TaskMode;
     icon: typeof FileSearch;
   }> = [
+    ...(mixedPlanning
+      ? [{
+          label: t.chipMixedPlan,
+          prompt: t.chipMixedPlanPrompt,
+          mode: "plan" as const,
+          icon: ListTree,
+        }]
+      : []),
     {
       label: t.chipPlanFirst,
       prompt: t.chipPlanFirstPrompt,

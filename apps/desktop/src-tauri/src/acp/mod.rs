@@ -22,6 +22,9 @@ use thiserror::Error;
 
 pub use crate::contracts::{PowerProfile, SandboxMode};
 
+/// CLI version this Desktop/harness release tracks.
+pub const TRACKED_CLI_VERSION: &str = "1.0.5";
+
 #[derive(Debug, Error)]
 pub enum AcpError {
     #[error("{0}")]
@@ -85,6 +88,34 @@ pub struct StartConfig {
     /// Built-in tools to strip via `--disallowed-tools` (e.g. image_gen).
     #[serde(default)]
     pub disallowed_tools: Vec<String>,
+}
+
+/// Allowlisted `GROK_CONFIG` overlay (Grok Build 1.0.5).
+/// Confined to `features` and `models` — never auth, discovery, or command spawn.
+pub fn grok_config_overlay(config: &StartConfig) -> Option<String> {
+    let mut overlay = serde_json::Map::new();
+    if config.use_harness {
+        overlay.insert(
+            "features".into(),
+            serde_json::json!({ "codebase_indexing": true }),
+        );
+    }
+    if let Some(effort) = config
+        .reasoning_effort
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        overlay.insert(
+            "models".into(),
+            serde_json::json!({ "default_reasoning_effort": effort }),
+        );
+    }
+    if overlay.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(overlay).to_string())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,12 +200,12 @@ After substantial edits:
 
 ## Role overlays (desktop digest)
 
-Personas/roles may not be native-resolved unless copied into `.grok/personas` / `.grok/roles`. Always embed role rules in worker `prompt` and tag `description` with `[explore]` / `[plan]` / `[implementer]` / `[reviewer]`.
+Personas/roles may not be native-resolved unless copied into `.grok/personas` / `.grok/roles`. Always embed role rules in worker `prompt` and tag `description` with `[explore]` / `[plan]` / `[implementer]` / `[reviewer]` / `[security]` / `[tests]` / `[quick-search]`.
 
-- explore/plan: read-only; no product edits; no force-push / reset --hard.
-- implementer: smallest change; match style; prefer argv-only checks; no nested subagents; handoffs under `.grok/scratch/<id>/`.
+- explore/plan/quick-search: read-only; no product edits; no force-push / reset --hard.
+- implementer: smallest change; match style; prefer argv-only checks; no nested subagents; handoffs under `.grok/scratch/<id>/`. Needs file writes — `all` or omit capability_mode; never `execute`.
 - reviewer: structured notes only (bug|suggestion|nit + file:line); do not fix unless asked.
-- Prefer narrow capability; never assume `all` / unrestricted tools for workers.
+- Prefer the `workflow` tool for known independent review shards. Prefer index/codegraph before grep.
 "#;
     format!("{agents}\n{digests}")
 }
@@ -269,8 +300,12 @@ mod harness_tests {
             "rules must name modern wait/output helpers"
         );
         assert!(
-            rules.contains("0.2.118"),
+            rules.contains(TRACKED_CLI_VERSION),
             "rules should advertise current CLI alignment"
+        );
+        assert!(
+            rules.contains("never `execute`") || rules.contains("Never `execute`"),
+            "rules must not assign execute-only capability to implementers"
         );
         assert!(
             rules.contains("Verify skill (desktop digest)"),
@@ -280,6 +315,46 @@ mod harness_tests {
             !rules.contains("$TMPDIR/grok-"),
             "rules must not recommend outside-workspace TMPDIR handoffs"
         );
+    }
+
+    fn overlay_config(use_harness: bool, effort: Option<&str>) -> StartConfig {
+        StartConfig {
+            task_id: None,
+            grok_path: None,
+            model: None,
+            reasoning_effort: effort.map(str::to_string),
+            always_approve: false,
+            strict_terminal: false,
+            cwd: "/tmp".into(),
+            rules: None,
+            agent_profile: None,
+            use_harness,
+            sandbox: None,
+            privacy_mode: crate::platform::PrivacyMode::Standard,
+            power_profile: None,
+            resume_session_id: None,
+            private_chat: false,
+            disallowed_tools: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn grok_config_overlay_indexes_when_harness_on() {
+        let raw = grok_config_overlay(&overlay_config(true, Some("high"))).expect("overlay");
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["features"]["codebase_indexing"], true);
+        assert_eq!(value["models"]["default_reasoning_effort"], "high");
+        assert!(value.get("mcpServers").is_none());
+        assert!(value.get("plugins").is_none());
+    }
+
+    #[test]
+    fn grok_config_overlay_skips_empty_when_harness_off() {
+        assert_eq!(grok_config_overlay(&overlay_config(false, None)), None);
+        let raw = grok_config_overlay(&overlay_config(false, Some("medium"))).expect("effort only");
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert!(value.get("features").is_none());
+        assert_eq!(value["models"]["default_reasoning_effort"], "medium");
     }
 
     #[test]
@@ -352,6 +427,16 @@ mod harness_tests {
         assert!(
             resolve_harness_plugin_dir_from(None, std::slice::from_ref(&repo)).is_some(),
             "repo harness must resolve"
+        );
+        assert!(
+            repo.join("workflows/review-changes.rhai").is_file(),
+            "harness must ship review-changes workflow"
+        );
+        assert!(
+            repo.join("personas/security-auditor.toml").is_file()
+                && repo.join("personas/test-writer.toml").is_file()
+                && repo.join("roles/quick-search.toml").is_file(),
+            "harness must ship 1.0 persona/role overlays"
         );
     }
 }
@@ -584,5 +669,43 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(250)).await;
         let child_alive = unsafe { libc::kill(child_pid as libc::pid_t, 0) == 0 };
         assert!(!child_alive, "descendant pid {child_pid} survived stop");
+    }
+
+    struct CountingBus {
+        count: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl EventBus for CountingBus {
+        fn emit_value(&self, event: &str, _payload: serde_json::Value) {
+            if event == "acp:session_update" {
+                self.count
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn host_synthesizes_cancelled_tool_updates_for_subtree_cancel() {
+        let mock = mock_agent_path();
+        let ws = temp_workspace("subtree-cancel");
+        let pool = RuntimePool::new();
+        let status = pool
+            .start_with_bus(noop_bus(), start_cfg(&ws, &mock))
+            .await
+            .expect("start");
+        let connection_id = status.connection_id.clone().expect("connection");
+        let session_id = status.session_id.clone().expect("session");
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let bus: SharedEventBus = Arc::new(CountingBus {
+            count: count.clone(),
+        });
+        let ids = vec!["tool-a".into(), "tool-b".into()];
+        let emitted = pool
+            .emit_host_subtree_cancelled(&connection_id, &session_id, &ids, &bus)
+            .expect("synthesize");
+        assert_eq!(emitted, 2);
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 2);
+        pool.stop_all().await.expect("stop");
     }
 }

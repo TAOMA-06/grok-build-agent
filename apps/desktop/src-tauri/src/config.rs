@@ -75,6 +75,9 @@ pub struct AppSettings {
     /// Preferred runtime adapter id: `grok-acp` (default) or `generic-acp`.
     #[serde(default = "default_preferred_adapter_id")]
     pub preferred_adapter_id: String,
+    /// Plan-mode tasks may start on secondary ACP; Grok still executes.
+    #[serde(default)]
+    pub mixed_planning: bool,
     #[serde(default)]
     pub sandbox: SandboxMode,
     pub cwd: String,
@@ -141,6 +144,8 @@ struct AppSettingsFile {
     #[serde(default = "default_preferred_adapter_id")]
     pub preferred_adapter_id: String,
     #[serde(default)]
+    pub mixed_planning: bool,
+    #[serde(default)]
     pub sandbox: SandboxMode,
     pub cwd: String,
     pub onboarding_done: bool,
@@ -182,6 +187,7 @@ impl Default for AppSettings {
             disable_video_tools: false,
             secondary_acp_path: String::new(),
             preferred_adapter_id: default_preferred_adapter_id(),
+            mixed_planning: false,
             sandbox: SandboxMode::Workspace,
             cwd: String::new(),
             onboarding_done: false,
@@ -346,6 +352,7 @@ pub fn load_settings() -> Result<AppSettings, ConfigError> {
         } else {
             file.preferred_adapter_id
         },
+        mixed_planning: file.mixed_planning,
         sandbox: file.sandbox,
         cwd: file.cwd,
         onboarding_done: file.onboarding_done,
@@ -388,6 +395,7 @@ pub fn save_settings(settings: &AppSettings) -> Result<(), ConfigError> {
         disable_video_tools: settings.disable_video_tools,
         secondary_acp_path: settings.secondary_acp_path.clone(),
         preferred_adapter_id: settings.preferred_adapter_id.clone(),
+        mixed_planning: settings.mixed_planning,
         sandbox: settings.sandbox,
         cwd: settings.cwd.clone(),
         onboarding_done: settings.onboarding_done,

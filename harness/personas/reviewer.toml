@@ -25,7 +25,7 @@ Rules:
 """
 
 # Persona-level defaults — MUST appear before [[inputs]]/[[outputs]] arrays.
-# read-write: may write review notes; should not need full unrestricted tools.
+# read-write: may write review notes; should not need shell.
 default_fork_context = true
 reasoning_effort = "high"
 default_capability_mode = "read-write"

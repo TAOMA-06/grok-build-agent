@@ -63,7 +63,7 @@ pub fn list_adapter_catalog(
             configured: grok_configured,
             available: grok_configured,
             models: Vec::new(),
-            notes: "Primary runtime. Owns auth and default coding agent loop.".into(),
+            notes: "Default executor. Used unless Settings prefers Secondary ACP.".into(),
         },
         AdapterCatalogEntry {
             adapter_id: GENERIC_ADAPTER_ID.into(),
@@ -73,11 +73,11 @@ pub fn list_adapter_catalog(
             models: Vec::new(),
             notes: if secondary_configured {
                 format!(
-                    "Configured via settings or {SECONDARY_ACP_ENV}. ACP-compatible binary for multi-runtime parity."
+                    "Codex or other ACP. Mixed planning uses this for Plan mode; Preferred runtime can run the whole task here."
                 )
             } else {
                 format!(
-                    "Not configured. Set Secondary ACP path in Settings or {SECONDARY_ACP_ENV}."
+                    "Set Secondary ACP path in Settings or {SECONDARY_ACP_ENV} (e.g. Codex ACP)."
                 )
             },
         },
@@ -109,7 +109,7 @@ mod tests {
         assert_eq!(catalog.len(), 2);
         assert!(catalog[0].available);
         assert!(!catalog[1].configured);
-        assert!(catalog[1].notes.contains("Settings"));
+        assert!(catalog[1].notes.contains("Settings") || catalog[1].notes.contains("ACP"));
     }
 
     #[test]

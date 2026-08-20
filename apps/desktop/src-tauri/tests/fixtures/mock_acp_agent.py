@@ -117,6 +117,24 @@ def handle(req: dict) -> bool:
 
     if method == "session/cancel":
         # ACP cancellation is a notification, so no response is emitted.
+        # When `_meta.toolCallIds` is present, emit per-tool cancelled updates
+        # (Desktop soft subtree cancel). Otherwise treat as whole-session cancel.
+        sid = params.get("sessionId") or ""
+        meta = params.get("_meta") or {}
+        ids = meta.get("toolCallIds") or []
+        if isinstance(ids, list) and ids:
+            for tid in ids:
+                notify(
+                    "session/update",
+                    {
+                        "sessionId": sid,
+                        "update": {
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": str(tid),
+                            "status": "cancelled",
+                        },
+                    },
+                )
         return True
 
     if method in ("session/set_mode", "session/set_config_option"):

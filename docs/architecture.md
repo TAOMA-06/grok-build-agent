@@ -2,7 +2,17 @@
 
 ## Product boundary
 
-Grok Build Desktop is a task command center around the official Grok CLI and ACP runtime. It does not replace Grok's model API or tool runner. The product owns project/task organization, worktree isolation, persistence, supervision, permissions and change review.
+Grok Build Desktop is a local **control console** around ACP runtimes. The default executor is the official Grok CLI. It does not replace a model API or tool runner. The product owns project/task organization, worktree isolation, persistence, supervision, permissions and change review.
+
+Runtime is **user-selectable** in Settings:
+
+- **Grok Build** (default): Plan / Agent / Goal all run on `grok-acp`.
+- **Mixed planning**: Plan mode starts on a secondary ACP binary (typically Codex); approving the plan hands it to Grok. Agent and Goal stay on Grok.
+- **Secondary ACP**: the whole task runs on `generic-acp` when that path is configured.
+
+GitHub usage in the console is `gh` commit/PR. Extra GitHub surfaces are optional, not required.
+
+Work-in-progress transfer notes: [handoff.md](handoff.md).
 
 ## Renderer
 
@@ -78,7 +88,7 @@ Worktrees are created without shell concatenation and require an explicit policy
 
 No discard, reset-hard or automatic conflict resolution is provided.
 
-The review API also supports file/hunk stage and unstage, tracked-file revert, commit and checkpoints. Revert always creates a checkpoint first. Checkpoints live under the repository Git directory and contain HEAD, binary working/index patches and bounded copies of regular untracked files; symlinks, unsafe relative paths, more than 1,000 files or more than 100 MB are rejected.
+The review API also supports file/hunk stage and unstage, tracked-file revert, commit, checkpoints, and `gh pr create` (push current branch + open a GitHub pull request). Revert always creates a checkpoint first. Checkpoints live under the repository Git directory and contain HEAD, binary working/index patches and bounded copies of regular untracked files; symlinks, unsafe relative paths, more than 1,000 files or more than 100 MB are rejected. Private Chat cannot open pull requests. GitHub is `gh`, not a GitHub dashboard.
 
 ## Control-plane contracts and policy
 
@@ -110,9 +120,11 @@ Remaining release validation is environmental rather than an in-process fallback
 
 ## Capability discovery
 
-The host normalizes `grok inspect --json` into Skills, Plugins, Hooks, MCP servers, commands and rules. It also parses Grok 0.2.93's initialize `_meta.modelState` and `_meta.availableCommands`, plus session `configOptions`, `availableModes` and live catalog/mode update events.
+The host normalizes `grok inspect --json` into Skills, Plugins, Hooks, MCP servers, commands and rules. It also parses Grok 0.2.93's initialize `_meta.modelState` and `_meta.availableCommands`, plus session `configOptions`, `availableModes` and live catalog/mode update events. Grok 1.0.5 harness sessions receive a `GROK_CONFIG` overlay (`features.codebase_indexing`) at process spawn; the overlay is allowlisted and never writes the user's `config.toml`.
 
-The composer builds one command catalog in this order: desktop-native equivalents, current ACP commands, user-invocable skills and documented-but-unavailable TUI commands. Native commands win name collisions; conflicting skills use a scoped `/source:name` form. Unknown commands are blocked until the user explicitly chooses to send them as an ordinary message. `/clear` follows Grok's new-empty-task behavior; clearing only the draft is a separate composer button. The slash menu and `Cmd+K` palette expose aliases, parameter hints, source and support state.
+The composer builds one command catalog in this order: desktop-native equivalents, current ACP commands, user-invocable skills and documented-but-unavailable TUI commands. Native commands win name collisions; conflicting skills use a scoped `/source:name` form. Unknown commands are blocked until the user explicitly chooses to send them as an ordinary message. `/clear` follows Grok's new-empty-task behavior; clearing only the draft is a separate composer button. The slash menu and `Cmd+K` palette expose aliases, parameter hints, source and support state. Settings → Extensions also exposes a Skills & Hooks orchestration panel that inserts slash drafts or queued multi-skill plans into the active composer.
+
+Mission Control lists a parent/child subagent tree when `_meta.subagent.parentToolCallId` is present, and can Stop workers via ACP `session/cancel` (Grok 0.2.117+ also tears down background subagents from prior turns). Per-worker cancel is not a first-class ACP method yet.
 
 Visible shell copy, settings, MCP forms, dialogs, ARIA labels and status messages use the shared reactive i18n dictionary. New installs follow macOS language, while settings can force English or Simplified Chinese without restarting. Grok/OS/Git/MCP diagnostic text stays verbatim and receives only localized surrounding context.
 

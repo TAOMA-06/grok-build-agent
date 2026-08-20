@@ -46,6 +46,11 @@ export type SessionSummary = {
   reasoningEffort?: string | null;
   alwaysApprove: boolean;
   draft?: string | null;
+  /**
+   * Runtime adapter for this task (`grok-acp` executor or `generic-acp` planner).
+   * Mixed planning starts Plan mode on the planner, then hands off to Grok.
+   */
+  adapterId?: string | null;
 };
 
 export type ToolCall = {
