@@ -7,8 +7,8 @@ use crate::contracts::{
 use crate::platform::{
     AuditRecordInput, CompletionGate, ContextManifest, DispatchState, ExecutionEvent,
     ExecutionIntent, ExecutionIntentState, ExecutionRecoverySummary, ExecutionRun, ExecutionState,
-    PlatformEvent, ProjectionRebuildReport, PromptDispatch, TaskDefinition, TaskState,
-    VerificationResult, VerificationStatus,
+    MemoryCandidate, MemoryState, PlatformEvent, ProjectionRebuildReport, PromptDispatch,
+    TaskDefinition, TaskState, VerificationResult, VerificationStatus,
 };
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -440,6 +440,7 @@ impl Database {
         ensure_session_column(&conn, "archived", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_session_column(&conn, "attention_required", "INTEGER NOT NULL DEFAULT 0")?;
         ensure_session_column(&conn, "applied_at", "TEXT")?;
+        ensure_session_column(&conn, "adapter_id", "TEXT")?;
         migrate_legacy_event_cache(&conn)?;
         let schema_version: i64 =
             conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -770,8 +771,8 @@ impl Database {
                 session_id, connection_id, workspace_root, title, created_at, updated_at,
                 last_message_preview, run_state, remote_session_id, worktree_path, model,
                 always_approve, draft, execution_root, base_commit, mode, permission_policy,
-                sandbox, archived, attention_required, applied_at
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)
+                sandbox, archived, attention_required, applied_at, adapter_id
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)
              ON CONFLICT(session_id) DO UPDATE SET
                 connection_id=excluded.connection_id,
                 workspace_root=excluded.workspace_root,
@@ -791,7 +792,8 @@ impl Database {
                 sandbox=excluded.sandbox,
                 archived=excluded.archived,
                 attention_required=excluded.attention_required,
-                applied_at=excluded.applied_at",
+                applied_at=excluded.applied_at,
+                adapter_id=excluded.adapter_id",
             params![
                 summary.session_id,
                 summary.connection_id,
@@ -814,6 +816,7 @@ impl Database {
                 if summary.archived { 1 } else { 0 },
                 if summary.attention_required { 1 } else { 0 },
                 summary.applied_at,
+                summary.adapter_id,
             ],
         )?;
         // Ensure UI row exists.
@@ -875,7 +878,7 @@ impl Database {
                 "SELECT session_id, connection_id, workspace_root, title, created_at, updated_at,
                         last_message_preview, run_state, remote_session_id, worktree_path, model,
                         always_approve, draft, execution_root, base_commit, mode, permission_policy,
-                        sandbox, archived, attention_required, applied_at
+                        sandbox, archived, attention_required, applied_at, adapter_id
                  FROM sessions WHERE workspace_root = ?1 ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map(params![ws], map_session_row)?;
@@ -887,7 +890,7 @@ impl Database {
                 "SELECT session_id, connection_id, workspace_root, title, created_at, updated_at,
                         last_message_preview, run_state, remote_session_id, worktree_path, model,
                         always_approve, draft, execution_root, base_commit, mode, permission_policy,
-                        sandbox, archived, attention_required, applied_at
+                        sandbox, archived, attention_required, applied_at, adapter_id
                  FROM sessions ORDER BY updated_at DESC",
             )?;
             let rows = stmt.query_map([], map_session_row)?;
@@ -905,7 +908,7 @@ impl Database {
                 "SELECT session_id, connection_id, workspace_root, title, created_at, updated_at,
                         last_message_preview, run_state, remote_session_id, worktree_path, model,
                         always_approve, draft, execution_root, base_commit, mode, permission_policy,
-                        sandbox, archived, attention_required, applied_at
+                        sandbox, archived, attention_required, applied_at, adapter_id
                  FROM sessions WHERE session_id = ?1",
                 params![session_id],
                 map_session_row,
@@ -1849,6 +1852,109 @@ impl Database {
             });
         }
         Ok(out)
+    }
+
+    pub fn upsert_memory_candidate(&self, memory: &MemoryCandidate) -> Result<(), DbError> {
+        self.conn.lock().execute(
+            "INSERT INTO memory_candidates (
+                memory_id, workspace_id, kind, content, source_event_id, confidence,
+                state, created_at, reviewed_at
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
+             ON CONFLICT(memory_id) DO UPDATE SET
+                workspace_id=excluded.workspace_id,
+                kind=excluded.kind,
+                content=excluded.content,
+                source_event_id=excluded.source_event_id,
+                confidence=excluded.confidence,
+                state=excluded.state,
+                reviewed_at=excluded.reviewed_at",
+            params![
+                memory.memory_id,
+                memory.workspace_id,
+                memory.kind,
+                memory.content,
+                memory.source_event_id,
+                memory.confidence,
+                memory_state_str(memory.state),
+                memory.created_at,
+                memory.reviewed_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_memory_candidates(
+        &self,
+        workspace_id: Option<&str>,
+        state_filter: Option<&str>,
+    ) -> Result<Vec<MemoryCandidate>, DbError> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT memory_id, workspace_id, kind, content, source_event_id, confidence,
+             state, created_at, reviewed_at FROM memory_candidates
+             WHERE (?1 IS NULL OR workspace_id = ?1)
+               AND (?2 IS NULL OR state = ?2)
+             ORDER BY created_at DESC",
+        )?;
+        let rows = statement.query_map(params![workspace_id, state_filter], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, f64>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, Option<String>>(8)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (
+                memory_id,
+                workspace_id,
+                kind,
+                content,
+                source_event_id,
+                confidence,
+                state,
+                created_at,
+                reviewed_at,
+            ) = row?;
+            out.push(MemoryCandidate {
+                memory_id,
+                workspace_id,
+                kind,
+                content,
+                source_event_id,
+                confidence,
+                state: parse_memory_state(&state)?,
+                created_at,
+                reviewed_at,
+            });
+        }
+        Ok(out)
+    }
+
+    pub fn review_memory_candidate(
+        &self,
+        memory_id: &str,
+        state: MemoryState,
+        reviewed_at: &str,
+    ) -> Result<bool, DbError> {
+        let changed = self.conn.lock().execute(
+            "UPDATE memory_candidates SET state = ?1, reviewed_at = ?2 WHERE memory_id = ?3",
+            params![memory_state_str(state), reviewed_at, memory_id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn list_accepted_memories_for_workspace(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<MemoryCandidate>, DbError> {
+        self.list_memory_candidates(Some(workspace_id), Some("accepted"))
     }
 
     pub fn save_verification_result(&self, result: &VerificationResult) -> Result<(), DbError> {
@@ -3201,6 +3307,23 @@ fn parse_verification_status(value: &str) -> Result<VerificationStatus, DbError>
     }
 }
 
+fn memory_state_str(state: MemoryState) -> &'static str {
+    match state {
+        MemoryState::Candidate => "candidate",
+        MemoryState::Accepted => "accepted",
+        MemoryState::Rejected => "rejected",
+    }
+}
+
+fn parse_memory_state(value: &str) -> Result<MemoryState, DbError> {
+    match value {
+        "candidate" => Ok(MemoryState::Candidate),
+        "accepted" => Ok(MemoryState::Accepted),
+        "rejected" => Ok(MemoryState::Rejected),
+        other => Err(DbError::Message(format!("unknown memory state {other}"))),
+    }
+}
+
 fn parse_dispatch_state(value: &str) -> Result<DispatchState, DbError> {
     match value {
         "prepared" => Ok(DispatchState::Prepared),
@@ -3947,6 +4070,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionSummary> 
         archived: row.get::<_, i64>(18)? != 0,
         attention_required: row.get::<_, i64>(19)? != 0,
         applied_at: row.get(20)?,
+        adapter_id: row.get(21)?,
     })
 }
 
@@ -3996,12 +4120,14 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: Some("draft text".into()),
+            adapter_id: Some("generic-acp".into()),
         };
         db.upsert_session(&summary).unwrap();
         db.save_draft("s1", "updated draft").unwrap();
         let loaded = db.get_session("s1").unwrap().unwrap();
         assert_eq!(loaded.draft.as_deref(), Some("updated draft"));
         assert_eq!(loaded.mode, TaskMode::Plan);
+        assert_eq!(loaded.adapter_id.as_deref(), Some("generic-acp"));
         assert_eq!(loaded.permission_policy, PermissionPolicy::WorkspaceEdit);
         let schema_version: i64 = db
             .conn
@@ -4079,6 +4205,7 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: None,
+            adapter_id: None,
         };
         db.upsert_session(&summary).unwrap();
         for i in 0..250 {
@@ -4155,6 +4282,7 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: None,
+            adapter_id: None,
         };
         db.upsert_session(&summary).unwrap();
         db.upsert_task(&TaskDefinition {
@@ -4251,6 +4379,39 @@ mod tests {
     }
 
     #[test]
+    fn memory_candidate_roundtrip_and_review() {
+        let db = temp_db();
+        let memory = crate::platform::MemoryCandidate {
+            memory_id: "m1".into(),
+            workspace_id: Some("/workspace".into()),
+            kind: "convention".into(),
+            content: "Prefer pnpm".into(),
+            source_event_id: "ui".into(),
+            confidence: 0.9,
+            state: crate::platform::MemoryState::Candidate,
+            created_at: "t0".into(),
+            reviewed_at: None,
+        };
+        db.upsert_memory_candidate(&memory).unwrap();
+        let listed = db
+            .list_memory_candidates(Some("/workspace"), None)
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].content, "Prefer pnpm");
+        assert!(db
+            .review_memory_candidate("m1", crate::platform::MemoryState::Accepted, "t1")
+            .unwrap());
+        let accepted = db
+            .list_accepted_memories_for_workspace("/workspace")
+            .unwrap();
+        assert_eq!(accepted.len(), 1);
+        assert!(matches!(
+            accepted[0].state,
+            crate::platform::MemoryState::Accepted
+        ));
+    }
+
+    #[test]
     fn completion_gate_requires_structured_verification() {
         let db = temp_db();
         db.upsert_task(&TaskDefinition {
@@ -4313,6 +4474,7 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: None,
+            adapter_id: None,
         };
         db.upsert_session(&summary).unwrap();
         let prepared = db
@@ -4398,6 +4560,7 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: None,
+            adapter_id: None,
         };
         db.upsert_session(&summary).unwrap();
         let first_input = ExecutionIntentInput {
@@ -4482,6 +4645,7 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: None,
+            adapter_id: None,
         })
         .unwrap();
         let intent = db

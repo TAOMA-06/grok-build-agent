@@ -1,5 +1,9 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { DesktopBridgeContext } from "../../platform/DesktopBridge";
+import { mockDesktopBridge } from "../../platform/mockBridge";
 import type { SessionRuntime } from "../../store";
 import { MissionControlDialog } from "./MissionControlDialog";
 
@@ -43,11 +47,20 @@ function session(overrides: Partial<SessionRuntime["summary"]> & Pick<Partial<Se
   };
 }
 
+function renderDialog(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <DesktopBridgeContext.Provider value={mockDesktopBridge}>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </DesktopBridgeContext.Provider>,
+  );
+}
+
 describe("MissionControlDialog", () => {
   it("puts operator attention ahead of active and idle work, then opens the selected task", () => {
     const onOpenSession = vi.fn();
     const onOpenChange = vi.fn();
-    render(
+    renderDialog(
       <MissionControlDialog
         open
         onOpenChange={onOpenChange}
@@ -71,5 +84,20 @@ describe("MissionControlDialog", () => {
     fireEvent.click(recovery);
     expect(onOpenSession).toHaveBeenCalledWith("task-recovery");
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("exposes create-job controls in the Jobs strip", () => {
+    renderDialog(
+      <MissionControlDialog
+        open
+        onOpenChange={vi.fn()}
+        sessions={[session({ sessionId: "task-idle", title: "Idle task" })]}
+        onOpenSession={vi.fn()}
+        onNewTask={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Create job/i }));
+    expect(screen.getByText("Schedule")).toBeInTheDocument();
+    expect(screen.getByText("Kind")).toBeInTheDocument();
   });
 });

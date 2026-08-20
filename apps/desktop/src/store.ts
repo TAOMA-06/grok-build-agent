@@ -83,11 +83,23 @@ type SessionSlice = {
   setSessionContextUsage: (id: string, usage: SessionContextUsage | null) => void;
   addBlock: (sessionId: string, b: ChatBlock) => void;
   updateBlock: (sessionId: string, blockId: string, patch: Partial<ChatBlock>) => void;
+  removeBlock: (sessionId: string, blockId: string) => void;
   setFailedSubmission: (id: string, failed: FailedSubmission | null) => void;
   appendAssistant: (sessionId: string, text: string) => void;
   appendThought: (sessionId: string, text: string) => void;
   upsertTool: (sessionId: string, tool: ToolCall) => void;
-  setPlan: (sessionId: string, text: string) => void;
+  upsertSubtask: (
+    sessionId: string,
+    subtask: {
+      toolCallId: string;
+      title: string;
+      status: string;
+      role?: string | null;
+      model?: string | null;
+      detail?: string | null;
+    },
+  ) => void;
+  setPlan: (sessionId: string, text: string, document?: import("./contracts").PlanDocument) => void;
   clearChat: (sessionId: string) => void;
   removeSession: (sessionId: string) => void;
   activeBlocks: () => ChatBlock[];
@@ -532,6 +544,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
+  removeBlock: (sessionId, blockId) => {
+    const s = get().sessions[sessionId];
+    if (!s) return;
+    set({
+      sessions: {
+        ...get().sessions,
+        [sessionId]: {
+          ...s,
+          blocks: s.blocks.filter((block) => block.id !== blockId),
+        },
+      },
+    });
+  },
+
   setFailedSubmission: (id, failedSubmission) => {
     const s = get().sessions[id];
     if (!s) return;
@@ -648,13 +674,56 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  setPlan: (sessionId, text) => {
+  upsertSubtask: (sessionId, subtask) => {
+    const s = get().sessions[sessionId];
+    if (!s) return;
+    const blocks = [...s.blocks];
+    const idx = blocks.findIndex(
+      (b) => b.type === "subtask" && b.toolCallId === subtask.toolCallId,
+    );
+    const next = {
+      type: "subtask" as const,
+      id: idx >= 0 && blocks[idx].type === "subtask" ? blocks[idx].id : crypto.randomUUID(),
+      title: subtask.title,
+      status: subtask.status,
+      toolCallId: subtask.toolCallId,
+      role: subtask.role ?? null,
+      model: subtask.model ?? null,
+      detail: subtask.detail ?? null,
+      at: new Date().toISOString(),
+    };
+    if (idx >= 0) blocks[idx] = next;
+    else blocks.push(next);
+    set({
+      sessions: {
+        ...get().sessions,
+        [sessionId]: {
+          ...s,
+          blocks,
+          streamAssistantId: null,
+          streamThoughtId: null,
+        },
+      },
+    });
+  },
+
+  setPlan: (sessionId, text, document) => {
     const s = get().sessions[sessionId];
     if (!s) return;
     const lastBlock = s.blocks[s.blocks.length - 1];
-    const blocks = lastBlock?.type === "plan" && lastBlock.text === text
-      ? s.blocks
-      : [...s.blocks, { type: "plan" as const, id: crypto.randomUUID(), text }];
+    const sameText = lastBlock?.type === "plan" && lastBlock.text === text;
+    const blocks = sameText
+      ? s.blocks.map((block, index) => (
+        index === s.blocks.length - 1 && block.type === "plan"
+          ? { ...block, document: document ?? block.document }
+          : block
+      ))
+      : [...s.blocks, {
+        type: "plan" as const,
+        id: crypto.randomUUID(),
+        text,
+        document,
+      }];
     set({
       sessions: {
         ...get().sessions,

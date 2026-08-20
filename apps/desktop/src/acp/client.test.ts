@@ -105,8 +105,32 @@ describe("ACP session event routing", () => {
     expect(runtime?.summary.mode).toBe("plan");
     expect(runtime?.modeState.currentMode).toBe("plan");
     expect(runtime?.availableCommands).toEqual([
-      { name: "context", description: "Inspect context", input: undefined },
+      { name: "context", description: "Inspect context", input: undefined, tag: null },
     ]);
+  });
+
+  it("promotes spawn_subagent tools into subtask fleet blocks", () => {
+    handleSessionUpdate({
+      sessionUpdate: "tool_call",
+      toolCallId: "sub-1",
+      title: "spawn_subagent",
+      kind: "other",
+      status: "running",
+      rawInput: {
+        description: "[implementer] wire the auth middleware",
+        model: "grok-4.5",
+      },
+    } as never, "remote-1", "conn-1");
+    const runtime = useAppStore.getState().sessions["local-foreground"];
+    const subtask = runtime?.blocks.find((block) => block.type === "subtask");
+    expect(subtask).toMatchObject({
+      type: "subtask",
+      toolCallId: "sub-1",
+      status: "running",
+      role: "implementer",
+      model: "grok-4.5",
+    });
+    expect(runtime?.tools.some((tool) => tool.id === "sub-1")).toBe(true);
   });
 
   it("does not echo optimistic user chunks into the transcript", () => {

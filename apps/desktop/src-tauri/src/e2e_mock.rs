@@ -112,6 +112,7 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: Some("hello draft".into()),
+            adapter_id: None,
         };
         db.upsert_session(&summary).unwrap();
         db.save_draft("local-e2e", "updated").unwrap();
@@ -136,7 +137,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resumed.session_id.as_deref(), Some(sess.as_str()));
-        pool.cancel_session(&conn, &sess).unwrap();
+        pool.cancel_session(&conn, &sess, None).unwrap();
 
         assert!(handlers_is_permission_for_test(
             "session/request_permission"

@@ -18,12 +18,12 @@ const projectPath = "/Users/demo/Projects/orbit";
 const now = new Date().toISOString();
 
 const health: RuntimeHealth = {
-  grok: { found: true, path: "~/.grok/bin/grok", version: "0.2.111" },
+  grok: { found: true, path: "~/.grok/bin/grok", version: "1.0.5" },
   authenticated: true,
   authMethod: "device",
   ready: true,
   checklist: [
-    { id: "cli", label: "Grok CLI", ok: true, detail: "0.2.111" },
+    { id: "cli", label: "Grok CLI", ok: true, detail: "1.0.5" },
     { id: "auth", label: "Signed in", ok: true, detail: "Device auth" },
   ],
 };
@@ -421,6 +421,29 @@ export const mockDesktopBridge: DesktopBridge = {
       checkedAt: new Date().toISOString(),
     }];
   },
+  async setMcpServerEnabled(name, enabled) {
+    return enabled ? `enabled ${name}` : `disabled ${name}`;
+  },
+  async checkCliUpdate() {
+    return {
+      currentVersion: "1.0.5",
+      latestVersion: "1.0.5",
+      updateAvailable: false,
+      channel: "stable",
+    };
+  },
+  async runCliUpdate() {
+    return "Already up to date";
+  },
+  async getHarnessStatus() {
+    return {
+      resolved: true,
+      pluginPath: "/mock/harness",
+      mode: "plugin",
+      trackedCli: "1.0.5",
+      configOverlay: true,
+    };
+  },
   async gitReview(root, _privateChat = false) {
     return mockReview(root);
   },
@@ -435,6 +458,9 @@ export const mockDesktopBridge: DesktopBridge = {
   },
   async gitCommit(_root, _message, _privateChat = false) {
     return { commit: "d34db33", summary: "mock commit" };
+  },
+  async gitCreatePullRequest(_root, _title, _body, _push = true, _privateChat = false) {
+    return { url: "https://github.com/example/orbit/pull/1", pushed: true };
   },
   async gitCreateCheckpoint(_root, _privateChat = false) {
     return {
@@ -474,6 +500,69 @@ export const mockDesktopBridge: DesktopBridge = {
   async workspaceSearch(_workspaceRoot, query, _privateChat = false) {
     return [{ path: `src/${query}.ts`, name: `${query}.ts`, directory: false, size: 128 }];
   },
+  async workspaceIndexSearch(_workspaceRoot, query, _privateChat = false) {
+    return [{
+      path: `src/${query}.ts`,
+      name: query,
+      kind: "function",
+      line: 1,
+      score: 100,
+      snippet: `export function ${query}() {}`,
+    }];
+  },
+  async workspaceIndexReferences(_workspaceRoot, query, _privateChat = false) {
+    return [{
+      path: `src/caller.ts`,
+      name: query,
+      kind: "call",
+      line: 4,
+      score: 88,
+      snippet: `return ${query}();`,
+    }];
+  },
+  async workspaceIndexCallGraph(_workspaceRoot, query, _privateChat = false) {
+    return {
+      symbol: query,
+      definitions: [{
+        path: `src/${query}.ts`,
+        name: query,
+        kind: "function",
+        line: 1,
+        score: 100,
+        snippet: `export function ${query}() {}`,
+      }],
+      callers: [{
+        path: `src/caller.ts`,
+        name: query,
+        kind: "call",
+        line: 4,
+        score: 88,
+        snippet: `return ${query}();`,
+      }],
+    };
+  },
+  async workspaceIndexInvalidate() { return { removed: 0 }; },
+  async workspaceIndexRebuild() { return { indexed: 0 }; },
+  async listRuntimeAdapters() {
+    return [
+      {
+        adapterId: "grok-acp",
+        label: "Grok Build ACP",
+        configured: true,
+        available: true,
+        models: [],
+        notes: "Primary runtime",
+      },
+      {
+        adapterId: "generic-acp",
+        label: "Secondary ACP",
+        configured: false,
+        available: false,
+        models: [],
+        notes: "Not configured",
+      },
+    ];
+  },
   async workspaceRead(_workspaceRoot, path, _privateChat = false) {
     return { path, content: "mock preview", binary: false, truncated: false, size: 12 };
   },
@@ -493,6 +582,7 @@ export const mockDesktopBridge: DesktopBridge = {
       strictNetworkIsolation: false,
       pendingPermissions: 0,
       blobBytes: 0,
+      github: { found: true, authenticated: true, detail: "mock gh" },
     };
   },
   async restartAgentHost() {},
@@ -508,6 +598,23 @@ export const mockDesktopBridge: DesktopBridge = {
   async getExecution() { return null; },
   async listExecutionEvents() { return []; },
   async resumeExecution() { return { scheduled: false, reason: "no recoverable execution intent" }; },
+  async listJobs() { return []; },
+  async cancelJob() { return { cancelled: false }; },
+  async upsertJob(job) {
+    return {
+      jobId: job.jobId ?? "job-mock",
+      workspaceId: job.workspaceId,
+      taskId: job.taskId ?? null,
+      kind: job.kind ?? "agent_prompt",
+      schedule: job.schedule ?? null,
+      state: job.state ?? "active",
+      idempotencyKey: job.idempotencyKey ?? null,
+      policy: job.policy ?? {},
+      nextRunAt: job.nextRunAt ?? null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  },
   async upsertTask() {},
   async listContextManifests() { return []; },
   async saveContextManifest() {},
@@ -515,6 +622,15 @@ export const mockDesktopBridge: DesktopBridge = {
   async saveVerificationResult() {},
   async runVerification(taskId, _workspaceRoot, command) {
     return { verificationId: crypto.randomUUID(), taskId, turnId: "mock", command, status: "passed", summary: "mock verification", exitCode: 0, createdAt: new Date().toISOString() };
+  },
+  async listMemoryCandidates() { return []; },
+  async upsertMemoryCandidate() {},
+  async reviewMemoryCandidate() { return { updated: true }; },
+  async getProjectProfile(workspaceId) {
+    return { workspaceId, content: "", path: null, exists: false, updatedAt: null };
+  },
+  async saveProjectProfile(workspaceId, content) {
+    return { workspaceId, content, path: ".grok/profile.md", exists: true, updatedAt: new Date().toISOString() };
   },
   async terminalCreate() { return { terminalId: crypto.randomUUID(), pid: 1 }; },
   async terminalList() { return []; },

@@ -43,6 +43,11 @@ export type McpServerInfo = {
   envKeys: string[];
   headerKeys: string[];
   status?: string | null;
+  /**
+   * Whether the server is enabled for agent sessions (CLI 0.2.113+
+   * `grok mcp enable|disable`). Absent/unknown defaults to true.
+   */
+  enabled?: boolean | null;
   lastDoctor?: McpDoctorResult | null;
 };
 

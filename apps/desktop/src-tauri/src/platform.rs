@@ -72,6 +72,42 @@ pub struct VerificationResult {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryState {
+    Candidate,
+    Accepted,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryCandidate {
+    pub memory_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    pub kind: String,
+    pub content: String,
+    pub source_event_id: String,
+    pub confidence: f64,
+    pub state: MemoryState,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectProfile {
+    pub workspace_id: String,
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub exists: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextManifestEntry {
@@ -487,6 +523,23 @@ pub struct AdapterDoctorReport {
     pub findings: Vec<String>,
 }
 
+/// Catalog row for multi-runtime parity (W1-A). Listing is available before
+/// a second adapter is fully wired into task launch.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdapterCatalogEntry {
+    pub adapter_id: String,
+    pub label: String,
+    /// Path/binary is present so the adapter can be selected.
+    pub configured: bool,
+    /// Probe believes the adapter can accept work right now.
+    pub available: bool,
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default)]
+    pub notes: String,
+}
+
 #[derive(Debug, Error)]
 pub enum PlatformContractError {
     #[error("{0}")]
@@ -549,8 +602,11 @@ pub fn contract_schema_bundle() -> Value {
         "runtimeLaunchConfig": schema_for!(RuntimeLaunchConfig),
         "runtimeInstance": schema_for!(RuntimeInstance),
         "runtimeCapabilities": schema_for!(RuntimeCapabilitySet),
+        "adapterCatalogEntry": schema_for!(AdapterCatalogEntry),
         "taskDefinition": schema_for!(TaskDefinition),
         "verificationResult": schema_for!(VerificationResult),
+        "memoryCandidate": schema_for!(MemoryCandidate),
+        "projectProfile": schema_for!(ProjectProfile),
         "contextManifest": schema_for!(ContextManifest),
         "completionGate": schema_for!(CompletionGate),
         "projectionRebuildReport": schema_for!(ProjectionRebuildReport),

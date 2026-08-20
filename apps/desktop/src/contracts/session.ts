@@ -4,6 +4,7 @@
 
 import type { ConnectionId, SandboxMode } from "./runtime";
 import type { TaskMode } from "./mode";
+import type { PlanDocument } from "./planSteps";
 
 export type SessionId = string;
 
@@ -45,6 +46,11 @@ export type SessionSummary = {
   reasoningEffort?: string | null;
   alwaysApprove: boolean;
   draft?: string | null;
+  /**
+   * Runtime adapter for this task (`grok-acp` executor or `generic-acp` planner).
+   * Mixed planning starts Plan mode on the planner, then hands off to Grok.
+   */
+  adapterId?: string | null;
 };
 
 export type ToolCall = {
@@ -68,7 +74,7 @@ export type ChatBlock =
   | { type: "assistant"; id: string; text: string; at?: string }
   | { type: "thought"; id: string; text: string; at?: string }
   | { type: "tool"; id: string; tool: ToolCall; at?: string }
-  | { type: "plan"; id: string; text: string; at?: string }
+  | { type: "plan"; id: string; text: string; document?: PlanDocument; at?: string }
   | {
       type: "system";
       id: string;
@@ -76,7 +82,22 @@ export type ChatBlock =
       level?: "info" | "error" | "warn";
       at?: string;
     }
-  | { type: "subtask"; id: string; title: string; status: string; at?: string };
+  | {
+      type: "subtask";
+      id: string;
+      /** Display title (often description or tool title). */
+      title: string;
+      status: string;
+      /** Tool call id when this subtask is backed by a tool_call event. */
+      toolCallId?: string | null;
+      /** Parsed role tag e.g. implementer / explore / reviewer. */
+      role?: string | null;
+      /** Optional model slug when advertised on the tool payload. */
+      model?: string | null;
+      /** Short detail / description for expand UI. */
+      detail?: string | null;
+      at?: string;
+    };
 
 /** Per-session UI persistence (scroll, inspector, draft). */
 export type SessionUiState = {
@@ -98,4 +119,6 @@ export type AvailableCommand = {
   name: string;
   description?: string | null;
   input?: unknown;
+  /** Optional bracket tag from CLI (0.2.112+), e.g. "new". */
+  tag?: string | null;
 };

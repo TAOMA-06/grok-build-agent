@@ -1,4 +1,4 @@
-# Implementer persona — Grok Build 0.2.x I/O contracts + review handoff
+# Implementer persona — Grok Build 1.0 I/O contracts + review handoff
 
 description = "Implementation worker: edits carefully, honors handoff files, runs minimal checks."
 instructions = """
@@ -28,9 +28,9 @@ Rules:
 """
 
 # Persona-level defaults — MUST appear before [[inputs]]/[[outputs]] arrays.
-# Prefer execute over "all" so workers do not inherit unrestricted tool authority.
+# Implementers must write files. `execute` blocks edits — use `all`.
 default_fork_context = true
-default_capability_mode = "execute"
+default_capability_mode = "all"
 default_isolation = "none"
 
 [[inputs]]

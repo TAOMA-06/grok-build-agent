@@ -910,6 +910,17 @@
   background: rgba(233, 183, 95, 0.12);
   border: 1px solid rgba(233, 183, 95, 0.28);
 }
+.gb-planner-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--gb-accent-strong);
+  background: var(--gb-accent-dim);
+  border: 1px solid color-mix(in srgb, var(--gb-accent) 40%, transparent);
+}
 .gb-composer-plan {
   display: grid;
   gap: 4px;
@@ -2654,6 +2665,117 @@
   background: var(--gb-accent) !important;
 }
 
+.gb-plan-steps {
+  margin: 10px 0 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--gb-border);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.gb-plan-steps strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--gb-muted);
+}
+
+.gb-plan-steps ol {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 8px;
+}
+
+.gb-plan-steps li {
+  display: grid;
+  gap: 4px;
+}
+
+.gb-plan-step-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.gb-plan-step-status {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--gb-muted);
+  background: color-mix(in srgb, var(--gb-muted) 14%, transparent);
+}
+
+.gb-plan-step-status.completed {
+  color: #2f7a4a;
+  background: rgba(47, 122, 74, 0.12);
+}
+
+.gb-plan-step-status.in_progress {
+  color: var(--gb-accent);
+  background: color-mix(in srgb, var(--gb-accent) 16%, transparent);
+}
+
+.gb-plan-step-status.cancelled {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.gb-plan-progress {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gb-muted);
+}
+
+.gb-plan-heading {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gb-plan-steps li span {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.gb-plan-revise {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 4px;
+  font-size: 12px;
+  color: var(--gb-muted);
+}
+
+.gb-plan-revise textarea {
+  resize: vertical;
+  min-height: 48px;
+}
+
+.gb-activity.gb-subagent {
+  border-color: rgba(160, 120, 255, 0.28);
+}
+
+.gb-empty-strengths {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--gb-muted);
+  line-height: 1.45;
+}
+
+.gb-mission-subagents {
+  opacity: 0.9;
+  font-style: normal;
+  color: var(--gb-accent);
+}
+
 .gb-system-message.error,
 .gb-permission-card {
   border-color: rgba(228, 59, 59, 0.34);
@@ -3539,6 +3661,30 @@
 
 .gb-mission-control-stats .attention b { color: var(--gb-warning); }
 .gb-mission-control-stats .working b { color: var(--gb-accent); }
+.gb-mission-control-stats .gb-mission-role-breakdown {
+  color: var(--gb-muted);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+.gb-symbol-hits {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 8px;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius-md);
+  background: var(--gb-raised);
+}
+.gb-symbol-hits strong {
+  font-size: 10px;
+  color: var(--gb-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.gb-symbol-hits .gb-file-row i {
+  color: var(--gb-faint);
+  font-style: normal;
+}
 .gb-mission-control-stats small { margin-left: auto; color: var(--gb-muted); font-size: 8px; }
 
 .gb-mission-control-list {
@@ -3563,6 +3709,235 @@
   color: var(--gb-text);
   background: transparent;
   text-align: left;
+}
+
+.gb-mission-control-card {
+  display: grid;
+  gap: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.gb-mission-control-card:hover {
+  border-color: color-mix(in srgb, var(--gb-accent) 18%, transparent);
+}
+
+.gb-mission-subagent-tree {
+  margin: 0;
+  padding: 0 12px 8px;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.gb-mission-subagent-tree li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--gb-muted);
+}
+
+.gb-mission-subagent-tree li span {
+  flex: 1;
+  min-width: 0;
+}
+
+.gb-mission-stop-one {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--gb-danger) 35%, var(--gb-border));
+  background: transparent;
+  color: var(--gb-danger);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.gb-mission-stop-one:hover {
+  background: color-mix(in srgb, var(--gb-danger) 12%, transparent);
+}
+
+.gb-mission-subagent-tree li[data-status="running"] span,
+.gb-mission-subagent-tree li[data-status="pending"] span {
+  color: var(--gb-accent);
+}
+
+.gb-mission-control-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 10px 8px;
+}
+
+.gb-mission-control-actions .danger {
+  color: var(--gb-danger);
+  border-color: color-mix(in srgb, var(--gb-danger) 40%, var(--gb-border));
+}
+
+.gb-mission-cancel-note {
+  margin: 0 14px 8px;
+  font-size: 11px;
+  color: var(--gb-muted);
+  line-height: 1.4;
+}
+
+.gb-mission-jobs {
+  margin: 0 14px 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--gb-border) 80%, transparent);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  background: color-mix(in srgb, var(--gb-panel) 88%, transparent);
+}
+
+.gb-mission-jobs > strong {
+  font-size: 12px;
+}
+
+.gb-mission-jobs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.gb-mission-job-form {
+  display: grid;
+  gap: 8px;
+}
+
+.gb-mission-job-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--gb-muted);
+}
+
+.gb-mission-job-form input,
+.gb-mission-job-form select,
+.gb-mission-job-form textarea {
+  width: 100%;
+  border: 1px solid var(--gb-border);
+  border-radius: 8px;
+  background: var(--gb-panel);
+  color: inherit;
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.gb-mission-job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gb-mission-jobs-empty {
+  font-size: 11px;
+  color: var(--gb-muted);
+}
+
+.gb-mission-jobs-group {
+  display: grid;
+  gap: 6px;
+}
+
+.gb-mission-jobs-group > em {
+  font-size: 11px;
+  font-style: normal;
+  color: var(--gb-muted);
+}
+
+.gb-mission-job-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.gb-mission-job-row small {
+  color: var(--gb-muted);
+}
+
+.gb-capability-orchestrator {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--gb-border);
+  border-radius: 8px;
+}
+
+.gb-orchestrator-count {
+  font-size: 11px;
+  color: var(--gb-muted);
+}
+
+.gb-orchestrator-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.gb-orchestrator-group {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.gb-orchestrator-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--gb-border) 70%, transparent);
+}
+
+.gb-orchestrator-row > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gb-orchestrator-row b {
+  font-size: 12px;
+}
+
+.gb-orchestrator-row small {
+  color: var(--gb-muted);
+  font-size: 11px;
+}
+
+.gb-orchestrator-row > div:last-child {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.gb-orchestrator-queue {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--gb-border);
+}
+
+.gb-orchestrator-queue ol {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--gb-muted);
+}
+
+@media (max-width: 720px) {
+  .gb-orchestrator-columns {
+    grid-template-columns: 1fr;
+  }
 }
 
 .gb-mission-control-row:hover,

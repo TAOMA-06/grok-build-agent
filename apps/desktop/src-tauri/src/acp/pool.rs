@@ -7,7 +7,7 @@ use super::events::{emit_json, SharedEventBus, TauriEventBus};
 use super::{
     default_harness_rules, resolve_harness_plugin_dir, AcpError, AgentStatus, StartConfig,
 };
-use crate::contracts::{ConnectionState, RuntimeSnapshot};
+use crate::contracts::{ConnectionState, EventSource, RuntimeSnapshot, SessionEventEnvelope};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -915,7 +915,12 @@ impl RuntimePool {
         conn.respond_to_request(id, result, error).await
     }
 
-    pub fn cancel_session(&self, connection_id: &str, session_id: &str) -> Result<(), AcpError> {
+    pub fn cancel_session(
+        &self,
+        connection_id: &str,
+        session_id: &str,
+        tool_call_ids: Option<&[String]>,
+    ) -> Result<(), AcpError> {
         let conn = self.get_connection(connection_id)?;
         if !conn.session_ids.lock().contains(session_id) {
             return Err(AcpError::Message(format!(
@@ -923,7 +928,57 @@ impl RuntimePool {
             )));
         }
         conn.terminals.cancel_task(session_id);
-        conn.notify("session/cancel", json!({ "sessionId": session_id }))
+        let mut params = json!({ "sessionId": session_id });
+        if let Some(ids) = tool_call_ids.filter(|ids| !ids.is_empty()) {
+            params["_meta"] = json!({
+                "cancelScope": "subtree",
+                "toolCallIds": ids,
+            });
+        }
+        conn.notify("session/cancel", params)
+    }
+
+    /// Emit Host-synthesized `tool_call_update` cancelled events for a soft
+    /// subtree cancel. Keeps the control plane UI/event log coherent when the
+    /// runtime ignores `_meta.toolCallIds` — does not claim Grok honored the hint.
+    pub fn emit_host_subtree_cancelled(
+        &self,
+        connection_id: &str,
+        session_id: &str,
+        tool_call_ids: &[String],
+        bus: &SharedEventBus,
+    ) -> Result<u32, AcpError> {
+        let conn = self.get_connection(connection_id)?;
+        let mut count = 0_u32;
+        for tool_call_id in tool_call_ids {
+            if tool_call_id.trim().is_empty() {
+                continue;
+            }
+            let payload = json!({
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": tool_call_id,
+                    "status": "cancelled",
+                    "_meta": {
+                        "hostSynthesized": true,
+                        "cancelScope": "subtree",
+                    }
+                }
+            });
+            let envelope = SessionEventEnvelope {
+                connection_id: conn.connection_id.clone(),
+                session_id: Some(session_id.to_string()),
+                sequence: conn.next_sequence(),
+                timestamp: iso_now(),
+                source: EventSource::System,
+                kind: "session_update".into(),
+                payload,
+            };
+            emit_json(bus, "acp:session_update", &envelope);
+            count += 1;
+        }
+        Ok(count)
     }
 
     pub async fn stop(&self) -> Result<(), AcpError> {

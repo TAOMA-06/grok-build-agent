@@ -77,6 +77,16 @@ export type AuthMethodSummary = {
   description?: string | null;
 };
 
+/** Multi-runtime catalog entry (W1-A parity skeleton). */
+export type AdapterCatalogEntry = {
+  adapterId: string;
+  label: string;
+  configured: boolean;
+  available: boolean;
+  models: string[];
+  notes: string;
+};
+
 /** One live ACP connection inside the pool. */
 export type ConnectionSnapshot = {
   connectionId: ConnectionId;

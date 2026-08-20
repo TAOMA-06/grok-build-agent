@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "capturedAt": "2026-08-04",
+  "source": "parity-roadmap-w0",
+  "frozenAdvantages": [
+    {
+      "id": "completion-gate",
+      "title": "CompletionGate + declared Verify",
+      "rule": "Tasks move to verifying, never silently completed without structured verification when commands are declared."
+    },
+    {
+      "id": "agent-host-sidecar",
+      "title": "Out-of-process Agent Host",
+      "rule": "Closing the UI must not drop the RuntimePool / confirmed work."
+    },
+    {
+      "id": "worktree-dry-run-apply",
+      "title": "Worktree + dry-run Apply",
+      "rule": "Main workspace writes require preview preflight; no hard-reset / force-push helpers."
+    },
+    {
+      "id": "plan-host-gate",
+      "title": "Plan mode Host filesystem gate",
+      "rule": "Plan mode blocks ACP fs writes and PTY input until approval, even under full-auto."
+    },
+    {
+      "id": "local-privacy-default",
+      "title": "Local-first privacy defaults",
+      "rule": "No product telemetry; Privacy Mode default on for new installs; Private Chat remains non-durable."
+    }
+  ],
+  "capabilityScores": [
+    { "axis": "模型与路由", "score": 5, "target": 8 },
+    { "axis": "仓库智能", "score": 6, "target": 8 },
+    { "axis": "编排/子代理", "score": 6, "target": 8 },
+    { "axis": "Plan→Build", "score": 7, "target": 8 },
+    { "axis": "终端/工具", "score": 7, "target": 8 },
+    { "axis": "验证闭环", "score": 9, "target": 9 },
+    { "axis": "Git 安全", "score": 9, "target": 9 },
+    { "axis": "MCP/扩展", "score": 6, "target": 8 },
+    { "axis": "浏览器验证", "score": 2, "target": 7 },
+    { "axis": "记忆/规则", "score": 2, "target": 7 },
+    { "axis": "后台长跑", "score": 6, "target": 8 },
+    { "axis": "Host 韧性", "score": 9, "target": 9 }
+  ],
+  "nextWave": "W1",
+  "mustStreams": ["A-runtime-adapter", "B-repo-index", "C-subagent-control-plane"]
+}

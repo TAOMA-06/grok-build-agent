@@ -13,6 +13,9 @@ Aligned with Grok Build Desktop Host policy: prefer argv-only local commands;
 shell wrappers, network, and destructive git need user confirmation and are never
 auto-run by the platform.
 
+Index / symbol search (codegraph, Host `workspace.index`, grep) is **not**
+verification. Those tools find code; they do not prove tests passed.
+
 ## Steps
 
 1. Collect required checks (priority order):
@@ -27,6 +30,9 @@ auto-run by the platform.
    - Commands (exact argv)
    - Pass/fail + exit codes
    - What remains unverified and why
+
+For UI Verify lines (`browser:` / `screenshot:` / `ui:`), attach observable evidence.
+Do not treat a successful compile as UI proof.
 
 ## Definition of done
 

@@ -966,6 +966,31 @@ fn parse_mcp_list_json(value: &serde_json::Value) -> Vec<crate::contracts::McpSe
             .clone()
             .or_else(|| command.clone())
             .unwrap_or_else(|| "—".into());
+        let status = item
+            .get("status")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| Some("configured".into()));
+        let enabled = item
+            .get("enabled")
+            .and_then(|v| v.as_bool())
+            .or_else(|| {
+                item.get("compatibilityStatus")
+                    .or_else(|| item.get("compatibility_status"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| {
+                        let lower = s.to_ascii_lowercase();
+                        lower == "enabled" || lower == "ok" || lower == "active"
+                    })
+            })
+            .or_else(|| {
+                status.as_deref().map(|s| {
+                    let lower = s.to_ascii_lowercase();
+                    !(lower == "disabled"
+                        || lower == "disabled_by_user"
+                        || lower.contains("disabled"))
+                })
+            });
         servers.push(crate::contracts::McpServerInfo {
             name: name.to_string(),
             transport,
@@ -976,11 +1001,8 @@ fn parse_mcp_list_json(value: &serde_json::Value) -> Vec<crate::contracts::McpSe
             args,
             env_keys,
             header_keys,
-            status: item
-                .get("status")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .or_else(|| Some("configured".into())),
+            status,
+            enabled,
             last_doctor: None,
         });
     }
@@ -1060,6 +1082,7 @@ fn parse_mcp_list_text(out: &str) -> Vec<crate::contracts::McpServerInfo> {
                 env_keys: vec![],
                 header_keys: vec![],
                 status: Some("configured".into()),
+                enabled: Some(true),
                 last_doctor: None,
             });
         }
@@ -1383,6 +1406,30 @@ pub fn remove_mcp(
     }
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     run_grok_in(configured, &arg_refs, cwd)
+}
+
+/// Enable or disable an MCP server without removing it (CLI 0.2.113+).
+pub fn set_mcp_enabled(
+    configured: Option<&str>,
+    name: &str,
+    enabled: bool,
+    workspace_root: Option<&str>,
+) -> Result<String, CliBridgeError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(CliBridgeError::Message("mcp name empty".into()));
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(CliBridgeError::Message(
+            "mcp name may only contain letters, numbers, hyphens, and underscores".into(),
+        ));
+    }
+    let cwd = workspace_root.filter(|s| !s.trim().is_empty());
+    let action = if enabled { "enable" } else { "disable" };
+    run_grok_in(configured, &["mcp", action, name], cwd)
 }
 
 pub fn doctor_mcp(
@@ -1953,6 +2000,38 @@ mod tests {
         assert!(lines.contains(&"argument with spaces"));
         assert!(lines.contains(&"--transport"));
         assert!(lines.contains(&"project"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mcp_enable_disable_uses_argv_without_shell_concatenation() {
+        let (script, dir) = fake_grok("printf '%s\\n' \"$@\" > argv.log\necho ok");
+        let cwd = dir.to_string_lossy().into_owned();
+        set_mcp_enabled(script.to_str(), "demo-server", false, Some(cwd.as_str())).unwrap();
+        let log = std::fs::read_to_string(dir.join("argv.log")).unwrap();
+        let lines: Vec<_> = log.lines().collect();
+        assert_eq!(lines, vec!["mcp", "disable", "demo-server"]);
+
+        set_mcp_enabled(script.to_str(), "demo-server", true, Some(cwd.as_str())).unwrap();
+        let log = std::fs::read_to_string(dir.join("argv.log")).unwrap();
+        let lines: Vec<_> = log.lines().collect();
+        assert_eq!(lines, vec!["mcp", "enable", "demo-server"]);
+    }
+
+    #[test]
+    fn parse_mcp_list_json_reads_enabled_flag() {
+        let value = serde_json::json!([{
+            "name": "filesystem",
+            "transport": "stdio",
+            "command": "npx",
+            "scope": "user",
+            "enabled": false,
+            "status": "disabled"
+        }]);
+        let servers = parse_mcp_list_json(&value);
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "filesystem");
+        assert_eq!(servers[0].enabled, Some(false));
     }
 
     #[cfg(unix)]

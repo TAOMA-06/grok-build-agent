@@ -1384,6 +1384,7 @@ dependencies = [
  "keyring",
  "libc",
  "parking_lot",
+ "regex",
  "rusqlite",
  "schemars 0.8.22",
  "security-framework 3.7.0",

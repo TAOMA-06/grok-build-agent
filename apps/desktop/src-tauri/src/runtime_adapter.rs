@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct GrokAcpAdapter {
+    adapter_id: &'static str,
     runtime: Arc<AcpRuntime>,
     bus: SharedEventBus,
     launches: Mutex<HashMap<String, RuntimeLaunchConfig>>,
@@ -20,7 +21,21 @@ pub struct GrokAcpAdapter {
 
 impl GrokAcpAdapter {
     pub fn new(runtime: Arc<AcpRuntime>, bus: SharedEventBus) -> Self {
+        Self::with_id(crate::adapter_registry::GROK_ADAPTER_ID, runtime, bus)
+    }
+
+    /// Second ACP-compatible channel (W1-A). Same protocol shape; distinct adapter id.
+    pub fn generic(runtime: Arc<AcpRuntime>, bus: SharedEventBus) -> Self {
+        Self::with_id(crate::adapter_registry::GENERIC_ADAPTER_ID, runtime, bus)
+    }
+
+    fn with_id(
+        adapter_id: &'static str,
+        runtime: Arc<AcpRuntime>,
+        bus: SharedEventBus,
+    ) -> Self {
         Self {
+            adapter_id,
             runtime,
             bus,
             launches: Mutex::new(HashMap::new()),
@@ -87,10 +102,19 @@ impl GrokAcpAdapter {
 #[async_trait]
 impl RuntimeAdapter for GrokAcpAdapter {
     fn adapter_id(&self) -> &'static str {
-        "grok-acp"
+        self.adapter_id
     }
 
     async fn probe(&self) -> Result<RuntimeCapabilitySet, PlatformContractError> {
+        if self.adapter_id == crate::adapter_registry::GENERIC_ADAPTER_ID
+            && crate::adapter_registry::secondary_acp_path().is_none()
+        {
+            return Err(PlatformContractError::Adapter(format!(
+                "{} is not configured; set {} to an ACP executable",
+                crate::adapter_registry::GENERIC_ADAPTER_ID,
+                crate::adapter_registry::SECONDARY_ACP_ENV
+            )));
+        }
         Ok(self.capabilities_from_snapshot(None))
     }
 
@@ -101,8 +125,20 @@ impl RuntimeAdapter for GrokAcpAdapter {
 
     async fn spawn(
         &self,
-        config: RuntimeLaunchConfig,
+        mut config: RuntimeLaunchConfig,
     ) -> Result<RuntimeInstance, PlatformContractError> {
+        if self.adapter_id == crate::adapter_registry::GENERIC_ADAPTER_ID {
+            let secondary = crate::adapter_registry::secondary_acp_path().ok_or_else(|| {
+                PlatformContractError::Adapter(format!(
+                    "{} is not configured; set {} to an ACP executable",
+                    crate::adapter_registry::GENERIC_ADAPTER_ID,
+                    crate::adapter_registry::SECONDARY_ACP_ENV
+                ))
+            })?;
+            if config.executable.trim().is_empty() {
+                config.executable = secondary;
+            }
+        }
         let status = self
             .runtime
             .start_with_bus(self.bus.clone(), Self::start_config(&config, None))
@@ -197,7 +233,7 @@ impl RuntimeAdapter for GrokAcpAdapter {
         session_id: &str,
     ) -> Result<(), PlatformContractError> {
         self.runtime
-            .cancel_session(&instance.connection_id, session_id)
+            .cancel_session(&instance.connection_id, session_id, None)
             .map_err(|error| PlatformContractError::Adapter(error.to_string()))
     }
 
@@ -268,6 +304,41 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response["echoSessionId"], session);
+        adapter.cancel(&instance, &session).await.unwrap();
+        adapter.shutdown(&instance).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn generic_adapter_uses_secondary_env_and_distinct_id() {
+        let workspace = std::env::temp_dir().join(format!("gbd-generic-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace).unwrap();
+        let executable = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/mock_acp_agent.py");
+        std::env::set_var(
+            crate::adapter_registry::SECONDARY_ACP_ENV,
+            &executable,
+        );
+        let adapter = GrokAcpAdapter::generic(Arc::new(AcpRuntime::new()), Arc::new(NoopEventBus));
+        assert_eq!(
+            adapter.adapter_id(),
+            crate::adapter_registry::GENERIC_ADAPTER_ID
+        );
+        let instance = adapter
+            .spawn(RuntimeLaunchConfig {
+                executable: String::new(),
+                workspace_root: workspace.to_string_lossy().into(),
+                model: None,
+                sandbox: "workspace".into(),
+                privacy_mode: crate::platform::PrivacyMode::Strict,
+                approval_policy: "workspace_edit".into(),
+                rules: None,
+                agent_profile: None,
+            })
+            .await
+            .unwrap();
+        std::env::remove_var(crate::adapter_registry::SECONDARY_ACP_ENV);
+        assert_eq!(instance.adapter_id, crate::adapter_registry::GENERIC_ADAPTER_ID);
+        let session = instance.session_id.clone().unwrap();
         adapter.cancel(&instance, &session).await.unwrap();
         adapter.shutdown(&instance).await.unwrap();
     }

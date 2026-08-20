@@ -224,6 +224,11 @@ struct PromptParams {
 struct SessionRoute {
     connection_id: String,
     session_id: String,
+    /// Optional soft-cancel hint for runtimes that understand subtree cancel.
+    /// ACP `session/cancel` remains session-scoped; Desktop still marks the
+    /// subtree cancelled locally when these ids are present.
+    #[serde(default)]
+    tool_call_ids: Option<Vec<String>>,
 }
 
 /// Explicitly binds recoverable queued work to a live ACP route. The Host never
@@ -1199,6 +1204,15 @@ async fn run_verification(
 fn validate_manual_verification(
     result: &crate::platform::VerificationResult,
 ) -> Result<(), String> {
+    let browser_evidence = result.turn_id == "browser"
+        && matches!(result.status, crate::platform::VerificationStatus::Passed)
+        && result
+            .summary
+            .as_deref()
+            .is_some_and(|summary| summary.starts_with("browser screenshot evidence"));
+    if browser_evidence {
+        return Ok(());
+    }
     if matches!(
         result.status,
         crate::platform::VerificationStatus::Passed | crate::platform::VerificationStatus::Failed
@@ -2164,6 +2178,57 @@ fn apply_task_context(db: &Database, params: &mut PromptParams) -> Result<(), St
         preamble = focus.content;
     }
 
+    // Trusted project memory + profile (accepted only) — same partition as task contract.
+    if let Some(task) = task.as_ref() {
+        let workspace_id = task.workspace_id.as_str();
+        if !workspace_id.is_empty() {
+            if let Ok(memories) = db.list_accepted_memories_for_workspace(workspace_id) {
+                if !memories.is_empty() {
+                    let mut block = String::from("<project_memory>\n");
+                    for memory in memories.iter().take(12) {
+                        let kind = if memory.kind == "fact" {
+                            String::new()
+                        } else {
+                            format!("[{}] ", memory.kind)
+                        };
+                        block.push_str(&format!("- {kind}{}\n", memory.content.trim()));
+                    }
+                    block.push_str("</project_memory>\n\n");
+                    let tokens = (block.chars().count() as u64).div_ceil(4);
+                    entries.push(ContextManifestEntry {
+                        source: format!("memory:{workspace_id}"),
+                        kind: "project_memory".into(),
+                        trust: "platform_trusted".into(),
+                        token_estimate: tokens,
+                        truncated_reason: (memories.len() > 12).then(|| "memory_cap".into()),
+                        metadata: BTreeMap::new(),
+                    });
+                    preamble.push_str(&block);
+                }
+            }
+            if let Ok(profile) = crate::workspace_ops::get_project_profile(workspace_id) {
+                if profile.exists && !profile.content.trim().is_empty() {
+                    let clipped = if profile.content.len() > 2_000 {
+                        format!("{}…", &profile.content[..2_000])
+                    } else {
+                        profile.content.clone()
+                    };
+                    let block = format!("<project_profile>\n{clipped}\n</project_profile>\n\n");
+                    entries.push(ContextManifestEntry {
+                        source: format!("profile:{workspace_id}"),
+                        kind: "project_profile".into(),
+                        trust: "platform_trusted".into(),
+                        token_estimate: (block.chars().count() as u64).div_ceil(4),
+                        truncated_reason: (profile.content.len() > 2_000)
+                            .then(|| "profile_cap".into()),
+                        metadata: BTreeMap::new(),
+                    });
+                    preamble.push_str(&block);
+                }
+            }
+        }
+    }
+
     for block in &params.content {
         match block {
             crate::contracts::PromptContent::Image { uri, .. } => {
@@ -2264,6 +2329,21 @@ mod tests {
         assert!(validate_manual_verification(&result).is_err());
         result.status = crate::platform::VerificationStatus::NotRun;
         result.exit_code = None;
+        assert!(validate_manual_verification(&result).is_ok());
+    }
+
+    #[test]
+    fn browser_screenshot_evidence_may_be_recorded_manually() {
+        let result = crate::platform::VerificationResult {
+            verification_id: "v2".into(),
+            task_id: "t1".into(),
+            turn_id: "browser".into(),
+            command: "browser: https://localhost:5173".into(),
+            status: crate::platform::VerificationStatus::Passed,
+            summary: Some("browser screenshot evidence · url=https://localhost:5173".into()),
+            exit_code: Some(0),
+            created_at: crate::acp::iso_now(),
+        };
         assert!(validate_manual_verification(&result).is_ok());
     }
 

@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ComposerAttachment, ModeSwitchResult, SelectableModel, ServerRequest, TaskMode } from "../../types";
 import type { SessionRuntime } from "../../store";
 import { classifyPermissionCategory, type PermissionRiskCategory } from "../../contracts/permission";
+import { PLANNER_ADAPTER_ID, shouldHandoffPlannerToGrok } from "../../contracts";
 import { CommandComposer } from "./CommandComposer";
 import { EmptyTaskState } from "./EmptyTaskState";
 import { ExecutionFlightDeck } from "./ExecutionFlightDeck";
@@ -143,7 +144,10 @@ export function ThreadView({
   onLocalCommand: (command: string) => void;
   onRetryFailed: () => Promise<void>;
   onAnswerPermission: (optionId: string | null) => Promise<void>;
-  onPlanDecision: (action: "approve" | "revise") => Promise<void>;
+  onPlanDecision: (
+    action: "approve" | "revise",
+    options?: { comments?: string[]; reviseNote?: string },
+  ) => Promise<void>;
   onRename: (title: string) => Promise<void>;
   onArchive: () => Promise<void>;
   onDelete: () => Promise<void>;
@@ -162,6 +166,9 @@ export function ThreadView({
       setFindOpen(true);
     };
     const viewPlan = () => document.querySelector(".gb-plan-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const openDelete = () => {
+      if (session) setDeleteOpen(true);
+    };
     const scrollTranscript = (event: Event) => {
       const direction = (event as CustomEvent<"up" | "down">).detail;
       const container = threadScrollRef.current;
@@ -172,19 +179,28 @@ export function ThreadView({
     window.addEventListener("grok:rename-task", openRename);
     window.addEventListener("grok:find-transcript", openFind);
     window.addEventListener("grok:view-plan", viewPlan);
+    window.addEventListener("grok:delete-task", openDelete);
     window.addEventListener("grok:scroll-transcript", scrollTranscript);
     return () => {
       window.removeEventListener("grok:rename-task", openRename);
       window.removeEventListener("grok:find-transcript", openFind);
       window.removeEventListener("grok:view-plan", viewPlan);
+      window.removeEventListener("grok:delete-task", openDelete);
       window.removeEventListener("grok:scroll-transcript", scrollTranscript);
     };
-  }, []);
+  }, [session]);
   const executionRoot = session?.summary.executionRoot || session?.summary.worktreePath || session?.summary.workspaceRoot;
   const changesVisible = Boolean(session && (session.tools.length > 0 || session.summary.worktreePath));
   const visibleMode = session?.summary.mode ?? session?.modeState.currentMode ?? "agent";
   const isEmpty = !session?.blocks.length;
   const isNewTask = !session;
+  const mixedSettings = useAppStore((state) => state.settings);
+  const plannerHandoffReady = Boolean(
+    session
+    && !session.busy
+    && shouldHandoffPlannerToGrok(mixedSettings, session.summary),
+  );
+  const plannerActive = session?.summary.adapterId === PLANNER_ADAPTER_ID;
 
   const composer = (
     <div className={`gb-composer-dock${isEmpty ? " is-empty" : ""}`}>
@@ -202,6 +218,12 @@ export function ThreadView({
               <button type="button" onClick={() => void onSend(session.busy ? "/goal pause" : "/goal resume", [], "goal")}>{session.busy ? t.pause : t.resume}</button>
               <button type="button" onClick={() => void onSend("/goal clear", [], "goal")}>{t.clear}</button>
             </div>
+          </div>
+        )}
+        {plannerHandoffReady && (
+          <div className="gb-composer-plan" role="status">
+            <span>{t.plannerActive}</span>
+            <p>{t.plannerBanner}</p>
           </div>
         )}
         <CommandComposer
@@ -241,6 +263,11 @@ export function ThreadView({
               {session.summary.mode === "plan" && (
                 <span className="gb-plan-pill" title={t.planModeBannerDetail}>
                   <ShieldAlert size={12} /> {t.modePlan}
+                </span>
+              )}
+              {plannerActive && (
+                <span className="gb-planner-pill" title={t.plannerBanner}>
+                  <FileCode2 size={12} /> {t.plannerActive}
                 </span>
               )}
               {session.privateChat && <span className="gb-private-chat-pill" title={t.privateChatLocalOnly}><Ghost size={12} /> {t.privateChatActive}</span>}
@@ -283,23 +310,31 @@ export function ThreadView({
               <Timeline
                 blocks={session!.blocks}
                 busy={Boolean(session?.busy)}
-                planActionsEnabled={Boolean(pendingPlanApproval)}
-                onPlanAction={(action) => {
+                sessionId={session?.summary.sessionId ?? null}
+                adapterId={session?.summary.adapterId}
+                planActionsEnabled={Boolean(pendingPlanApproval) || plannerHandoffReady}
+                onPlanAction={(payload) => {
                   if (pendingPlanApproval) {
-                    void onPlanDecision(action).then(() => {
-                      if (action === "revise" && session) {
-                        useAppStore.getState().setSessionDraft(session.summary.sessionId, t.planFeedbackDraft);
+                    void onPlanDecision(payload.action, {
+                      comments: payload.comments,
+                      reviseNote: payload.reviseNote,
+                    }).then(() => {
+                      if (payload.action === "revise" && session) {
+                        const note = payload.reviseNote?.trim() || payload.comments?.join("\n") || t.planFeedbackDraft;
+                        useAppStore.getState().setSessionDraft(session.summary.sessionId, note);
                         window.dispatchEvent(new Event("grok:focus-composer"));
                       }
                     });
                     return;
                   }
-                  if (action === "approve") {
+                  if (payload.action === "approve") {
                     void onChooseMode("agent").then((result) => {
-                      if (result.kind !== "unsupported") void onSend(t.planApprovedControl, [], "agent");
+                      if (result.kind === "unsupported" && !plannerHandoffReady) return;
+                      void onSend(t.planApprovedControl, [], "agent");
                     });
                   } else if (session) {
-                    useAppStore.getState().setSessionDraft(session.summary.sessionId, t.planFeedbackDraft);
+                    const note = payload.reviseNote?.trim() || payload.comments?.join("\n") || t.planFeedbackDraft;
+                    useAppStore.getState().setSessionDraft(session.summary.sessionId, note);
                     window.dispatchEvent(new Event("grok:focus-composer"));
                   }
                 }}

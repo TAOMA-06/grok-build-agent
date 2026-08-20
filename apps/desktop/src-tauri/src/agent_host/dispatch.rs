@@ -19,9 +19,12 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
                 | "catalog.sessions.saveUi"
                 | "task.upsert"
                 | "context.save"
-                | "verification.save"
-                | "events.appendCompat"
-                | "events.platform.append"
+            | "verification.save"
+            | "events.appendCompat"
+            | "events.platform.append"
+            | "memory.upsert"
+            | "memory.review"
+            | "profile.save"
         )
     {
         return success(request.id, json!({}));
@@ -86,6 +89,7 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
                 "strictNetworkIsolation": false,
                 "pendingPermissions": state.db.list_permission_requests(true).map(|items| items.len()).unwrap_or(0),
                 "blobBytes": state.blobs.disk_usage().unwrap_or(0),
+                "github": crate::git_ops::github_status(),
             }))
         }
         "doctor.rebuildProjections" => state
@@ -163,6 +167,18 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
         "runtime.probe" => serde_json::to_value(crate::acp::probe_grok(
             request.params.get("grokPath").and_then(Value::as_str),
         )).map_err(|error| error.to_string()),
+        "runtime.adapters.list" => {
+            let settings = crate::config::load_settings().ok();
+            let secondary = settings
+                .as_ref()
+                .map(|item| item.secondary_acp_path.as_str())
+                .filter(|path| !path.trim().is_empty());
+            serde_json::to_value(crate::adapter_registry::list_adapter_catalog(
+                request.params.get("grokPath").and_then(Value::as_str)
+                    .or_else(|| settings.as_ref().map(|item| item.grok_path.as_str()).filter(|path| !path.is_empty())),
+                secondary,
+            )).map_err(|error| error.to_string())
+        },
         "runtime.health" => serde_json::to_value(crate::runtime::health(
             request.params.get("grokPath").and_then(Value::as_str),
         )).map_err(|error| error.to_string()),
@@ -371,6 +387,89 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
             request.params.get("taskId").and_then(Value::as_str).unwrap_or_default(),
         ).map_err(|error| error.to_string())
           .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "memory.list" => state
+            .db
+            .list_memory_candidates(
+                request.params.get("workspaceId").and_then(Value::as_str),
+                request.params.get("state").and_then(Value::as_str),
+            )
+            .map_err(|error| error.to_string())
+            .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "memory.upsert" => serde_json::from_value::<crate::platform::MemoryCandidate>(
+            request.params.get("memory").cloned().unwrap_or(Value::Null),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|memory| {
+            if memory.content.trim().is_empty() {
+                return Err("memory content is required".into());
+            }
+            state
+                .db
+                .upsert_memory_candidate(&memory)
+                .map_err(|error| error.to_string())
+        })
+        .map(|_| json!({})),
+        "memory.review" => {
+            let memory_id = request
+                .params
+                .get("memoryId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if memory_id.is_empty() {
+                Err("memoryId is required".into())
+            } else {
+                match request.params.get("state").and_then(Value::as_str) {
+                    Some("accepted") | None => Ok(crate::platform::MemoryState::Accepted),
+                    Some("rejected") => Ok(crate::platform::MemoryState::Rejected),
+                    Some("candidate") => Ok(crate::platform::MemoryState::Candidate),
+                    Some(other) => Err(format!("unknown memory state {other}")),
+                }
+                .and_then(|next| {
+                    state
+                        .db
+                        .review_memory_candidate(memory_id, next, &crate::acp::iso_now())
+                        .map_err(|error| error.to_string())
+                        .map(|changed| json!({ "updated": changed }))
+                })
+            }
+        }
+        "profile.get" => {
+            let workspace_id = request
+                .params
+                .get("workspaceId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if workspace_id.is_empty() {
+                Err("workspaceId is required".into())
+            } else {
+                crate::workspace_ops::get_project_profile(workspace_id)
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| {
+                        serde_json::to_value(value).map_err(|error| error.to_string())
+                    })
+            }
+        }
+        "profile.save" => {
+            let workspace_id = request
+                .params
+                .get("workspaceId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let content = request
+                .params
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if workspace_id.is_empty() {
+                Err("workspaceId is required".into())
+            } else {
+                crate::workspace_ops::save_project_profile(workspace_id, content)
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| {
+                        serde_json::to_value(value).map_err(|error| error.to_string())
+                    })
+            }
+        }
         "task.completionGate" => state.db.completion_gate(
             request.params.get("taskId").and_then(Value::as_str).unwrap_or_default(),
         ).map_err(|error| error.to_string())
@@ -470,6 +569,48 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
         )
         .map_err(|error| error.to_string())
         .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "workspace.index.search" => crate::code_index::search_symbols(
+            request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
+            request.params.get("query").and_then(Value::as_str).unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "workspace.index.references" => crate::code_index::search_references(
+            request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
+            request.params.get("query").and_then(Value::as_str).unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "workspace.index.callGraph" => crate::code_index::search_call_graph(
+            request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
+            request.params.get("query").and_then(Value::as_str).unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "workspace.index.invalidate" => {
+            let paths = request
+                .params
+                .get("paths")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                });
+            crate::code_index::invalidate_symbol_cache(
+                request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
+                paths.as_deref(),
+            )
+            .map_err(|error| error.to_string())
+            .map(|removed| json!({ "removed": removed }))
+        }
+        "workspace.index.rebuild" => crate::code_index::rebuild_symbol_cache(
+            request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())
+        .map(|indexed| json!({ "indexed": indexed })),
         "workspace.read" => crate::workspace_ops::read(
             request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
             request.params.get("path").and_then(Value::as_str).unwrap_or_default(),
@@ -550,6 +691,14 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
         )
         .map_err(|error| error.to_string())
         .and_then(|request| crate::git_ops::commit(&request).map_err(|error| error.to_string()))
+        .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "git.pr.create" => serde_json::from_value::<crate::git_ops::GitPrCreateRequest>(
+            request.params.get("request").cloned().unwrap_or(Value::Null),
+        )
+        .map_err(|error| error.to_string())
+        .and_then(|request| {
+            crate::git_ops::create_pull_request(&request).map_err(|error| error.to_string())
+        })
         .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
         "git.checkpoint.create" => crate::git_ops::create_checkpoint(
             request.params.get("workspaceRoot").and_then(Value::as_str).unwrap_or_default(),
@@ -641,6 +790,25 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
         )
         .map_err(|error| error.to_string())
         .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+        "mcp.setEnabled" => {
+            let enabled = request
+                .params
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            crate::cli_bridge::set_mcp_enabled(
+                request.params.get("grokPath").and_then(Value::as_str),
+                request
+                    .params
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                enabled,
+                request.params.get("workspaceRoot").and_then(Value::as_str),
+            )
+            .map_err(|error| error.to_string())
+            .map(Value::String)
+        }
         "runtime.start" => match serde_json::from_value::<StartConfig>(request.params) {
             Ok(config) if matches!(config.sandbox, Some(crate::contracts::SandboxMode::Strict)) => {
                 Err("Strict sandbox is unavailable because Grok cannot attest enforceable network isolation; use workspace sandbox".into())
@@ -717,11 +885,46 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
         "session.prompt" => prompt(state, request.params).await,
         "session.cancel" => match serde_json::from_value::<SessionRoute>(request.params) {
             Ok(route) => {
+                let scoped_subtree = route
+                    .tool_call_ids
+                    .as_ref()
+                    .is_some_and(|ids| !ids.is_empty());
                 let result = state
                     .runtime
-                    .cancel_session(&route.connection_id, &route.session_id)
+                    .cancel_session(
+                        &route.connection_id,
+                        &route.session_id,
+                        route.tool_call_ids.as_deref(),
+                    )
                     .map_err(|e| e.to_string());
-                if result.is_ok() {
+                // Subtree-scoped cancel is a soft hint for the runtime. Keep the
+                // Host execution ledger and task alive so the turn can continue.
+                // Also synthesize cancelled tool updates so the control plane stays
+                // coherent when the runtime ignores `_meta.toolCallIds`.
+                if result.is_ok() && scoped_subtree {
+                    let ids = route.tool_call_ids.clone().unwrap_or_default();
+                    let private_chat = state
+                        .private_sessions
+                        .lock()
+                        .contains_key(&route.session_id)
+                        || state
+                            .private_connections
+                            .lock()
+                            .contains(&route.connection_id);
+                    let bus: SharedEventBus = Arc::new(HostEventBus {
+                        db: state.db.clone(),
+                        events: state.events.clone(),
+                        pending_actions: state.pending_actions.clone(),
+                        private_chat,
+                    });
+                    let _ = state.runtime.emit_host_subtree_cancelled(
+                        &route.connection_id,
+                        &route.session_id,
+                        &ids,
+                        &bus,
+                    );
+                }
+                if result.is_ok() && !scoped_subtree {
                     if let Some(task_id) = private_task_for_session(state, &route.session_id) {
                         state.terminals.cancel_task(&task_id);
                         state.private_task_roots.lock().remove(&task_id);

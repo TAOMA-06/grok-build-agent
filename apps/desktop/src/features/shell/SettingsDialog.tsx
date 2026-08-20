@@ -5,6 +5,7 @@ import { Bot, Ghost, Info, Puzzle, RefreshCw, Settings2, ShieldCheck, Stethoscop
 import { useRef, useState } from "react";
 import { useEffect } from "react";
 import { McpManager } from "../mcp/McpManager";
+import { CapabilityOrchestrator } from "./CapabilityOrchestrator";
 import { applyLocalePreference, t } from "../../i18n";
 import { GbButton } from "../../components/ui/GbButton";
 import { normalizeSettings } from "../../contracts";
@@ -34,16 +35,112 @@ function compatibilityStateLabel(enabled?: boolean | null) {
   return t.compatibilityInherited;
 }
 
+function RuntimeAdaptersPanel({
+  draft,
+  patch,
+}: {
+  draft: Settings;
+  patch: (partial: Partial<Settings>) => void;
+}) {
+  const bridge = useDesktopBridge();
+  const adaptersQuery = useQuery({
+    queryKey: ["runtime-adapters", draft.cliPathOverride || draft.grokPath, draft.secondaryAcpPath],
+    queryFn: () => bridge.listRuntimeAdapters(draft.cliPathOverride || draft.grokPath || undefined),
+  });
+  const modelsQuery = useQuery({
+    queryKey: ["runtime-fallback-models", draft.cliPathOverride || draft.grokPath],
+    queryFn: () => bridge.listModels(draft.cliPathOverride || draft.grokPath || undefined),
+  });
+  const modelOptions = modelsQuery.data ?? [];
+  const fallbackConfigured = draft.fallbackModelId.trim();
+  const fallbackInList = modelOptions.some((model) => model.id === fallbackConfigured);
+
+  return (
+    <section className="gb-settings-panel">
+      <h3>{t.adapterCatalogTitle}</h3>
+      <label>
+        <span>{t.preferredAdapter}<small>{t.preferredAdapterHint}</small></span>
+        <select
+          value={draft.preferredAdapterId === "generic-acp" ? "generic-acp" : "grok-acp"}
+          onChange={(event) => patch({ preferredAdapterId: event.target.value })}
+        >
+          <option value="grok-acp">{t.preferredAdapterGrok}</option>
+          <option value="generic-acp">{t.preferredAdapterSecondary}</option>
+        </select>
+      </label>
+      <label>
+        <span>{t.secondaryAcpPath}<small>{t.secondaryAcpPathHint}</small></span>
+        <input
+          value={draft.secondaryAcpPath}
+          onChange={(event) => patch({ secondaryAcpPath: event.target.value })}
+          placeholder="/path/to/codex-acp"
+        />
+      </label>
+      <label className="gb-settings-toggle">
+        <input
+          type="checkbox"
+          checked={draft.mixedPlanning}
+          onChange={(event) => patch({ mixedPlanning: event.target.checked })}
+        />
+        <span>{t.mixedPlanning}<small>{t.mixedPlanningHint}</small></span>
+      </label>
+      {draft.mixedPlanning && !draft.secondaryAcpPath.trim() && (
+        <p className="gb-settings-warning" role="status">{t.mixedPlanningNeedsPath}</p>
+      )}
+      <label>
+        <span>{t.fallbackModelId}<small>{t.fallbackModelIdHint}</small></span>
+        <select
+          value={draft.fallbackModelId}
+          onChange={(event) => patch({ fallbackModelId: event.target.value })}
+        >
+          <option value="">{t.fallbackModelUnset}</option>
+          {fallbackConfigured && !fallbackInList && (
+            <option value={fallbackConfigured}>{fallbackConfigured}</option>
+          )}
+          {modelOptions.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.name || model.id}
+            </option>
+          ))}
+        </select>
+      </label>
+      {draft.preferredAdapterId === "generic-acp" && !draft.secondaryAcpPath.trim() && (
+        <p className="gb-settings-warning" role="status">{t.adapterUnavailable}</p>
+      )}
+      <div className="gb-capability-groups">
+        <section>
+          <header>
+            <strong>{t.adapterCatalogTitle}</strong>
+            <span>{adaptersQuery.data?.length ?? 0}</span>
+          </header>
+          {(adaptersQuery.data ?? []).map((adapter) => (
+            <div key={adapter.adapterId}>
+              <span>
+                <b>{adapter.label}</b>
+                <small>{adapter.notes}</small>
+              </span>
+              <i>{adapter.configured ? t.adapterConfigured : t.adapterUnavailable}</i>
+            </div>
+          ))}
+        </section>
+      </div>
+    </section>
+  );
+}
+
 export function SettingsDialog({
   open,
   onOpenChange,
   initialTab = "general",
   onReloadAgent,
+  onInsertCapabilityDraft,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialTab?: SettingsTab;
   onReloadAgent?: () => void | Promise<void>;
+  /** Insert a Skills/Hooks orchestration draft into the active composer. */
+  onInsertCapabilityDraft?: (draft: string) => void;
 }) {
   const bridge = useDesktopBridge();
   const settings = useAppStore((state) => state.settings);
@@ -56,6 +153,7 @@ export function SettingsDialog({
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [doctorAction, setDoctorAction] = useState<string | null>(null);
   const [bundlePreview, setBundlePreview] = useState<string | null>(null);
+  const [cliUpdateBusy, setCliUpdateBusy] = useState(false);
   useEffect(() => {
     if (open) setTab(initialTab);
   }, [initialTab, open]);
@@ -71,6 +169,16 @@ export function SettingsDialog({
     queryKey: ["models", draft.cliPathOverride || draft.grokPath],
     queryFn: () => bridge.listModels(draft.cliPathOverride || draft.grokPath || undefined),
     enabled: open,
+  });
+  const cliUpdateQuery = useQuery({
+    queryKey: ["cli-update", settings.cliPathOverride || settings.grokPath],
+    queryFn: () => bridge.checkCliUpdate(settings.cliPathOverride || settings.grokPath || undefined),
+    enabled: open && tab === "diagnostics",
+  });
+  const harnessQuery = useQuery({
+    queryKey: ["harness-status"],
+    queryFn: () => bridge.getHarnessStatus(),
+    enabled: open && tab === "diagnostics",
   });
   const policyRulesQuery = useQuery({
     queryKey: ["policy-rules"],
@@ -221,12 +329,21 @@ export function SettingsDialog({
                   <label className="gb-switch-row"><span>{t.keepCliUpdated}<small>{t.keepCliUpdatedHint}</small></span><input type="checkbox" checked={draft.autoUpdateCli} onChange={(event) => patch({ autoUpdateCli: event.target.checked })} /></label>
                   <details className="gb-advanced-settings"><summary>{t.advanced}</summary><label><span>{t.cliPathOverride}<small>{t.cliPathHint}</small></span><input value={draft.cliPathOverride} onChange={(event) => patch({ cliPathOverride: event.target.value, grokPath: event.target.value })} placeholder={t.autoDetect} /></label></details>
                 </section>
+                <RuntimeAdaptersPanel draft={draft} patch={patch} />
               </Tabs.Content>
               <Tabs.Content value="extensions">
                 <div className="gb-settings-section-head"><h3>{t.extensions}</h3><button type="button" className="gb-icon-button" aria-label={t.refreshExtensions} onClick={() => void capabilitiesQuery.refetch()}><RefreshCw size={14} /></button></div>
                 {capabilitiesQuery.isLoading && <div className="gb-settings-placeholder"><Puzzle size={24} /><strong>{t.readingCapabilities}</strong></div>}
                 {capabilitiesQuery.data && (
                   <div className="gb-capability-groups">
+                    <CapabilityOrchestrator
+                      skills={capabilitiesQuery.data.skills}
+                      hooks={capabilitiesQuery.data.hooks}
+                      onInsertDraft={(draft) => {
+                        onInsertCapabilityDraft?.(draft);
+                        onOpenChange(false);
+                      }}
+                    />
                     {([
                       [t.skills, capabilitiesQuery.data.skills],
                       [t.agentTypes, capabilitiesQuery.data.agents],
@@ -282,7 +399,88 @@ export function SettingsDialog({
                 <McpManager onReloadAgent={onReloadAgent} />
               </Tabs.Content>
               <Tabs.Content value="diagnostics">
-                <div className="gb-settings-section-head"><h3>{t.diagnostics}</h3><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => void doctorQuery.refetch()}><RefreshCw size={14} /></button></div>
+                <div className="gb-settings-section-head"><h3>{t.diagnostics}</h3><button type="button" className="gb-icon-button" aria-label={t.refresh} onClick={() => { void doctorQuery.refetch(); void cliUpdateQuery.refetch(); void harnessQuery.refetch(); }}><RefreshCw size={14} /></button></div>
+                <div className="gb-capability-groups"><section>
+                  <header><strong>{t.harnessInspectorTitle}</strong><span>{draft.useHarness ? "on" : "off"}</span></header>
+                  <div>
+                    <span>
+                      <b>{draft.useHarness ? t.harnessInspectorOn : t.harnessInspectorOff}</b>
+                      <small>
+                        {harnessQuery.data?.resolved
+                          ? t.harnessInspectorPlugin
+                          : t.harnessInspectorRulesOnly}
+                      </small>
+                    </span>
+                    <i>{harnessQuery.data?.mode ?? "—"}</i>
+                  </div>
+                  {harnessQuery.data?.pluginPath && (
+                    <p className="gb-settings-copy mono">{harnessQuery.data.pluginPath}</p>
+                  )}
+                  <p className="gb-settings-copy">
+                    {t.harnessInspectorTrackedCli}
+                    {harnessQuery.data?.trackedCli ? ` (${harnessQuery.data.trackedCli})` : ""}
+                  </p>
+                  {draft.useHarness && harnessQuery.data?.configOverlay !== false && (
+                    <p className="gb-settings-copy">{t.harnessInspectorOverlay}</p>
+                  )}
+                  <button
+                    type="button"
+                    className="gb-button"
+                    style={{ marginTop: 8 }}
+                    onClick={() => void harnessQuery.refetch()}
+                  >
+                    {t.harnessInspectorCheck}
+                  </button>
+                </section></div>
+                <div className="gb-capability-groups"><section>
+                  <header><strong>{t.cliUpdateTitle}</strong><span>{cliUpdateQuery.data?.channel ?? "stable"}</span></header>
+                  <div>
+                    <span>
+                      <b>{t.cliUpdateCurrent}</b>
+                      <small>{cliUpdateQuery.data?.currentVersion ?? "—"}</small>
+                    </span>
+                    <i>{cliUpdateQuery.data?.updateAvailable ? t.updateAvailable : t.cliUpdateUpToDate}</i>
+                  </div>
+                  <div>
+                    <span>
+                      <b>{t.cliUpdateLatest}</b>
+                      <small>{cliUpdateQuery.data?.latestVersion ?? "—"}</small>
+                    </span>
+                    <i>{cliUpdateQuery.isFetching ? t.cliUpdateChecking : ""}</i>
+                  </div>
+                  {cliUpdateQuery.data?.updateAvailable && (
+                    <p className="gb-settings-copy">{t.cliUpdateAvailableHint}</p>
+                  )}
+                  <div className="row-actions" style={{ marginTop: 8, gap: 8 }}>
+                    <button
+                      type="button"
+                      className="gb-button"
+                      disabled={cliUpdateBusy || cliUpdateQuery.isFetching}
+                      onClick={() => void cliUpdateQuery.refetch()}
+                    >
+                      {t.cliUpdateCheck}
+                    </button>
+                    <button
+                      type="button"
+                      className="gb-button primary"
+                      disabled={cliUpdateBusy || !cliUpdateQuery.data?.updateAvailable}
+                      onClick={() => {
+                        setCliUpdateBusy(true);
+                        setDoctorAction(t.cliUpdateUpdating);
+                        void bridge
+                          .runCliUpdate(settings.cliPathOverride || settings.grokPath || undefined)
+                          .then((message) => {
+                            setDoctorAction(message || t.cliUpdateUpToDate);
+                            return cliUpdateQuery.refetch();
+                          })
+                          .catch((error) => setDoctorAction(String(error)))
+                          .finally(() => setCliUpdateBusy(false));
+                      }}
+                    >
+                      {cliUpdateBusy ? t.cliUpdateUpdating : t.cliUpdateNow}
+                    </button>
+                  </div>
+                </section></div>
                 {doctorQuery.isLoading && <div className="gb-settings-placeholder"><Stethoscope size={24} /><strong>{t.runtimeHealthTitle}</strong><p>{t.readingCapabilities}</p></div>}
                 {doctorQuery.data && <div className="gb-capability-groups"><section>
                   <header><strong>{t.runtimeHealthTitle}</strong><span>{doctorQuery.data.host}</span></header>
@@ -291,6 +489,19 @@ export function SettingsDialog({
                   <div><span><b>Permissions</b><small>Pending requests</small></span><i>{doctorQuery.data.pendingPermissions}</i></div>
                   <div><span><b>Blob storage</b><small>Content-addressed artifacts</small></span><i>{doctorQuery.data.blobBytes} bytes</i></div>
                   <div><span><b>Strict network isolation</b><small>Grok cannot attest enforceable isolation</small></span><i>{doctorQuery.data.strictNetworkIsolation ? "protected" : "unavailable"}</i></div>
+                  <div>
+                    <span>
+                      <b>{t.githubCli}</b>
+                      <small>{doctorQuery.data.github?.detail || (doctorQuery.data.github?.found ? "" : t.githubCliMissing)}</small>
+                    </span>
+                    <i>
+                      {doctorQuery.data.github?.authenticated
+                        ? t.adapterConfigured
+                        : doctorQuery.data.github?.found
+                          ? t.githubCliUnauthenticated
+                          : t.githubCliMissing}
+                    </i>
+                  </div>
                 </section></div>}
                 {doctorQuery.isError && <div className="gb-settings-placeholder"><Stethoscope size={24} /><strong>{t.capabilitiesUnavailable}</strong><p>{String(doctorQuery.error)}</p></div>}
                 <div className="gb-settings-section-head"><h3>Recovery</h3><div><button type="button" className="gb-button" onClick={() => {

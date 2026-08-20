@@ -74,6 +74,150 @@ describe("useDesktopController", () => {
     expect(session?.blocks.find((block) => block.type === "user")).toMatchObject({ delivery: "failed" });
   });
 
+  it("falls back to the secondary ACP path when preferred start fails", async () => {
+    useAppStore.getState().setSettings({
+      cliPathOverride: "/usr/local/bin/grok",
+      secondaryAcpPath: "/tmp/mock-acp",
+      preferredAdapterId: "grok-acp",
+    });
+    const startAgent = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("preferred missing"))
+      .mockResolvedValueOnce({
+        running: true,
+        connectionId: "conn-fallback",
+        sessionId: "remote-fallback",
+        pid: 42,
+      });
+    const sendPrompt = vi.fn().mockResolvedValue(null);
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      startAgent,
+      sendPrompt,
+      upsertSession: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue(null),
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      createWorktree: vi.fn(mockDesktopBridge.createWorktree),
+      gitReview: vi.fn(mockDesktopBridge.gitReview),
+      prepareAttachments: vi.fn().mockResolvedValue([]),
+    };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+    await act(async () => {
+      await result.current.send("use fallback runtime", [], "agent");
+    });
+    expect(startAgent).toHaveBeenCalledTimes(2);
+    expect(startAgent).toHaveBeenNthCalledWith(1, expect.objectContaining({ grokPath: "/usr/local/bin/grok" }));
+    expect(startAgent).toHaveBeenNthCalledWith(2, expect.objectContaining({ grokPath: "/tmp/mock-acp" }));
+    const sessionId = useAppStore.getState().activeSessionId!;
+    const warn = useAppStore.getState().sessions[sessionId]?.blocks.find(
+      (block) => block.type === "system" && block.level === "warn",
+    );
+    expect(String(warn && "text" in warn ? warn.text : "")).toContain("secondary ACP");
+  });
+
+  it("retries a failed turn once via secondary ACP without changing Settings", async () => {
+    useAppStore.getState().setSettings({
+      cliPathOverride: "/usr/local/bin/grok",
+      secondaryAcpPath: "/tmp/mock-acp",
+      preferredAdapterId: "grok-acp",
+      model: "grok-4.5",
+    });
+    const startAgent = vi.fn().mockResolvedValue({
+      running: true,
+      connectionId: "conn-1",
+      sessionId: "remote-1",
+      pid: 7,
+    });
+    const stopAgent = vi.fn().mockResolvedValue(undefined);
+    const sendPrompt = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("runtime crashed"))
+      .mockResolvedValueOnce(null);
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      startAgent,
+      stopAgent,
+      sendPrompt,
+      upsertSession: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue(null),
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      createWorktree: vi.fn(mockDesktopBridge.createWorktree),
+      gitReview: vi.fn(mockDesktopBridge.gitReview),
+      prepareAttachments: vi.fn().mockResolvedValue([]),
+      appendCachedEvent: vi.fn().mockResolvedValue(undefined),
+      saveDraft: vi.fn().mockResolvedValue(undefined),
+    };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+    await act(async () => {
+      await result.current.send("recover this turn", [], "agent");
+    });
+    expect(sendPrompt).toHaveBeenCalledTimes(2);
+    expect(stopAgent).toHaveBeenCalled();
+    expect(startAgent.mock.calls.some((call) => call[0]?.grokPath === "/tmp/mock-acp")).toBe(true);
+    expect(useAppStore.getState().settings.preferredAdapterId).toBe("grok-acp");
+    expect(useAppStore.getState().settings.model).toBe("grok-4.5");
+    const sessionId = useAppStore.getState().activeSessionId!;
+    expect(useAppStore.getState().sessions[sessionId]?.failedSubmission).toBeNull();
+    expect(useAppStore.getState().sessions[sessionId]?.summary.runState).toBe("idle");
+  });
+
+  it("retries adapter then fallback model when both are configured", async () => {
+    useAppStore.getState().setSettings({
+      cliPathOverride: "/usr/local/bin/grok",
+      secondaryAcpPath: "/tmp/mock-acp",
+      preferredAdapterId: "grok-acp",
+      model: "grok-4.5",
+      fallbackModelId: "grok-4",
+    });
+    const startAgent = vi.fn().mockResolvedValue({
+      running: true,
+      connectionId: "conn-1",
+      sessionId: "remote-1",
+      pid: 7,
+    });
+    const stopAgent = vi.fn().mockResolvedValue(undefined);
+    const sendPrompt = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("runtime crashed"))
+      .mockRejectedValueOnce(new Error("secondary also failed"))
+      .mockResolvedValueOnce(null);
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      startAgent,
+      stopAgent,
+      sendPrompt,
+      upsertSession: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue(null),
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      createWorktree: vi.fn(mockDesktopBridge.createWorktree),
+      gitReview: vi.fn(mockDesktopBridge.gitReview),
+      prepareAttachments: vi.fn().mockResolvedValue([]),
+      appendCachedEvent: vi.fn().mockResolvedValue(undefined),
+      saveDraft: vi.fn().mockResolvedValue(undefined),
+    };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+    await act(async () => {
+      await result.current.send("climb the ladder", [], "agent");
+    });
+    expect(sendPrompt).toHaveBeenCalledTimes(3);
+    expect(startAgent.mock.calls.some((call) => call[0]?.grokPath === "/tmp/mock-acp")).toBe(true);
+    expect(startAgent.mock.calls.some((call) => call[0]?.model === "grok-4")).toBe(true);
+    expect(useAppStore.getState().settings.model).toBe("grok-4.5");
+    expect(useAppStore.getState().settings.fallbackModelId).toBe("grok-4");
+    const sessionId = useAppStore.getState().activeSessionId!;
+    expect(useAppStore.getState().sessions[sessionId]?.summary.model).toBe("grok-4");
+    expect(useAppStore.getState().sessions[sessionId]?.failedSubmission).toBeNull();
+  });
+
   it("defaults a Private Chat task to ephemeral desktop state without writing history", async () => {
     useAppStore.getState().setSettings({ privateChat: true });
     const upsertSession = vi.fn().mockResolvedValue(undefined);
@@ -807,13 +951,262 @@ describe("useDesktopController", () => {
       { wrapper: wrapper(bridge) },
     );
     await act(async () => {
-      await result.current.answerPlanApproval("approve");
+      await result.current.answerPlanApproval("approve", {
+        comments: ["Step 1: looks good"],
+      });
     });
     expect(respondServerRequest).toHaveBeenCalledWith("connection", "approval-request", {
       outcome: "approved",
-      comments: [],
+      comments: ["Step 1: looks good"],
     });
     expect(useAppStore.getState().sessions["approval-local"]?.summary.mode).toBe("agent");
+    expect(useAppStore.getState().pendingPlanApproval).toBeNull();
+  });
+
+  it("starts mixed Plan mode on the planner ACP without Grok /plan prefix", async () => {
+    useAppStore.getState().setSettings({
+      mixedPlanning: true,
+      secondaryAcpPath: "/usr/local/bin/codex",
+      grokPath: "/usr/local/bin/grok",
+      cliPathOverride: "/usr/local/bin/grok",
+      cwd: "/repo",
+    });
+    const startAgent = vi.fn().mockResolvedValue({
+      running: true,
+      connectionId: "planner-conn",
+      sessionId: "planner-remote",
+      pid: 11,
+    });
+    const sendPrompt = vi.fn().mockResolvedValue(null);
+    const confirmSessionMode = vi.fn();
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      startAgent,
+      sendPrompt,
+      confirmSessionMode,
+      upsertSession: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue(null),
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      createWorktree: vi.fn(mockDesktopBridge.createWorktree),
+      gitReview: vi.fn(mockDesktopBridge.gitReview),
+      prepareAttachments: vi.fn().mockResolvedValue([]),
+      workspaceTree: vi.fn().mockResolvedValue([]),
+    };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+    await act(async () => {
+      await result.current.send("draft a login plan", [], "plan");
+    });
+    expect(startAgent).toHaveBeenCalledWith(expect.objectContaining({
+      grokPath: "/usr/local/bin/codex",
+      useHarness: false,
+      resumeSessionId: null,
+    }));
+    expect(sendPrompt).toHaveBeenCalledWith(
+      "planner-conn",
+      "planner-remote",
+      "draft a login plan",
+      expect.any(Array),
+      expect.any(Object),
+    );
+    expect(confirmSessionMode).not.toHaveBeenCalled();
+    const sessionId = useAppStore.getState().activeSessionId!;
+    expect(useAppStore.getState().sessions[sessionId]?.summary.adapterId).toBe("generic-acp");
+  });
+
+  it("reconnects Grok with the approved plan when Agent follows a planner session", async () => {
+    useAppStore.getState().setSettings({
+      mixedPlanning: true,
+      secondaryAcpPath: "/usr/local/bin/codex",
+      grokPath: "/usr/local/bin/grok",
+      cliPathOverride: "/usr/local/bin/grok",
+    });
+    const summary: SessionSummary = {
+      sessionId: "mixed-local",
+      connectionId: "planner-conn",
+      remoteSessionId: "planner-remote",
+      workspaceRoot: "/repo",
+      executionRoot: "/repo",
+      title: "Mixed plan",
+      createdAt: "now",
+      updatedAt: "now",
+      runState: "idle",
+      model: "grok-build",
+      mode: "plan",
+      alwaysApprove: false,
+      sandbox: "workspace",
+      adapterId: "generic-acp",
+    };
+    const session = runtime(summary);
+    session.blocks = [
+      { type: "user", id: "1", text: "plan auth" },
+      { type: "plan", id: "2", text: "Step 1: change auth.ts" },
+    ];
+    useAppStore.setState({
+      sessions: { "mixed-local": session },
+      sessionOrder: ["mixed-local"],
+      activeSessionId: "mixed-local",
+      status: { running: true, connectionId: "planner-conn", sessionId: "planner-remote" },
+    });
+    const startAgent = vi.fn().mockResolvedValue({
+      running: true,
+      connectionId: "grok-conn",
+      sessionId: "grok-remote",
+      pid: 9,
+    });
+    const sendPrompt = vi.fn().mockResolvedValue(null);
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      startAgent,
+      sendPrompt,
+      upsertSession: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue(null),
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      prepareAttachments: vi.fn().mockResolvedValue([]),
+      confirmSessionMode: vi.fn().mockResolvedValue({
+        currentMode: "agent",
+        availableModes: [],
+        liveSwitchSupported: false,
+        source: "desktop",
+      }),
+    };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+    await act(async () => {
+      await result.current.send("Plan approved. Proceed with the implementation.", [], "agent");
+    });
+    expect(startAgent).toHaveBeenCalledWith(expect.objectContaining({
+      grokPath: "/usr/local/bin/grok",
+      resumeSessionId: null,
+    }));
+    const prompt = sendPrompt.mock.calls[0]?.[2] as string;
+    expect(prompt).toContain("<approved_plan>");
+    expect(prompt).toContain("Step 1: change auth.ts");
+    expect(useAppStore.getState().sessions["mixed-local"]?.summary.adapterId).toBe("grok-acp");
+  });
+
+  it("switches planner tasks to Agent locally without Grok mode RPCs", async () => {
+    useAppStore.getState().setSettings({
+      mixedPlanning: true,
+      secondaryAcpPath: "/usr/local/bin/codex",
+    });
+    const summary: SessionSummary = {
+      sessionId: "planner-mode",
+      connectionId: "planner-conn",
+      remoteSessionId: "planner-remote",
+      workspaceRoot: "/repo",
+      title: "Planner task",
+      createdAt: "now",
+      updatedAt: "now",
+      runState: "idle",
+      model: "grok-build",
+      mode: "plan",
+      alwaysApprove: false,
+      sandbox: "workspace",
+      adapterId: "generic-acp",
+    };
+    useAppStore.setState({
+      sessions: { "planner-mode": runtime(summary) },
+      sessionOrder: ["planner-mode"],
+      activeSessionId: "planner-mode",
+      status: { running: true, connectionId: "planner-conn", sessionId: "planner-remote" },
+    });
+    const setSessionMode = vi.fn();
+    const startAgent = vi.fn();
+    const bridge: DesktopBridge = { ...mockDesktopBridge, setSessionMode, startAgent };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+    await act(async () => {
+      await result.current.chooseMode("agent");
+    });
+    expect(setSessionMode).not.toHaveBeenCalled();
+    expect(startAgent).not.toHaveBeenCalled();
+    expect(useAppStore.getState().sessions["planner-mode"]?.summary.mode).toBe("agent");
+  });
+
+  it("hands an approved planner plan to Grok", async () => {
+    useAppStore.getState().setSettings({
+      mixedPlanning: true,
+      secondaryAcpPath: "/usr/local/bin/codex",
+      grokPath: "/usr/local/bin/grok",
+      cliPathOverride: "/usr/local/bin/grok",
+    });
+    const summary: SessionSummary = {
+      sessionId: "planner-approval",
+      connectionId: "planner-conn",
+      remoteSessionId: "planner-remote",
+      workspaceRoot: "/repo",
+      executionRoot: "/repo",
+      title: "Planner approval",
+      createdAt: "now",
+      updatedAt: "now",
+      runState: "awaiting_plan",
+      model: "grok-build",
+      mode: "plan",
+      alwaysApprove: false,
+      sandbox: "workspace",
+      adapterId: "generic-acp",
+    };
+    const session = runtime(summary);
+    session.blocks = [{ type: "plan", id: "plan-1", text: "Ship the auth fix" }];
+    useAppStore.setState({
+      sessions: { "planner-approval": session },
+      sessionOrder: ["planner-approval"],
+      activeSessionId: "planner-approval",
+      pendingPlanApproval: {
+        id: "approval-request",
+        method: "_x.ai/exit_plan_mode",
+        connectionId: "planner-conn",
+        sessionId: "planner-remote",
+      },
+      status: { running: true, connectionId: "planner-conn", sessionId: "planner-remote" },
+    });
+    const respondServerRequest = vi.fn().mockResolvedValue(undefined);
+    const startAgent = vi.fn().mockResolvedValue({
+      running: true,
+      connectionId: "grok-conn",
+      sessionId: "grok-remote",
+      pid: 3,
+    });
+    const sendPrompt = vi.fn().mockResolvedValue(null);
+    const bridge: DesktopBridge = {
+      ...mockDesktopBridge,
+      respondServerRequest,
+      startAgent,
+      sendPrompt,
+      upsertSession: vi.fn().mockResolvedValue(undefined),
+      getTask: vi.fn().mockResolvedValue(null),
+      upsertTask: vi.fn().mockResolvedValue(undefined),
+      prepareAttachments: vi.fn().mockResolvedValue([]),
+      confirmSessionMode: vi.fn().mockResolvedValue({
+        currentMode: "agent",
+        availableModes: [],
+        liveSwitchSupported: false,
+        source: "desktop",
+      }),
+    };
+    const { result } = renderHook(
+      () => useDesktopController(async () => "clean_head"),
+      { wrapper: wrapper(bridge) },
+    );
+    await act(async () => {
+      await result.current.answerPlanApproval("approve");
+    });
+    expect(respondServerRequest).toHaveBeenCalledWith("planner-conn", "approval-request", {
+      outcome: "approved",
+      comments: [],
+    });
+    expect(startAgent).toHaveBeenCalledWith(expect.objectContaining({
+      grokPath: "/usr/local/bin/grok",
+      resumeSessionId: null,
+    }));
+    expect(String(sendPrompt.mock.calls[0]?.[2] ?? "")).toContain("<approved_plan>");
     expect(useAppStore.getState().pendingPlanApproval).toBeNull();
   });
 });

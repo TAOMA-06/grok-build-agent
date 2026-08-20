@@ -55,6 +55,10 @@ export const DESKTOP_COMMANDS: CommandDescriptor[] = [
   local({ name: "/mcps", aliases: ["/mcp"], descriptionKey: "mcps", category: "tools", execution: "local" }),
   local({ name: "/diff", aliases: [], descriptionKey: "diff", category: "tools", execution: "local" }),
   local({ name: "/export", aliases: [], descriptionKey: "export", category: "session", execution: "cli" }),
+  // Grok Build 0.2.114+: delete the current session/task after confirmation.
+  local({ name: "/delete", aliases: [], descriptionKey: "delete", category: "session", execution: "local" }),
+  // Grok Build 0.2.109+: terminal/env diagnostics — Desktop opens Settings → Diagnostics.
+  local({ name: "/doctor", aliases: [], descriptionKey: "doctor", category: "tools", execution: "local" }),
   unsupported("/import-claude"),
   local({ name: "/dashboard", aliases: ["/agents-dashboard"], descriptionKey: "dashboard", category: "session", execution: "local" }),
   local({ name: "/login", aliases: [], descriptionKey: "login", category: "account", execution: "cli" }),
@@ -75,6 +79,11 @@ const DOCUMENTED_ACP_COMMANDS: CommandDescriptor[] = [
 const DOCUMENTED_UNSUPPORTED = [
   "/share", "/btw", "/loop", "/queue", "/vim-mode", "/terminal-setup",
   "/config-agents", "/personas", "/feedback", "/privacy",
+  // Grok Build 0.2.112+: opt-in TUI onboarding tour.
+  "/tutorial",
+  // Grok Build 1.0+: workflow dashboard / named runs are TUI surfaces.
+  "/workflows",
+  "/workflow",
 ] as const;
 
 const CAPABILITY_GATED = [
@@ -98,6 +107,7 @@ export function buildCommandCatalog(
     description: string | null | undefined,
     source: "acp" | "skill",
     input?: unknown,
+    tag?: string | null,
   ) => {
     const normalized = normalizeCommandName(name);
     const existing = catalog.get(normalized);
@@ -114,11 +124,12 @@ export function buildCommandCatalog(
       source,
       execution: "acp",
       available: true,
+      tag: tag ?? null,
     });
   };
 
   for (const command of liveCommands) {
-    addRemote(command.name, command.description, "acp", command.input);
+    addRemote(command.name, command.description, "acp", command.input, command.tag);
   }
   for (const skill of skills.filter((item) => item.enabled !== false)) {
     const requested = normalizeCommandName(skill.id || skill.name);
@@ -152,6 +163,25 @@ export function buildCommandCatalog(
     const summarize = catalog.get("/summarize")!;
     const aliases = Array.from(new Set([...summarize.aliases, "/recap"])) as Array<`/${string}`>;
     catalog.set("/summarize", { ...summarize, aliases });
+  }
+  // Grok Build 0.2.116+: /undo is an alias for /rewind.
+  if (catalog.has("/rewind")) {
+    const rewind = catalog.get("/rewind")!;
+    const aliases = Array.from(new Set([...rewind.aliases, "/undo"])) as Array<`/${string}`>;
+    catalog.set("/rewind", {
+      ...rewind,
+      aliases,
+      tag: rewind.tag ?? catalog.get("/undo")?.tag ?? null,
+    });
+    catalog.delete("/undo");
+  } else if (catalog.has("/undo")) {
+    const undo = catalog.get("/undo")!;
+    catalog.set("/rewind", {
+      ...undo,
+      name: "/rewind",
+      aliases: Array.from(new Set([...undo.aliases, "/undo"])) as Array<`/${string}`>,
+    });
+    catalog.delete("/undo");
   }
   for (const name of DOCUMENTED_UNSUPPORTED) {
     if (!catalog.has(name)) catalog.set(name, unsupported(name));

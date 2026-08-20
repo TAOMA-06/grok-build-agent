@@ -27,6 +27,7 @@ import type {
   GitFileAction,
   GitMutationResult,
   GitCommitResult,
+  GitPrCreateResult,
   GitCheckpoint,
   GitCheckpointRestorePreview,
   WorkspaceEntry,
@@ -81,7 +82,7 @@ export interface DesktopBridge {
     content?: PromptContent[],
     dispatch?: PromptDispatchContext,
   ): Promise<unknown>;
-  cancelPrompt(connectionId: string, sessionId: string): Promise<void>;
+  cancelPrompt(connectionId: string, sessionId: string, toolCallIds?: string[] | null): Promise<void>;
   respondServerRequest(
     connectionId: string,
     id: string | number,
@@ -130,6 +131,25 @@ export interface DesktopBridge {
     name?: string | null,
     options?: { grokPath?: string; workspaceRoot?: string | null },
   ): Promise<McpDoctorResult[]>;
+  setMcpServerEnabled(
+    name: string,
+    enabled: boolean,
+    options?: { grokPath?: string; workspaceRoot?: string | null },
+  ): Promise<string>;
+  checkCliUpdate(grokPath?: string): Promise<{
+    currentVersion?: string | null;
+    latestVersion?: string | null;
+    updateAvailable: boolean;
+    channel?: string | null;
+  }>;
+  runCliUpdate(grokPath?: string): Promise<string>;
+  getHarnessStatus(): Promise<{
+    resolved: boolean;
+    pluginPath?: string | null;
+    mode: string;
+    trackedCli?: string | null;
+    configOverlay?: boolean;
+  }>;
   gitReview(workspaceRoot: string, privateChat?: boolean): Promise<ReviewSnapshot>;
   gitFilePatch(workspaceRoot: string, path: string, staged: boolean, privateChat?: boolean): Promise<string>;
   gitFileAction(
@@ -146,6 +166,13 @@ export interface DesktopBridge {
     privateChat?: boolean,
   ): Promise<GitMutationResult>;
   gitCommit(workspaceRoot: string, message: string, privateChat?: boolean): Promise<GitCommitResult>;
+  gitCreatePullRequest(
+    workspaceRoot: string,
+    title?: string | null,
+    body?: string | null,
+    push?: boolean,
+    privateChat?: boolean,
+  ): Promise<GitPrCreateResult>;
   gitCreateCheckpoint(workspaceRoot: string, privateChat?: boolean): Promise<GitCheckpoint>;
   gitCheckpointRestorePreview(
     workspaceRoot: string,
@@ -163,6 +190,31 @@ export interface DesktopBridge {
     privateChat?: boolean,
   ): Promise<WorkspaceEntry[]>;
   workspaceSearch(workspaceRoot: string, query: string, privateChat?: boolean): Promise<WorkspaceEntry[]>;
+  workspaceIndexSearch(
+    workspaceRoot: string,
+    query: string,
+    privateChat?: boolean,
+  ): Promise<import("../contracts").SymbolHit[]>;
+  workspaceIndexReferences(
+    workspaceRoot: string,
+    query: string,
+    privateChat?: boolean,
+  ): Promise<import("../contracts").SymbolHit[]>;
+  workspaceIndexCallGraph(
+    workspaceRoot: string,
+    query: string,
+    privateChat?: boolean,
+  ): Promise<import("../contracts").CallGraphSlice>;
+  workspaceIndexInvalidate(
+    workspaceRoot: string,
+    paths?: string[] | null,
+    privateChat?: boolean,
+  ): Promise<{ removed: number }>;
+  workspaceIndexRebuild(
+    workspaceRoot: string,
+    privateChat?: boolean,
+  ): Promise<{ indexed: number }>;
+  listRuntimeAdapters(grokPath?: string): Promise<import("../contracts").AdapterCatalogEntry[]>;
   workspaceRead(workspaceRoot: string, path: string, privateChat?: boolean): Promise<WorkspacePreview>;
   listPolicyRules(workspaceId?: string | null): Promise<StoredPolicyRule[]>;
   deletePolicyRule(ruleId: string): Promise<void>;
@@ -180,12 +232,22 @@ export interface DesktopBridge {
     connectionId: string,
     sessionId: string,
   ): Promise<{ scheduled: boolean; reason?: string }>;
+  listJobs(workspaceId?: string | null): Promise<import("../contracts").HostJob[]>;
+  cancelJob(jobId: string): Promise<{ cancelled: boolean }>;
+  upsertJob(
+    job: Partial<import("../contracts").HostJob> & { workspaceId: string },
+  ): Promise<import("../contracts").HostJob>;
   upsertTask(task: TaskDefinition): Promise<void>;
   listContextManifests(taskId: string): Promise<ContextManifest[]>;
   saveContextManifest(manifest: ContextManifest): Promise<void>;
   listVerificationResults(taskId: string): Promise<VerificationResult[]>;
   saveVerificationResult(result: VerificationResult): Promise<void>;
   runVerification(taskId: string, workspaceRoot: string, command: string): Promise<VerificationResult>;
+  listMemoryCandidates(workspaceId?: string | null, state?: string | null): Promise<import("../types").MemoryCandidate[]>;
+  upsertMemoryCandidate(memory: import("../types").MemoryCandidate): Promise<void>;
+  reviewMemoryCandidate(memoryId: string, state: "candidate" | "accepted" | "rejected"): Promise<{ updated: boolean }>;
+  getProjectProfile(workspaceId: string): Promise<import("../types").ProjectProfile>;
+  saveProjectProfile(workspaceId: string, content: string): Promise<import("../types").ProjectProfile>;
   terminalCreate(taskId: string, workspaceRoot: string, command: string, args: string[]): Promise<{ terminalId: string; pid: number }>;
   terminalList(taskId: string): Promise<TerminalSummary[]>;
   terminalOutput(terminalId: string, offset?: number, limit?: number): Promise<TerminalOutput>;

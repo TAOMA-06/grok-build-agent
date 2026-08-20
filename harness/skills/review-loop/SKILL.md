@@ -13,7 +13,11 @@ You coordinate only. Implementation and review happen in subagents.
 
 **Load path note:** Desktop “Orchestrator harness” injects `AGENTS.md` (+ verify digest)
 always, and loads this skill when the harness package resolves via session `pluginDirs`
-or when installed under `.grok/skills/review-loop/`.
+or when installed under `.grok/skills/review-loop/`. For a heavy multi-reviewer DAG
+(effort, specialists, memory flush), use Grok’s bundled `/implement` instead.
+
+**Tool-call discipline:** emit `spawn_subagent` before any “launching implementer/reviewer”
+narration. Never end a turn claiming a launch that did not happen in that same reply.
 
 ## Setup
 
@@ -31,7 +35,9 @@ echo "$scratch"
    - `summary_file`: `<workspace>/.grok/scratch/<run_id>/summary.md`
    - `review_file`: `<workspace>/.grok/scratch/<run_id>/review.md`
 
-3. Optionally `todo_write` phases: `implement` → `review` → `fix` → `rereview` → `verify`.
+3. `todo_write` (merge: false) with stable ids: `implement` → `review-round-1` →
+   `fix-round-1` → `rereview-round-1` → `verify`. After compaction, rebuild from
+   these ids plus the files on disk — do not assume a pre-compaction todo snapshot.
 
 ## Role prompt snippets (embed in spawn prompt)
 
@@ -65,12 +71,16 @@ Final response: path to review_file + short verdict.
 ### 1. Implement
 
 `spawn_subagent`: `subagent_type: general-purpose`, `description: "[implementer] …"`.
+Omit `capability_mode` or pass `all` — implementers must be able to write files.
+Never pass `execute` (that mode cannot edit files).
 
 Embed implementer block + paths. Use `isolation: "worktree"` when the parent tree must stay clean.
 
 ### 2. Review
 
 `description: "[reviewer] …"`. Embed reviewer block + `summary_file` / `review_file`.
+Do **not** pass `capability_mode: read-only` — the reviewer must write `review_file`.
+`read-write` is appropriate (notes only, no shell).
 
 ### 3. Decide
 

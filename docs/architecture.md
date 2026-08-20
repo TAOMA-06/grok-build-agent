@@ -2,7 +2,17 @@
 
 ## Product boundary
 
-Grok Build Desktop is a task command center around the official Grok CLI and ACP runtime. It does not replace Grok's model API or tool runner. The product owns project/task organization, worktree isolation, persistence, supervision, permissions and change review.
+Grok Build Desktop is a local **control console** around ACP runtimes. The default executor is the official Grok CLI. It does not replace a model API or tool runner. The product owns project/task organization, worktree isolation, persistence, supervision, permissions and change review.
+
+Runtime is **user-selectable** in Settings:
+
+- **Grok Build** (default): Plan / Agent / Goal all run on `grok-acp`.
+- **Mixed planning**: Plan mode starts on a secondary ACP binary (typically Codex); approving the plan hands it to Grok. Agent and Goal stay on Grok.
+- **Secondary ACP**: the whole task runs on `generic-acp` when that path is configured.
+
+GitHub usage in the console is `gh` commit/PR. Extra GitHub surfaces are optional, not required.
+
+Work-in-progress transfer notes: [handoff.md](handoff.md).
 
 ## Renderer
 
@@ -57,7 +67,7 @@ Provider cache policy keeps the model and tool schema stable for the lifetime of
 
 ## Persistence
 
-Settings schema v9 stores user-facing defaults (including fresh-install `grok-4.5`), combine-queued-prompts and image/video tool stripping, compact/multiline/timestamp preferences, the system/English/Simplified Chinese locale, an optional strict-terminal Host policy flag, and an explicit account-privacy-preference marker so upgraded installs do not silently change an existing account setting. It migrates legacy `alwaysApprove`, `useHarness`, model and cwd fields. SQLite schema v4 keeps the v3 session projection for UI compatibility and adds the immutable control-plane event store, task/turn records, prompt dispatch journal, projection checkpoints, tool/permission/artifact/runtime/worktree/job/audit records, context manifests, memory candidates and blob references.
+Settings schema v10 stores user-facing defaults (including fresh-install `grok-4.5`), combine-queued-prompts and image/video tool stripping, compact/multiline/timestamp preferences, the system/English/Simplified Chinese locale, an optional strict-terminal Host policy flag, secondary ACP path + preferred adapter id for multi-runtime parity, and an explicit account-privacy-preference marker so upgraded installs do not silently change an existing account setting. It migrates legacy `alwaysApprove`, `useHarness`, model and cwd fields. SQLite schema v4 keeps the v3 session projection for UI compatibility and adds the immutable control-plane event store, task/turn records, prompt dispatch journal, projection checkpoints, tool/permission/artifact/runtime/worktree/job/audit records, context manifests, memory candidates and blob references.
 
 Before a v1–v3 catalog is upgraded, WAL is checkpointed and a versioned backup is created next to the database. The former 200-row event cache is imported with `legacy_partial_history=1`; it is never presented as a complete transcript. New compatibility events are written to `platform_events` without trimming, with a deterministic dedupe key. Large structured event payloads are moved to the SHA-256 content-addressed blob store.
 
@@ -78,13 +88,13 @@ Worktrees are created without shell concatenation and require an explicit policy
 
 No discard, reset-hard or automatic conflict resolution is provided.
 
-The review API also supports file/hunk stage and unstage, tracked-file revert, commit and checkpoints. Revert always creates a checkpoint first. Checkpoints live under the repository Git directory and contain HEAD, binary working/index patches and bounded copies of regular untracked files; symlinks, unsafe relative paths, more than 1,000 files or more than 100 MB are rejected.
+The review API also supports file/hunk stage and unstage, tracked-file revert, commit, checkpoints, and `gh pr create` (push current branch + open a GitHub pull request). Revert always creates a checkpoint first. Checkpoints live under the repository Git directory and contain HEAD, binary working/index patches and bounded copies of regular untracked files; symlinks, unsafe relative paths, more than 1,000 files or more than 100 MB are rejected. Private Chat cannot open pull requests. GitHub is `gh`, not a GitHub dashboard.
 
 ## Control-plane contracts and policy
 
 Rust is the canonical source for the versioned `PlatformEvent`, `PromptDispatch`, `ActionRequest`, `PolicyDecision` and Runtime Adapter contracts. The desktop exposes their JSON Schema and mirrors their camelCase wire shapes in TypeScript. Every production event requires workspace, task, session, runtime and correlation attribution.
 
-`GrokAcpAdapter` implements the runtime-neutral lifecycle over the existing pool and is covered by a mock-ACP conformance test for spawn, initialize, prompt, cancel and shutdown. Grok currently reports `promptIdempotency=false`, so duplicate suppression remains a platform responsibility.
+`GrokAcpAdapter` implements the runtime-neutral lifecycle over the existing pool and is covered by a mock-ACP conformance test for spawn, initialize, prompt, cancel and shutdown. Grok currently reports `promptIdempotency=false`, so duplicate suppression remains a platform responsibility. Adapter catalog discovery (`runtime.adapters.list`) always exposes `grok-acp` plus a secondary `generic-acp` slot enabled when `GROK_BUILD_SECONDARY_ACP` points at an ACP-compatible executable.
 
 ACP terminal creation is classified before process launch (policy v2). Shells (including script files), interpreters, package scripts (`npm run` / `npx`), containers, cloud CLIs, network programs, publishing and destructive Git are fail-closed with `POLICY_CONFIRMATION_REQUIRED`; known inspection and project-check argv (e.g. `cargo test`, `git status`, `rg`) are allowed once inside the workspace. Task `allowed_paths` elevate out-of-scope terminal paths to confirmation and deny out-of-scope ACP writes. Plan mode allows only inspection tools and blocks PTY input until approval. Automatic verifications use argv directly and stop rather than bypassing a required confirmation. Durable-session policy decisions are emitted as normalized events, redacted and copied into the append-only audit table. Native durable-session ACP permission requests are persisted, survive renderer restarts, expire fail-closed, and are marked interrupted after a Host restart when the reverse request can no longer be resumed safely.
 
@@ -102,15 +112,19 @@ Terminal execution uses a real PTY with input, resize, bounded output and proces
 
 Task, Session, Turn, Tool Call and Permission snapshots are projected from the immutable event stream into `entity_projections`. Doctor rebuilds into a temporary table inside one transaction, validates typed Task/Session snapshots, and replaces the current projection only after replay succeeds. Task contracts, Context Manifests, structured verification results and the completion gate are Host-owned; a Runtime completion response moves a Task to `verifying`, never directly to `completed`.
 
-The Context Manifest records the platform task contract, user instruction and attachments actually sent for each Turn. Task contracts are injected in a separate trusted partition; repository, MCP, web and attachment content is explicitly labelled untrusted data. Allowed modification paths are enforced again by the Host on ACP filesystem writes.
+The Context Manifest records the platform task contract, user instruction and attachments actually sent for each Turn. Task contracts are injected in a separate trusted partition; repository, MCP, web and attachment content is explicitly labelled untrusted data. Allowed modification paths are enforced again by the Host on ACP filesystem writes. Accepted project memories and `.grok/profile.md` also inject into that trusted partition (`project_memory` / `project_profile` manifest kinds).
 
-Remaining release validation is environmental rather than an in-process fallback: real Grok authentication, signed/notarized installation on Intel and Apple Silicon Macs, and soak/chaos runs. Grok cannot attest direct network isolation, so Strict mode stays unavailable instead of presenting an unenforceable guarantee. Long-term Memory, Profiles, and additional Runtime adapters remain outside coding-agent v1. Host-owned agent jobs (durable recurring prompts) are supported as an opt-in Desktop control-plane feature on top of the existing `jobs` table.
+Structured Plan session updates prefer ACP/JSON step entries with per-step status; markdown list heuristics remain a fallback for free-form plans. Browser-oriented Verify lines (`browser:` / `screenshot:` / `ui:`) are declared on the task contract and satisfied via optional browser MCP or recorded screenshot evidence — Desktop does not embed a browser runtime.
+
+Remaining release validation is environmental rather than an in-process fallback: real Grok authentication, signed/notarized installation on Intel and Apple Silicon Macs, and soak/chaos runs. Grok cannot attest direct network isolation, so Strict mode stays unavailable instead of presenting an unenforceable guarantee. Long-term Memory and Project Profiles ship as an MVP (reviewable SQLite candidates + `.grok/profile.md`); additional Runtime adapters remain outside coding-agent v1 except the W1-A adapter catalog / secondary ACP slot (`generic-acp` via Settings or `GROK_BUILD_SECONDARY_ACP`). Host-owned agent jobs (durable recurring prompts) are supported as an opt-in Desktop control-plane feature on top of the existing `jobs` table.
 
 ## Capability discovery
 
-The host normalizes `grok inspect --json` into Skills, Plugins, Hooks, MCP servers, commands and rules. It also parses Grok 0.2.93's initialize `_meta.modelState` and `_meta.availableCommands`, plus session `configOptions`, `availableModes` and live catalog/mode update events.
+The host normalizes `grok inspect --json` into Skills, Plugins, Hooks, MCP servers, commands and rules. It also parses Grok 0.2.93's initialize `_meta.modelState` and `_meta.availableCommands`, plus session `configOptions`, `availableModes` and live catalog/mode update events. Grok 1.0.5 harness sessions receive a `GROK_CONFIG` overlay (`features.codebase_indexing`) at process spawn; the overlay is allowlisted and never writes the user's `config.toml`.
 
-The composer builds one command catalog in this order: desktop-native equivalents, current ACP commands, user-invocable skills and documented-but-unavailable TUI commands. Native commands win name collisions; conflicting skills use a scoped `/source:name` form. Unknown commands are blocked until the user explicitly chooses to send them as an ordinary message. `/clear` follows Grok's new-empty-task behavior; clearing only the draft is a separate composer button. The slash menu and `Cmd+K` palette expose aliases, parameter hints, source and support state.
+The composer builds one command catalog in this order: desktop-native equivalents, current ACP commands, user-invocable skills and documented-but-unavailable TUI commands. Native commands win name collisions; conflicting skills use a scoped `/source:name` form. Unknown commands are blocked until the user explicitly chooses to send them as an ordinary message. `/clear` follows Grok's new-empty-task behavior; clearing only the draft is a separate composer button. The slash menu and `Cmd+K` palette expose aliases, parameter hints, source and support state. Settings → Extensions also exposes a Skills & Hooks orchestration panel that inserts slash drafts or queued multi-skill plans into the active composer.
+
+Mission Control lists a parent/child subagent tree when `_meta.subagent.parentToolCallId` is present, and can Stop workers via ACP `session/cancel` (Grok 0.2.117+ also tears down background subagents from prior turns). Per-worker cancel is not a first-class ACP method yet.
 
 Visible shell copy, settings, MCP forms, dialogs, ARIA labels and status messages use the shared reactive i18n dictionary. New installs follow macOS language, while settings can force English or Simplified Chinese without restarting. Grok/OS/Git/MCP diagnostic text stays verbatim and receives only localized surrounding context.
 

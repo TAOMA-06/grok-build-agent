@@ -454,6 +454,9 @@ pub struct McpServerInfo {
     pub header_keys: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    /// Whether the server is enabled (CLI 0.2.113+ enable/disable). Default true when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_doctor: Option<McpDoctorResult>,
 }
@@ -624,6 +627,9 @@ pub struct SessionSummary {
     pub always_approve: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<String>,
+    /// `grok-acp` executor or `generic-acp` planner for mixed planning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -961,11 +967,13 @@ mod tests {
             reasoning_effort: None,
             always_approve: false,
             draft: Some("hello".into()),
+            adapter_id: Some("generic-acp".into()),
         };
         let raw = serde_json::to_value(&row).unwrap();
         assert_eq!(raw["sessionId"], "local-1");
         assert_eq!(raw["runState"], "idle");
         let back: SessionSummary = serde_json::from_value(raw).unwrap();
         assert_eq!(back.draft.as_deref(), Some("hello"));
+        assert_eq!(back.adapter_id.as_deref(), Some("generic-acp"));
     }
 }
