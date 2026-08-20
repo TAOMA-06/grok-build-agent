@@ -1,8 +1,8 @@
 # Handoff — Grok Build Desktop
 
 > 交接文档。下一轮工作先读这份，再改代码。  
-> 日期：2026-08-20 · 分支：`feat/cli-0.2.118`（相对 `origin/feat/cli-0.2.118` **全部未提交**）  
-> 桌面版本：`apps/desktop/package.json` → **1.1.1** · 对齐官方 Grok Build CLI **1.0.5**（分支名仍带 0.2.118，不要被名字误导）
+> 日期：2026-08-20 · 已合入 **`main`**（含 `feat/cli-0.2.118`；`feat/jobs-ui-thread-briefing` 以 ours 策略标记合并，不覆盖当前控制台）  
+> 桌面版本：`apps/desktop/package.json` → **1.1.1** · 对齐官方 Grok Build CLI **1.0.5**
 
 ---
 
@@ -24,12 +24,12 @@ GitHub：控制台提供 commit + `gh pr create`。要不要用、用到哪一�
 
 ## 2. 当前仓库状态
 
-工作区相对 `origin/feat/cli-0.2.118` 有大量 **已改未提交** 文件，以及若干 **未跟踪新文件**。没有 commit。接手后先 `git status` / `git diff`，不要假设 remote 上已有这些改动。
-
-两波已经落地、但都还在工作区里：
+功能已提交并合入 `main`：
 
 1. **Harness 对齐 Grok CLI 1.0.5**（含 Desktop Host 的 `GROK_CONFIG` overlay）
-2. **混合规划 + GitHub PR + 控制台定位**
+2. **混合规划 + GitHub PR + 用户可选运行时**
+
+其它本地/远程功能分支：`feat/harness-plugin-dirs`、`codex/fix-privacy-release-blockers`、已 merge 的 0.2.111 / plan-guard / commands-alias **本来就在 main**。`feat/jobs-ui-thread-briefing` 是更早的 Codex workbench 分叉，和当前控制台冲突，用 `ours` 合入以免覆盖 1.0.5 实现。
 
 最近一次自动化验证（2026-08-20，本机）：
 
@@ -189,7 +189,7 @@ cd apps/desktop/src-tauri && cargo test --lib        # 131 passed
 
 | 缺口 | 说明 | 建议 |
 |---|---|---|
-| **未提交** | 整波改动都在工作区 | 用户要发版或换机器前先 commit |
+| **未推送时核对 origin/main** | 合入后需 `git push origin main` | 发版前确认 remote |
 | **真实窗口未点过** | 只有单测 | 按第 6 节在 `npm run app:dev` 走一遍 |
 | **规划器只回 assistant 文本、没有 plan 块** | 没有批准按钮 | 用户切 Agent 再发也能 handoff；若要更顺，可把最后一条 assistant 晋升为 plan |
 | **规划器 ACP 写文件** | Desktop 的 Plan 写保护主要拦 **Grok ACP** 的 host fs。Codex 走自己的工具时，只能靠提示词 | 不要假装 host 已挡住 Codex 写操作 |
@@ -207,15 +207,15 @@ cd apps/desktop/src-tauri && cargo test --lib        # 131 passed
 
 - Desktop 不把 `harness/personas` 同步到 `~/.grok/personas`
 - `workflows/*.rhai` 不会出现在 TUI `/workflows` 目录，除非拷进 `.grok/workflows/`
-- 分支名 `feat/cli-0.2.118` 与实际对齐的 **1.0.5** 不一致，发版说明里要写 1.0.5
+- 历史分支名 `feat/cli-0.2.118` 与对齐的 **1.0.5** 不一致，发版说明里写 1.0.5
 
 ---
 
 ## 8. 下一轮建议（用户没点名时的默认）
 
-1. **提交当前工作区**（用户明确要求再 commit）。信息建议覆盖：harness 1.0.5、`GROK_CONFIG`、mixed planning、`gh pr create`、控制台定位。
-2. **Tauri 手工冒烟** 第 6 节。规划器路径没有就用 `apps/desktop/src-tauri/tests/fixtures/mock_acp_agent.py`（确认它能当 ACP stdio 用；不够就补一个只吐 plan 块的 fixture）。
-3. 运行时路径由用户在 Settings 选择；不要再把产品锁回「只能 Grok」或「只能混合规划」。
+1. **Tauri 手工冒烟** 第 6 节。规划器路径没有就用 `apps/desktop/src-tauri/tests/fixtures/mock_acp_agent.py`。
+2. 运行时路径由用户在 Settings 选择；不要再把产品锁回「只能 Grok」或「只能混合规划」。
+3. 发版说明写 Grok Build CLI **1.0.5**，不要写 0.2.118。
 
 ---
 
@@ -224,7 +224,7 @@ cd apps/desktop/src-tauri && cargo test --lib        # 131 passed
 可直接粘贴：
 
 ```text
-读 docs/handoff.md。产品路径由用户在 Settings 选择（Grok 全程 / 混合规划 / 第二 ACP 全程），不要锁死。
+读 docs/handoff.md。当前线是 main。产品路径由用户在 Settings 选择（Grok 全程 / 混合规划 / 第二 ACP 全程），不要锁死。
 先 git status 核对分支和工作区，再动代码。
 ```
 
