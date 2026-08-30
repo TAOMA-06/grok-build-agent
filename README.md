@@ -1,248 +1,174 @@
 # Grok Build Desktop
 
-> A local-first, open-source macOS **control console** for official [Grok Build](https://docs.x.ai/build/overview), with optional secondary ACP (e.g. Codex) in Settings.  
-> 面向官方 Grok Build CLI 的本地优先、开源 macOS **控制台**；可在设置里选用第二 ACP（如 Codex）。
+> A local-first macOS **operator workbench** for the official [Grok Build CLI](https://docs.x.ai/build/overview). Organize projects, supervise parallel tasks, review changes, and keep the runtime boundary explicit.<br>
+> 面向官方 Grok Build CLI 的本地优先 macOS **智能体工作台**：管理项目与并行任务、审查改动，并清楚区分桌面端、Agent Host 与外部运行时边界。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform: macOS 12+](https://img.shields.io/badge/platform-macOS%2012%2B%20universal-black)](#download--安装)
-[![GitHub Release](https://img.shields.io/github/v/release/TAOMA-06/grok-build-agent?include_prereleases)](https://github.com/TAOMA-06/grok-build-agent/releases)
+[![Platform: macOS 12+](https://img.shields.io/badge/platform-macOS%2012%2B%20universal-black)](#download--下载安装)
+[![GitHub Release](https://img.shields.io/github/v/release/TAOMA-06/grok-build-agent?include_prereleases)](https://github.com/TAOMA-06/grok-build-agent/releases/latest)
 
-English · [中文](#中文)
+Grok Build Desktop turns long-running coding-agent work into visible, reviewable tasks. The official Grok Build CLI remains the default execution and authentication owner; the desktop app adds project organization, durable task state, worktree isolation, approvals, review, verification, files, and task-scoped terminals.
 
-This is an **unofficial community project** and is **not affiliated with, endorsed by, or sponsored by xAI or SpaceX**. Grok, xAI, SpaceX, and related names and marks belong to their respective owners.
+Grok Build Desktop 把长时间运行的编码智能体工作变成可观察、可审查的任务。官方 Grok Build CLI 仍负责默认执行与登录；桌面端负责项目组织、任务恢复、worktree 隔离、审批、改动审查、验证、文件和任务级终端。
 
-本项目为**非官方社区项目**，与 xAI 或 SpaceX **不存在官方关联、认可或赞助关系**。Grok、xAI、SpaceX 及相关名称与标识归各自权利方所有。
+> [!IMPORTANT]
+> This is an **unofficial community project** and is not affiliated with, endorsed by, or sponsored by xAI or SpaceX. Grok, xAI, SpaceX, and related marks belong to their respective owners.<br>
+> 本项目为**非官方社区项目**，与 xAI 或 SpaceX 不存在官方关联、认可或赞助关系。
 
----
-
-## Latest compatibility · Grok Build CLI v1.0.5
-
-Grok Build Desktop now tracks the latest Grok Build CLI workflow (1.0.0–1.0.5) with:
-
-- Orchestrator harness for **workflows** (`review-changes.rhai`), bounded subagent fan-out, Host jobs, `/usage`, `/summarize`|`/recap`, conversation-only `/undo`|`/rewind`, and non-overlapping `/loop`
-- Session `GROK_CONFIG` overlay (1.0.5) so harness sessions enable codebase indexing without editing `config.toml`
-- Settings MCP **enable/disable** without remove/re-add (`grok mcp enable|disable`)
-- Local `/delete` task confirm, `/doctor` diagnostics entry, and honest TUI-only `/tutorial` / `/workflows` catalog entries
-- Plan **Copy plan** action and **Edit** for queued follow-up prompts
-- Diagnostics soft-nudge for CLI updates (soft floor / latest check)
-- New-install default model **Grok 4.5** (live catalog may offer Grok 4.6); optional image/video tool stripping at process spawn
-- Focused Briefing home composition and Host-level agent customization controls
-- Queued follow-up prompts during a running Grok turn, with an explicit queued state and a separate Stop control
-- A read-only external-tool compatibility matrix sourced from `grok inspect --json`; it never imports or transmits third-party sessions
-
-The official Grok Build CLI remains the runtime and authentication owner; this project does not bundle, replace, or emulate it.
-
-### 最新适配 · Grok Build CLI v1.0.5
-
-Grok Build Desktop 已适配最新 Grok Build CLI 工作流（1.0.0–1.0.5），新增：
-
-- Orchestrator harness 对齐 **workflows**（`review-changes.rhai`）、有界子代理扇出、Host jobs、`/usage`、`/summarize`|`/recap`、仅回退对话的 `/undo`|`/rewind`，以及不重叠的 `/loop`
-- 会话级 `GROK_CONFIG` 覆盖（1.0.5）：Harness 开启时代码索引，无需改用户 `config.toml`
-- 设置页 MCP 支持 **启用 / 停用**（无需删除后重建）
-- 本地 `/delete` 确认删除任务、`/doctor` 打开诊断，以及 TUI 专用 `/tutorial` / `/workflows` 的诚实目录项
-- 计划卡片 **复制计划**，以及对排队中后续消息的 **编辑**
-- 诊断页软提示 CLI 版本更新
-- 新安装默认模型 **Grok 4.5**（活目录可能提供 Grok 4.6），并可在进程启动时剥离图像/视频工具
-- Focused Briefing 首页构图与 Host 级 Agent 定制控件
-- Grok 运行期间可排队后续消息，时间线会明确显示排队状态，并保留独立的停止控制
-- 通过 `grok inspect --json` 只读显示外部工具兼容性矩阵；不会导入或传输第三方会话
-
-官方 Grok Build CLI 仍负责运行与登录；本项目不会打包、替代或模拟该 CLI。
-
----
-
-## Screenshots · 截图
+## Product tour · 产品预览
 
 <p align="center">
-  <img src="docs/screenshots/01-home.png" alt="New task workspace" width="900" />
+  <img src="docs/screenshots/01-home.png" alt="Grok Build Desktop new-task launchpad" width="1000" />
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/02-settings.png" alt="Desktop settings" width="440" />
-  &nbsp;
-  <img src="docs/screenshots/03-commands.png" alt="Command palette" width="440" />
+  <img src="docs/screenshots/04-workbench.png" alt="Active task workspace and composer" width="49%" />
+  <img src="docs/screenshots/05-inspector.png" alt="Task inspector with changes and review actions" width="49%" />
 </p>
 
-| | |
-|---|---|
-| **Workspace** · 工作区 | A focused new-task canvas with quick project review, a multiline composer, and Agent / Plan / Goal controls. |
-| **Settings** · 设置 | Clear controls for theme, language, privacy, agent behavior, permissions, extensions, and diagnostics. |
-| **Command palette** · 命令面板 | Keyboard-first access to `/plan`, `/effort`, `/diff`, and other desktop controls. |
+<p align="center">
+  <img src="docs/screenshots/02-settings.png" alt="Runtime, privacy and behavior settings" width="49%" />
+  <img src="docs/screenshots/06-mission-control.png" alt="Mission Control task supervision" width="49%" />
+</p>
 
----
+<p align="center">
+  <img src="docs/screenshots/03-commands.png" alt="Keyboard-first command palette" width="760" />
+</p>
 
-## Download · 安装
+<p align="center"><sub>Screenshots use the built-in MockBridge demo data and reflect the current <code>main</code> UI. They do not expose local projects or claim that an unreleased build is already distributed. · 截图使用内置 MockBridge 演示数据，展示当前 <code>main</code> 界面，不包含本机项目，也不代表未发布构建已经对外分发。</sub></p>
 
-The latest release is a **Developer ID–signed, Apple-notarized universal DMG** for both Apple Silicon and Intel Macs.
+## What it helps you do · 核心能力
 
-Download it from Releases:
+| Surface | Capability | 能力说明 |
+| --- | --- | --- |
+| **Projects & tasks** | Group conversations by workspace; surface running, attention, idle, completed, and archived states. | 按工作区组织任务，并显示运行中、需关注、空闲、完成和归档状态。 |
+| **Durable Agent Host** | Keep confirmed work alive when the window closes; recover sessions through event replay and persisted task state. | 关闭窗口后 Host 仍可继续已确认工作，并通过事件回放与持久化状态恢复任务。 |
+| **Agent / Plan / Goal** | Switch task mode, model, and reasoning effort from one persistent Composer; queue follow-ups or stop a running turn. | 在同一个 Composer 中切换任务模式、模型和推理强度，支持排队后续消息与停止当前轮次。 |
+| **Runtime choice** | Use Grok Build, mixed planning with a secondary ACP, or a secondary ACP for the entire task. | 可选择 Grok Build、第二 ACP 参与的混合规划，或整段任务使用第二 ACP。 |
+| **Worktrees & Git review** | Create isolated worktrees, inspect diffs, stage/revert files or hunks, leave review guidance, apply with preflight, and prepare pull requests. | 自动隔离 worktree，审查 diff，处理文件或 hunk，添加审查意见，经预检后应用并准备 Pull Request。 |
+| **Task Inspector** | Open Changes, Activity, Context, Verify, Memory, Files, and Terminal without leaving the task. | 在任务内查看改动、活动、上下文、验证、记忆、文件与终端。 |
+| **Mission Control** | Supervise parallel tasks, Host jobs, recovery signals, approvals, and subagent activity from one surface. | 集中查看并行任务、Host Jobs、恢复信号、审批和子代理活动。 |
+| **Permissions & privacy** | Route exact approval choices to the correct task; keep critical second-confirmation requests interactive even in full-auto mode. | 将精确审批选项路由到正确任务；即使开启全自动，高风险二次确认仍必须由用户处理。 |
+| **Local privacy controls** | Privacy Mode sync, optional ephemeral Private Chat, local secret redaction, attachment checks, and no product telemetry. | 支持账户级隐私模式同步、可选临时私密会话、本地密钥脱敏、附件检查，并且不收集产品遥测。 |
+| **Extensions & diagnostics** | Inspect models, adapters, MCP servers, skills, plugins, hooks, Host health, CLI health, and recovery tools. | 查看模型、适配器、MCP、技能、插件、Hooks、Host/CLI 健康状态与恢复工具。 |
 
-**→ [GitHub Releases](https://github.com/TAOMA-06/grok-build-agent/releases/latest)**
+## Runtime choices · 运行时选择
 
-Artifact name:
+Choose the execution model in **Settings → Agent**:
 
-- `Grok.Build.Desktop_<version>_universal.dmg`
+- **Grok Build** — default; Agent, Plan, and Goal run on the official Grok Build CLI.
+- **Mixed planning** — a secondary ACP (commonly Codex) drafts the plan; Grok implements after approval.
+- **Secondary ACP** — the configured ACP binary runs the entire task.
 
-Install:
+在 **设置 → Agent** 中选择运行方式：
+
+- **Grok Build** — 默认；Agent、Plan、Goal 均由官方 Grok Build CLI 执行。
+- **混合规划** — 第二 ACP（通常为 Codex）负责起草计划，批准后交给 Grok 实施。
+- **第二 ACP** — 整段任务由配置的 ACP 二进制运行。
+
+The app does not bundle, replace, or emulate the official Grok Build CLI.
+
+## Typical workflow · 典型流程
+
+1. Open a project folder. · 打开项目文件夹。
+2. Describe one concrete outcome. The app creates an isolated worktree for Git write tasks. · 描述一个明确结果；Git 写任务会准备隔离 worktree。
+3. Run other tasks in parallel while the Agent Host maintains task state. · 并行运行其他任务，Agent Host 维护任务状态。
+4. Inspect tool activity, permissions, verification evidence, files, terminal output, and diffs. · 检查工具活动、权限、验证证据、文件、终端和 diff。
+5. Apply changes only after the worktree preflight is ready. · 仅在 worktree 预检通过后应用改动。
+
+## Safety and privacy · 安全与隐私
+
+- Worktree writes are isolated; dirty repositories require an explicit user choice.
+- Shell, network, destructive, elevated, and out-of-scope path actions follow Host policy and approval rules.
+- Critical requests cannot be silently persisted as always-allow rules.
+- Strict Privacy Shield redacts common API keys, access tokens, JWTs, and private keys before local persistence or dispatch.
+- High-risk attachment names are blocked in strict mode.
+- **Private Chat** is an explicit local-ephemeral mode; it is separate from account-level Grok Privacy Mode.
+- The product has no application telemetry. Workspace data stays on the Mac unless the chosen runtime or an explicitly configured external tool receives it.
+
+More: [PRIVACY.md](PRIVACY.md) · [SECURITY.md](SECURITY.md) · [THREAT_MODEL.md](THREAT_MODEL.md)
+
+## Compatibility · 兼容性
+
+Current source targets Grok Build CLI **1.0.0–1.0.5** workflows, including:
+
+- session `GROK_CONFIG` overlay for harness code indexing without editing the user's global config;
+- bounded orchestration, workflows, Host jobs, `/usage`, `/recap`, `/undo` aliases, and non-overlapping loops when advertised by the live CLI;
+- MCP enable/disable, live model discovery, reasoning effort, queued follow-ups, and honest unavailable/TUI-only command labels;
+- a read-only external-tool compatibility matrix sourced from `grok inspect --json` without importing third-party sessions.
+
+实际功能以当前安装的官方 CLI 能力为准。桌面端不会猜测未上报的模型、命令、登录方式或审批选项。
+
+## Download · 下载安装
+
+The latest published release is **v1.1.1**, distributed as a Developer ID–signed and Apple-notarized universal DMG for Apple Silicon and Intel Macs. This was verified against the current GitHub Release metadata.
+
+当前公开版本为 **v1.1.1**，提供适用于 Apple Silicon 与 Intel Mac 的通用 DMG；GitHub Release 标记其已完成 Developer ID 签名与 Apple 公证。
+
+**→ [Download from GitHub Releases · 前往 GitHub Releases](https://github.com/TAOMA-06/grok-build-agent/releases/latest)**
+
+Artifact · 安装包：`Grok.Build.Desktop_<version>_universal.dmg`
+
+Requirements · 环境要求：
+
+- macOS 12 or later
+- Apple Silicon or Intel Mac
+- Official [Grok Build CLI](https://docs.x.ai/build/overview) — not bundled
+
+Install · 安装：
 
 1. Open the downloaded DMG.
 2. Drag **Grok Build Desktop.app** into `/Applications`.
-3. Open the app normally. The release is signed and notarized for macOS.
-4. Install / sign in to the official **Grok CLI** if prompted (`grok login --oauth` or device auth).
+3. Launch the app normally and install/sign in to the official Grok CLI if prompted.
 
-Requirements:
+> [!NOTE]
+> The app can check GitHub Release metadata, but it does **not** yet download, verify, replace, and relaunch itself. Updates remain a manual DMG install.<br>
+> 应用可以检查 GitHub Release 元数据，但尚未实现下载、签名验证、替换和重启的完整自更新链路；更新仍需手动安装 DMG。
 
-- macOS 12+
-- Apple Silicon or Intel Mac
-- Official [Grok Build CLI](https://docs.x.ai/build/overview) (not bundled)
-
-## Contact & support · 联系与赞助
-
-Grok Build Desktop is independently maintained. Feedback, collaboration, and sponsorship enquiries are welcome.
-
-**Email:** [taomahj834225@outlook.com](mailto:taomahj834225@outlook.com)
-
-本项目由独立开发者维护，欢迎反馈、合作与赞助洽谈。
-
----
-
-## English
-
-### What it is
-
-Grok Build Desktop turns the official Grok Build CLI into a dependable desktop **control console**. The CLI remains the default execution runtime and owns Grok authentication. This app organizes projects and tasks, isolates worktrees, reviews diffs, and keeps the Agent Host running if you close the window.
-
-In **Settings** you choose the runtime:
-
-- **Grok Build** (default) — Plan / Agent / Goal all on Grok
-- **Mixed planning** — a secondary ACP (typically Codex) drafts the plan; Grok implements after you approve
-- **Secondary ACP** — run the whole task on the configured ACP binary
-
-GitHub in the console is the normal `gh` path: commit locally, then **Open pull request** (push + `gh pr create`).
-
-### Highlights
-
-- Project / task sidebar with running, attention, completed, and archived states
-- Independent Agent Host sidecar — closing the UI does not kill confirmed work
-- Concurrent ACP sessions with crash recovery and event replay
-- Automatic Git worktrees and explicit dirty-worktree choice
-- Plan / Agent / Goal modes, reasoning effort, model picker, context usage
-- Original Mission Control visual system with spacecraft artwork and reduced-motion support
-- Markdown replies, tool activity, plans, permissions, MCP manager
-- No product telemetry; workspace data stays on your Mac — see [PRIVACY.md](PRIVACY.md)
-
-### Focus and privacy controls
-
-- The first task instruction automatically becomes an editable **Task focus** in the Context drawer.
-- **Economy** focus uses short task anchors and refreshes the full task contract less often; **Balanced** favors more regular full refreshes. Both show the injected token estimate and strategy in Context.
-- New installs default to **Privacy Mode** on (Grok Build `/privacy opt-out`): coding session data is not used to train or improve the product. The app syncs this preference when an agent is connected and you are signed in. See [PRIVACY.md](PRIVACY.md).
-- New installs default to **durable tasks** (Private Chat off) with **Orchestrator harness** on: task contracts, verification commands, orchestration rules, session harness skills, and `GROK_CONFIG` codebase indexing (Grok Build **1.0.5**) when the package path resolves.
-- New tasks seed a structured **task contract** (goal, acceptance, inferred verify commands) and auto-run declared argv-only verifications after each turn when policy allows; shell, network, and destructive commands remain blocked pending confirmation.
-- New installs default to **Medium** reasoning effort and **Strict Privacy Shield** to reduce recurring token use and protect common prompt secrets and high-risk attachments from accidental dispatch.
-- Strict mode redacts detected API keys, access tokens, JWTs, and PEM private keys, and blocks high-risk attachment names. It is local protection only; account-level training is handled by Privacy Mode. See [PRIVACY.md](PRIVACY.md).
-
-### Using the app
-
-1. Open a project folder.
-2. Describe the task and send it. The app prepares a worktree (for Git projects), starts ACP, and sends the prompt.
-3. Run other tasks in parallel from the sidebar.
-4. Review activity and diffs in the task drawer.
-5. Use **Apply to project** when ready (dry-run first; apply only when preflight passes).
-
-### Develop from source
+## Develop from source · 从源码开发
 
 ```bash
 cd apps/desktop
 npm install
-npm run app:dev
 ```
 
-Quality gate:
+Build, launch, and verify the real macOS app through the project entrypoint:
+
+```bash
+./script/build_and_run.sh --verify
+```
+
+Quality gates:
 
 ```bash
 cd apps/desktop && npm run check
-cd src-tauri && cargo test --workspace
+cd apps/desktop/src-tauri && cargo test --workspace
+cd apps/desktop && npm run check:parity-eval
 ```
 
-More: [architecture](docs/architecture.md) · [release](docs/release.md) · [ACP mapping](docs/acp-mapping.md) · [SECURITY](SECURITY.md) · [THREAT_MODEL](THREAT_MODEL.md)
+The latest local UI validation recorded **39 frontend test files / 193 tests** and **131 Rust tests** passing. The parity smoke remains provisional because 14/28 agent tasks require recorded external results. See [the validation record](docs/ui-redesign/2026-08-30-validation.md).
 
----
-
-## 中文
-
-### 这是什么
-
-Grok Build Desktop 把官方 Grok Build CLI 变成可用的桌面**控制台**。CLI 默认负责执行与登录。本应用管项目、任务、隔离 worktree、diff 审阅，以及关掉窗口后 Host 继续跑。
-
-在**设置**里选择运行时：
-
-- **Grok Build**（默认）— Plan / Agent / Goal 都走 Grok
-- **混合规划** — 第二 ACP（通常是 Codex）起草计划，批准后交给 Grok 实施
-- **第二 ACP** — 整段任务都跑在你配置的 ACP 二进制上
-
-GitHub 走常规 `gh`：本地提交后点 **打开 Pull Request**（push + `gh pr create`）。
-
-### 主要能力
-
-- 项目 / 任务侧边栏：运行中、需关注、已完成、已归档
-- 独立 Agent Host：关掉窗口也不会中断已确认的任务
-- 多会话 ACP，支持崩溃恢复与事件回放
-- Git 项目自动 worktree，脏工作区需显式选择策略
-- Plan / Agent / Goal 模式、推理强度、模型选择、上下文用量
-- 原创航天任务控制台视觉、飞行器背景与减少动态效果支持
-- Markdown 回复、工具活动、计划审批、权限确认、MCP 管理
-- 无产品遥测，工作区数据留在本机 — 见 [PRIVACY.md](PRIVACY.md)
-
-### 聚焦与隐私控制
-
-- 首条任务指令会自动成为可在 Context 抽屉中编辑的**任务聚焦**。
-- **经济**档使用短任务锚点，更少刷新完整任务合同；**均衡**档会更频繁刷新。两种档位都会在 Context 中显示注入策略和估算 Token。
-- 新安装默认开启 **Privacy Mode（隐私模式）**（对齐 Grok Build `/privacy opt-out`）：编程会话数据不会用于训练或改进产品。Agent 已连接且已登录时会同步到账户。详见 [PRIVACY.md](PRIVACY.md)。
-- 新安装默认可恢复任务（Private Chat 关）并开启 **编排 Harness**：任务合同、验证命令、计划/探索/验证引导，以及 `GROK_CONFIG` 代码索引默认生效（对齐 Grok Build **1.0.5**）。
-- 新任务会种子化结构化**任务合同**（目标、验收、推断的验证命令）；仅 argv 形式且策略允许的声明验证会自动运行，shell、网络和破坏性命令仍需确认。
-- 新安装默认使用**中等**推理强度与**严格隐私防护**，以降低重复 Token 消耗，并避免常见提示词密钥和高风险附件被意外发送。
-- 严格模式会脱敏识别到的 API 密钥、访问令牌、JWT 和 PEM 私钥，并阻止高风险附件名称。这是本地保护；账户级训练由 Privacy Mode 管理。详见 [PRIVACY.md](PRIVACY.md)。
-
-### 使用流程
-
-1. 打开一个项目文件夹。
-2. 描述任务并发送。应用会为 Git 项目准备 worktree、启动 ACP 并发送提示。
-3. 可在侧边栏并行开启其他任务。
-4. 在任务抽屉中查看活动与文件变更。
-5. 确认无误后使用 **Apply to project**（先 dry-run，预检通过才写入主仓库）。
-
-### 下载安装
-
-1. 打开 [Releases](https://github.com/TAOMA-06/grok-build-agent/releases/latest)，下载通用 DMG：`Grok.Build.Desktop_<version>_universal.dmg`。
-2. 打开 DMG 后，将 **Grok Build Desktop.app** 拖入「应用程序」。
-3. 该版本已完成 Developer ID 签名与 Apple 公证，可正常打开。
-4. 如提示缺少 CLI，按引导安装官方 Grok CLI 并完成登录。
-
-### 从源码开发
-
-```bash
-cd apps/desktop
-npm install
-npm run app:dev
-```
-
-**联系方式：** [taomahj834225@outlook.com](mailto:taomahj834225@outlook.com)
-
----
+最近一次本地 UI 验证记录为：前端 **39 个测试文件 / 193 项测试**、Rust **131 项测试**通过。Parity smoke 仍为 provisional，因为 28 个 Agent 任务中有 14 个需要外部记录结果。
 
 ## Repository layout · 仓库结构
 
 ```text
-apps/desktop/       React + Tauri 桌面应用
-docs/               架构、发布说明与 README 截图
-.github/workflows/  macOS CI / 签名发布流水线
-LICENSE             MIT
+apps/desktop/       React + Tauri desktop application
+docs/               Architecture, security, release, validation, and screenshots
+harness/            Optional orchestration package and workflows
+script/             Canonical local build/run entrypoint
+.github/workflows/  macOS CI and signed release automation
 ```
 
-## Contributors · 贡献者
+Architecture: [docs/architecture.md](docs/architecture.md) · [ACP mapping](docs/acp-mapping.md) · [release process](docs/release.md)
 
-- **[TAOMA-06](https://github.com/TAOMA-06)** (maintainer · 维护者) — [taomahj834225@outlook.com](mailto:taomahj834225@outlook.com)
+## Contact and contributing · 联系与贡献
 
-## License · 许可
+Grok Build Desktop is independently maintained. Issues, pull requests, feedback, collaboration, and sponsorship enquiries are welcome.
+
+- Maintainer: **[TAOMA-06](https://github.com/TAOMA-06)**
+- Email: [taomahj834225@outlook.com](mailto:taomahj834225@outlook.com)
+
+## License
 
 MIT — see [LICENSE](LICENSE).
