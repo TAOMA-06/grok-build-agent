@@ -73,16 +73,21 @@ select {
 
 button {
   cursor: pointer;
-  border: 1px solid var(--border);
-  background: #fff;
+  border: 1px solid transparent;
+  background: var(--bg-2);
   color: var(--text);
-  border-radius: 6px;
-  padding: 0.4rem 0.7rem;
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  background: var(--bg-2);
+  border-color: transparent;
+  background: var(--bg-3);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 button:disabled {
@@ -92,24 +97,38 @@ button:disabled {
 
 button.primary {
   background: var(--steel);
-  border-color: var(--steel);
+  border-color: transparent;
   color: #fff;
+  box-shadow: 0 4px 14px rgba(13, 74, 156, 0.25);
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--steel-dim);
 }
 
 button.danger {
-  background: #fff7f7;
-  border-color: #e5a7af;
+  background: rgba(180, 35, 49, 0.1);
+  border-color: transparent;
   color: var(--danger);
+}
+
+button.danger:hover:not(:disabled) {
+  background: rgba(180, 35, 49, 0.18);
 }
 
 button.ghost {
   background: transparent;
+  border-color: transparent;
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--bg-2);
 }
 
 button.tab {
   border: none;
   background: transparent;
-  border-radius: 6px 6px 0 0;
+  border-radius: 8px 8px 0 0;
   color: var(--text-muted);
   padding: 0.5rem 0.75rem;
 }

@@ -80,8 +80,8 @@ export function ProjectSidebar({
           <RocketMark />
         </div>
         <span className="gb-brand-name">
-          <strong>grok build desktop</strong>
-          <small>developed by taomahj</small>
+          <strong>Grok Build</strong>
+          <small>Local agent workbench</small>
         </span>
       </div>
 
@@ -114,6 +114,7 @@ export function ProjectSidebar({
                 key={workspace.id}
                 className={workspace.path === activeWorkspace ? "gb-project active" : "gb-project"}
                 onClick={() => onSelectWorkspace(workspace.path)}
+                aria-current={workspace.path === activeWorkspace ? "page" : undefined}
               >
                 {workspace.path === activeWorkspace ? <FolderOpen size={14} /> : <Folder size={14} />}
                 <span>{workspace.name}</span>
@@ -125,6 +126,10 @@ export function ProjectSidebar({
           </div>
         )}
 
+        <div className="gb-task-section-head">
+          <span>{t.tasks}</span>
+          <small>{visibleSessions.length}</small>
+        </div>
         <div className="gb-thread-list" aria-label={t.tasks}>
           {visibleSessions.map((session) => {
             const status = sessionStatus(session);
@@ -135,6 +140,8 @@ export function ProjectSidebar({
                 key={session.summary.sessionId}
                 className={session.summary.sessionId === activeSessionId ? "gb-thread-row active" : "gb-thread-row"}
                 onClick={() => onSelectSession(session.summary.sessionId)}
+                data-status={status}
+                aria-current={session.summary.sessionId === activeSessionId ? "page" : undefined}
                 aria-label={needsAttention ? `${t.taskNeedsAttention}: ${session.summary.title}` : session.summary.title}
               >
                 <span className={`gb-status-dot ${status}`} aria-hidden />

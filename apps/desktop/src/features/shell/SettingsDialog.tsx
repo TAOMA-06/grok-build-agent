@@ -12,6 +12,8 @@ import { normalizeSettings } from "../../contracts";
 import { useDesktopBridge } from "../../platform/DesktopBridge";
 import { useAppStore } from "../../store";
 import type { Settings } from "../../types";
+import { useAppUpdater, CURRENT_APP_VERSION } from "../updater/updater";
+import { Sparkles } from "lucide-react";
 
 export type SettingsTab = "general" | "agent" | "permissions" | "extensions" | "diagnostics" | "about";
 
@@ -247,6 +249,13 @@ export function SettingsDialog({
     }
   }
 
+  const {
+    phase: appUpdatePhase,
+    info: appUpdateInfo,
+    checkForUpdates: checkAppUpdate,
+    setDialogOpen: setAppUpdateDialogOpen,
+  } = useAppUpdater();
+
   return (
     <Dialog.Root open={open} onOpenChange={(next) => { if (next) { setDraft(normalizeSettings(settings)); setSaveError(null); } onOpenChange(next); }}>
       <Dialog.Portal>
@@ -431,6 +440,54 @@ export function SettingsDialog({
                   >
                     {t.harnessInspectorCheck}
                   </button>
+                </section></div>
+                <div className="gb-capability-groups"><section>
+                  <header><strong>Grok Build Desktop (桌面客户端更新)</strong><span>GitHub Releases</span></header>
+                  <div>
+                    <span>
+                      <b>当前版本</b>
+                      <small>v{CURRENT_APP_VERSION}</small>
+                    </span>
+                    <i>{appUpdateInfo?.hasUpdate ? "发现新版本" : "已是最新版本"}</i>
+                  </div>
+                  <div>
+                    <span>
+                      <b>最新版本</b>
+                      <small>{appUpdateInfo ? `v${appUpdateInfo.version}` : (appUpdatePhase === "checking" ? "正在检查..." : `v${CURRENT_APP_VERSION}`)}</small>
+                    </span>
+                    <i>{appUpdatePhase === "checking" ? "检查中..." : ""}</i>
+                  </div>
+                  <label style={{ minHeight: 38, borderBottom: 0, marginTop: 4 }}>
+                    <span>
+                      启动时自动检查更新
+                      <small>应用启动时静默比对 GitHub Releases 并通过弹窗提醒</small>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={draft.autoCheckAppUpdates !== false}
+                      onChange={(e) => patch({ autoCheckAppUpdates: e.target.checked })}
+                    />
+                  </label>
+                  <div className="row-actions" style={{ marginTop: 8, gap: 8 }}>
+                    <button
+                      type="button"
+                      className="gb-button"
+                      disabled={appUpdatePhase === "checking"}
+                      onClick={() => void checkAppUpdate({ silent: false })}
+                    >
+                      {appUpdatePhase === "checking" ? "正在检查..." : "检查桌面端更新"}
+                    </button>
+                    {appUpdateInfo?.hasUpdate && (
+                      <button
+                        type="button"
+                        className="gb-button primary"
+                        onClick={() => setAppUpdateDialogOpen(true)}
+                      >
+                        <Sparkles size={13} style={{ marginRight: 4 }} />
+                        查看发布说明
+                      </button>
+                    )}
+                  </div>
                 </section></div>
                 <div className="gb-capability-groups"><section>
                   <header><strong>{t.cliUpdateTitle}</strong><span>{cliUpdateQuery.data?.channel ?? "stable"}</span></header>

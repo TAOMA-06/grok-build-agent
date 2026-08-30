@@ -1,0 +1,15 @@
+---
+description: After each agent-parity / desktop alignment update, sync existing canvases so changes are visible.
+alwaysApply: true
+---
+
+# Sync parity canvases after each update
+
+When implementing or completing agent-parity / Desktop alignment work in this repo:
+
+1. **Update existing canvases** (do not create parallel duplicates):
+   - `~/.cursor/projects/Users-taoma-Documents-grok-build/canvases/agent-parity-roadmap.canvas.tsx`
+   - `~/.cursor/projects/Users-taoma-Documents-grok-build/canvases/agent-gap-review.canvas.tsx`
+2. Refresh **scores**, **landed checklist**, **wave status**, **NEXT priorities**, and a short **「本轮变更」** callout describing what just changed.
+3. Open the roadmap canvas via `open_resource` when the update is done so the user can see it beside chat.
+4. Keep honesty: MVP / partial vs done; never claim Chromium, full AST, or per-worker ACP cancel if not shipped.

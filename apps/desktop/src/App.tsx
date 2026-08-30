@@ -7,8 +7,8 @@ import { applyLocalePreference, t, useTranslation } from "./i18n";
 import { useDesktopBridge } from "./platform/DesktopBridge";
 import { useAppStore } from "./store";
 import type { BootstrapState } from "./types";
+import { resolveTheme } from "./features/shell/theme";
 import "./App.css";
-import "./features/shell/shell.css";
 import "./features/shell/shell-v2.css";
 
 export default function App() {
@@ -22,6 +22,21 @@ export default function App() {
     setHealth,
   } = useAppStore();
   const [bootstrap, setBootstrap] = useState<BootstrapState>({ status: "checking" });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const systemTheme = window.matchMedia("(prefers-color-scheme: light)");
+    const applyTheme = () => {
+      root.dataset.theme = resolveTheme(settings.theme, systemTheme.matches);
+      root.dataset.ui = "workbench-v3";
+    };
+    applyTheme();
+    if (settings.theme === "system") systemTheme.addEventListener("change", applyTheme);
+    return () => {
+      if (settings.theme === "system") systemTheme.removeEventListener("change", applyTheme);
+      if (root.dataset.ui === "workbench-v3") delete root.dataset.ui;
+    };
+  }, [settings.theme]);
 
   const refreshBootstrap = useCallback(async () => {
     setBootstrap({ status: "checking" });

@@ -417,6 +417,17 @@ export function shouldHideAcpNotification(method: string): boolean {
   return HIDDEN_XAI_NOTIFICATIONS.has(method);
 }
 
+export function permissionRequiresSecondConfirmation(params: unknown): boolean {
+  if (!params || typeof params !== "object") return false;
+  const record = params as Record<string, unknown>;
+  return record.requiresSecondConfirmation === true
+    || record.requires_second_confirmation === true;
+}
+
+export function shouldAutoApprovePermission(alwaysApprove: boolean, params: unknown): boolean {
+  return alwaysApprove && !permissionRequiresSecondConfirmation(params);
+}
+
 /** Batch high-frequency stream chunks per animation frame per session. */
 const pendingAssistant = new Map<string, string>();
 const pendingThought = new Map<string, string>();
@@ -892,7 +903,7 @@ export async function subscribeAcpEvents(): Promise<UnlistenFn[]> {
           ? useAppStore.getState().sessions[localSessionId]?.summary
               .alwaysApprove === true
           : false;
-        if (automaticallyApprove) {
+        if (shouldAutoApprovePermission(automaticallyApprove, routedRequest.params)) {
           const allow =
             options.find(
               (o) => o.kind === "allow_once" || o.kind === "allow_always",

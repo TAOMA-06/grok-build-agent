@@ -109,13 +109,14 @@ describe("ThreadView", () => {
     expect(screen.getByText("Plan")).toBeInTheDocument();
   });
 
-  it("classifies host permission prompts with a category and reason", () => {
-    render(
+  it("moves a host permission prompt into the blocking composer dock", () => {
+    const { container } = render(
       <ThreadView
         {...props}
         session={{
           ...recoveredSession,
-          // Non-empty transcript so the permission card mounts in the thread column.
+          // Non-empty transcript proves the prompt is docked rather than appended
+          // to the scrolling timeline.
           blocks: [
             {
               id: "u1",
@@ -153,5 +154,8 @@ describe("ThreadView", () => {
     expect(screen.getByText(/Shell or script execution|Shell 或脚本执行/)).toBeInTheDocument();
     expect(screen.getByText(/bash \.\/hack\.sh/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Allow once" })).toBeInTheDocument();
+    expect(container.querySelector(".gb-composer-blocking-dock")).toBeInTheDocument();
+    expect(screen.getByTestId("composer").closest(".gb-composer-shell")).toHaveAttribute("hidden");
+    expect(container.querySelector(".gb-thread-scroll .gb-permission-card")).not.toBeInTheDocument();
   });
 });

@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   handleSessionUpdate,
+  permissionRequiresSecondConfirmation,
   resolveLocalSessionId,
+  shouldAutoApprovePermission,
   shouldHideAcpNotification,
 } from "./client";
 import { useAppStore } from "../store";
@@ -197,5 +199,13 @@ describe("ACP session event routing", () => {
     expect(shouldHideAcpNotification("_x.ai/session_notification")).toBe(true);
     expect(shouldHideAcpNotification("_x.ai/queue/changed")).toBe(true);
     expect(shouldHideAcpNotification("vendor/custom-warning")).toBe(false);
+  });
+
+  it("keeps critical permission requests interactive even in full auto", () => {
+    expect(permissionRequiresSecondConfirmation({ requiresSecondConfirmation: true })).toBe(true);
+    expect(permissionRequiresSecondConfirmation({ requires_second_confirmation: true })).toBe(true);
+    expect(shouldAutoApprovePermission(true, { requiresSecondConfirmation: true })).toBe(false);
+    expect(shouldAutoApprovePermission(true, { requiresSecondConfirmation: false })).toBe(true);
+    expect(shouldAutoApprovePermission(false, {})).toBe(false);
   });
 });

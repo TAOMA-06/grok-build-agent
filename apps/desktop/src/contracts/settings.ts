@@ -48,6 +48,8 @@ export type Settings = {
   defaultMode: import("./mode").TaskMode;
   permissionPolicy: "workspace_edit" | "ask_all" | "full_auto";
   autoUpdateCli: boolean;
+  /** Automatically check for desktop application updates from GitHub Releases on launch. */
+  autoCheckAppUpdates: boolean;
   alwaysApprove: boolean;
   /**
    * When true, Host terminal policy only auto-allows pure inspection tools
@@ -134,6 +136,7 @@ export function defaultSettings(): Settings {
     defaultMode: "agent",
     permissionPolicy: "workspace_edit",
     autoUpdateCli: true,
+    autoCheckAppUpdates: true,
     alwaysApprove: false,
     strictTerminal: false,
     useHarness: true,

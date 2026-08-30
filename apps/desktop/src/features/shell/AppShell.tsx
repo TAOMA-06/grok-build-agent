@@ -15,6 +15,8 @@ import { SettingsDialog, type SettingsTab } from "./SettingsDialog";
 import { ThreadView } from "./ThreadView";
 import { useDesktopController, type DirtyPolicy } from "./useDesktopController";
 import { buildCommandCatalog } from "./commands";
+import { UpdateDialog } from "../updater/UpdateDialog";
+import { useAppUpdater } from "../updater/updater";
 
 export function AppShell() {
   const bridge = useDesktopBridge();
@@ -107,12 +109,16 @@ export function AppShell() {
     });
   }, [modelsQuery.data, setGlobalModelState, settings.model]);
 
+  const checkForUpdates = useAppUpdater((s) => s.checkForUpdates);
+
   useEffect(() => {
-    const theme = settings.theme === "system"
-      ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
-      : settings.theme;
-    document.documentElement.dataset.theme = theme;
-  }, [settings.theme]);
+    if (settings.autoCheckAppUpdates !== false) {
+      const timer = window.setTimeout(() => {
+        void checkForUpdates({ silent: false });
+      }, 2500);
+      return () => window.clearTimeout(timer);
+    }
+  }, [checkForUpdates, settings.autoCheckAppUpdates]);
 
   useEffect(() => {
     function onShortcut(event: KeyboardEvent) {
@@ -401,7 +407,7 @@ export function AppShell() {
   }, [commandActions, commandSearch]);
 
   return (
-    <div className={[
+    <div data-ui="workbench-v3" className={[
       "gb-app",
       drawerOpen && activeSession ? "drawer-open" : "",
       settings.compactMode ? "compact-mode" : "",
@@ -530,6 +536,7 @@ export function AppShell() {
           if (sessionId) await controller.reloadActiveAgent();
         }}
       />
+      <UpdateDialog />
       <DirtyWorktreeDialog open={dirtyDialogOpen} onChoose={resolveDirtyPolicy} />
       <Dialog.Root open={commandOpen} onOpenChange={setCommandOpen}>
         <Dialog.Portal>

@@ -21,6 +21,7 @@ import { PLANNER_ADAPTER_ID } from "../../contracts";
 import type { ChatBlock } from "../../types";
 import { t, useTranslation } from "../../i18n";
 import { useAppStore } from "../../store";
+import { foldDuplicateAssistantReplies } from "./timelineProjection";
 
 export type PlanActionPayload = {
   action: "approve" | "revise";
@@ -254,9 +255,10 @@ export function Timeline({
   const removeBlock = useAppStore((state) => state.removeBlock);
   const [visibleCount, setVisibleCount] = useState(2_000);
   useEffect(() => setVisibleCount(2_000), [blocks.length === 0 ? "empty" : blocks[blocks.length - 1]?.id]);
+  const foldedBlocks = useMemo(() => foldDuplicateAssistantReplies(blocks), [blocks]);
   const visibleBlocks = useMemo(
-    () => blocks.slice(Math.max(0, blocks.length - visibleCount)),
-    [blocks, visibleCount],
+    () => foldedBlocks.slice(Math.max(0, foldedBlocks.length - visibleCount)),
+    [foldedBlocks, visibleCount],
   );
   const latestPlanIndex = visibleBlocks.reduce(
     (lastIndex, block, index) => block.type === "plan" ? index : lastIndex,
@@ -271,7 +273,7 @@ export function Timeline({
   }, [visibleBlocks]);
   return (
     <div className="gb-timeline">
-      {visibleCount < blocks.length && <button type="button" className="gb-button" onClick={() => setVisibleCount((count) => Math.min(blocks.length, count + 2_000))}>Load 2,000 earlier events</button>}
+      {visibleCount < foldedBlocks.length && <button type="button" className="gb-button" onClick={() => setVisibleCount((count) => Math.min(foldedBlocks.length, count + 2_000))}>Load 2,000 earlier events</button>}
       {visibleBlocks.map((block, blockIndex) => {
         if (block.type === "user") {
           return (

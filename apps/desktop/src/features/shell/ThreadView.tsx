@@ -24,6 +24,7 @@ import { CommandComposer } from "./CommandComposer";
 import { EmptyTaskState } from "./EmptyTaskState";
 import { ExecutionFlightDeck } from "./ExecutionFlightDeck";
 import { Timeline } from "./Timeline";
+import { UpdatePill } from "../updater/UpdatePill";
 import { t } from "../../i18n";
 import { useAppStore } from "../../store";
 
@@ -203,11 +204,17 @@ export function ThreadView({
   const plannerActive = session?.summary.adapterId === PLANNER_ADAPTER_ID;
 
   const composer = (
-    <div className={`gb-composer-dock${isEmpty ? " is-empty" : ""}`}>
+    <div className={`gb-composer-dock${isEmpty ? " is-empty" : ""}${pendingPermission ? " is-blocked" : ""}`}>
+      {pendingPermission && (
+        <div className="gb-composer-blocking-dock">
+          <PermissionCard request={pendingPermission} options={permissionOptions} onAnswer={onAnswerPermission} />
+        </div>
+      )}
       <div
         className={`gb-composer-shell${visibleMode === "plan" ? " plan" : ""}${
           visibleMode === "goal" ? " goal" : ""
         }`}
+        hidden={Boolean(pendingPermission)}
       >
         {visibleMode === "goal" && session?.summary.mode === "goal" && (
           <div className="gb-mode-status goal has-actions" role="status">
@@ -259,6 +266,7 @@ export function ThreadView({
               <span><FolderKanban size={13} /> {workspaceName || t.project}{session.summary.worktreePath && <> <i>·</i> <Flag size={12} /> {t.isolated}</>}</span>
             </div>
             <div className="gb-thread-header-actions">
+              <UpdatePill />
               <span className={`gb-run-pill ${session.busy ? "running" : session.summary.runState}`} role="status" aria-live="polite"><CircleDot size={12} />{session.busy ? t.grokWorking : t.runState[session.summary.runState] ?? session.summary.runState}</span>
               {session.summary.mode === "plan" && (
                 <span className="gb-plan-pill" title={t.planModeBannerDetail}>
@@ -339,9 +347,6 @@ export function ThreadView({
                   }
                 }}
               />
-              {pendingPermission && (
-                <PermissionCard request={pendingPermission} options={permissionOptions} onAnswer={onAnswerPermission} />
-              )}
             </div>
           </div>
           {composer}

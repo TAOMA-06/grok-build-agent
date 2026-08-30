@@ -12,7 +12,6 @@ import { t } from "../../i18n";
 import { useAppStore } from "../../store";
 import type { TaskMode } from "../../types";
 import { Stagger, StaggerItem } from "./motion";
-import { RocketLineArt } from "./RocketLineArt";
 
 export function EmptyTaskState({
   onSuggest,
@@ -75,8 +74,11 @@ export function EmptyTaskState({
   return (
     <Stagger className="gb-empty-stack gb-home-briefing" stagger={0.055} delayChildren={0.05}>
       <StaggerItem className="gb-home-signature">
-        <div className="gb-empty-orbit" aria-hidden>
-          <RocketLineArt />
+        <div className="gb-telemetry-signature" aria-hidden>
+          <span className="gb-telemetry-beacon" />
+          <span className="gb-telemetry-rule" />
+          <code>{mixedPlanning ? t.plannerActive : "GROK ACP"}</code>
+          <span>{t.ready}</span>
         </div>
       </StaggerItem>
       <StaggerItem className="gb-home-copy">
