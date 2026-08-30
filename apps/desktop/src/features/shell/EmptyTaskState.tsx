@@ -11,7 +11,6 @@ import { mixedPlanningReady } from "../../contracts";
 import { t } from "../../i18n";
 import { useAppStore } from "../../store";
 import type { TaskMode } from "../../types";
-import { Stagger, StaggerItem } from "./motion";
 
 export function EmptyTaskState({
   onSuggest,
@@ -72,24 +71,24 @@ export function EmptyTaskState({
   ];
 
   return (
-    <Stagger className="gb-empty-stack gb-home-briefing" stagger={0.055} delayChildren={0.05}>
-      <StaggerItem className="gb-home-signature">
+    <div className="gb-empty-stack gb-home-briefing">
+      <div className="gb-home-signature">
         <div className="gb-telemetry-signature" aria-hidden>
           <span className="gb-telemetry-beacon" />
           <span className="gb-telemetry-rule" />
           <code>{mixedPlanning ? t.plannerActive : "GROK ACP"}</code>
           <span>{t.ready}</span>
         </div>
-      </StaggerItem>
-      <StaggerItem className="gb-home-copy">
+      </div>
+      <div className="gb-home-copy">
         <div className="gb-empty-copy">
           <span className="gb-empty-overline">{t.newTask}</span>
           <h1>{t.emptyTitle}</h1>
           <p>{t.emptyDescription}</p>
           <p className="gb-empty-strengths">{t.emptyStrengthsHint}</p>
         </div>
-      </StaggerItem>
-      <StaggerItem className="gb-home-quick-actions">
+      </div>
+      <div className="gb-home-quick-actions">
         <div className="gb-suggestion-row" aria-label={t.newTask}>
           {chips.map((chip) => {
             const Icon = chip.icon;
@@ -107,7 +106,7 @@ export function EmptyTaskState({
             );
           })}
         </div>
-      </StaggerItem>
-    </Stagger>
+      </div>
+    </div>
   );
 }
