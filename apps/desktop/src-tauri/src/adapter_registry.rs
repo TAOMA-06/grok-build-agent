@@ -72,9 +72,8 @@ pub fn list_adapter_catalog(
             available: secondary_configured,
             models: Vec::new(),
             notes: if secondary_configured {
-                format!(
-                    "Codex or other ACP. Mixed planning uses this for Plan mode; Preferred runtime can run the whole task here."
-                )
+                "Codex or other ACP. Mixed planning uses this for Plan mode; Preferred runtime can run the whole task here."
+                    .to_string()
             } else {
                 format!(
                     "Set Secondary ACP path in Settings or {SECONDARY_ACP_ENV} (e.g. Codex ACP)."
@@ -86,7 +85,9 @@ pub fn list_adapter_catalog(
 
 /// True when the catalog satisfies the W1-A skeleton exit: ≥1 primary + discoverable secondary slot.
 pub fn catalog_has_secondary_slot(entries: &[AdapterCatalogEntry]) -> bool {
-    let has_grok = entries.iter().any(|entry| entry.adapter_id == GROK_ADAPTER_ID);
+    let has_grok = entries
+        .iter()
+        .any(|entry| entry.adapter_id == GROK_ADAPTER_ID);
     let has_generic = entries
         .iter()
         .any(|entry| entry.adapter_id == GENERIC_ADAPTER_ID);

@@ -122,9 +122,30 @@ fn skip_dir(name: &str) -> bool {
 fn indexable_extension(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|ext| ext.to_str()).unwrap_or(""),
-        "rs" | "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "py" | "go" | "java"
-            | "kt" | "swift" | "cs" | "cpp" | "cc" | "cxx" | "h" | "hpp" | "m" | "mm"
-            | "rb" | "php" | "scala" | "toml" | "md"
+        "rs" | "ts"
+            | "tsx"
+            | "js"
+            | "jsx"
+            | "mjs"
+            | "cjs"
+            | "py"
+            | "go"
+            | "java"
+            | "kt"
+            | "swift"
+            | "cs"
+            | "cpp"
+            | "cc"
+            | "cxx"
+            | "h"
+            | "hpp"
+            | "m"
+            | "mm"
+            | "rb"
+            | "php"
+            | "scala"
+            | "toml"
+            | "md"
     )
 }
 
@@ -221,10 +242,7 @@ fn save_def_cache(root: &Path, cache: &DefCache) {
     }
 }
 
-fn extract_defs(
-    content: &str,
-    compiled: &[(Pattern, regex::Regex)],
-) -> Vec<CachedDef> {
+fn extract_defs(content: &str, compiled: &[(Pattern, regex::Regex)]) -> Vec<CachedDef> {
     let mut defs = Vec::new();
     for (pattern, re) in compiled {
         for capture in re.captures_iter(content) {
@@ -257,7 +275,10 @@ fn extract_defs(
 /// Rebuild or refresh the on-disk definition cache under `.grok/cache/`.
 /// Returns every cached definition (path attached) for query ranking.
 /// When `force` is true, ignore mtime hits and reparse every indexable file.
-fn collect_cached_defs(root: &Path, force: bool) -> Result<Vec<(String, CachedDef)>, CodeIndexError> {
+fn collect_cached_defs(
+    root: &Path,
+    force: bool,
+) -> Result<Vec<(String, CachedDef)>, CodeIndexError> {
     let compiled: Vec<(Pattern, regex::Regex)> = PATTERNS
         .iter()
         .filter_map(|pattern| {
@@ -309,9 +330,7 @@ fn collect_cached_defs(root: &Path, force: bool) -> Result<Vec<(String, CachedDe
                     continue;
                 }
                 // Keep scanning under .grok except the cache dir itself.
-                if item.file_name().to_str() == Some("cache")
-                    && directory.ends_with(".grok")
-                {
+                if item.file_name().to_str() == Some("cache") && directory.ends_with(".grok") {
                     continue;
                 }
                 queue.push_back(path);
@@ -436,7 +455,10 @@ fn looks_like_definition(line: &str, name: &str) -> bool {
         format!("const {name}"),
         format!("let {name}"),
     ];
-    if patterns.iter().any(|needle| trimmed.contains(needle.as_str())) {
+    if patterns
+        .iter()
+        .any(|needle| trimmed.contains(needle.as_str()))
+    {
         return true;
     }
     trimmed.starts_with("impl") && trimmed.contains(name)
@@ -446,7 +468,6 @@ fn classify_reference(line: &str, name: &str) -> &'static str {
     let call = format!("{name}(");
     let path = format!("{name}::");
     let method = format!(".{name}(");
-    let member = format!(".{name}");
     let import_like = trimmed_starts_with_import(line);
     if line.contains(&call) || line.contains(&method) || line.contains(&path) {
         if import_like {
@@ -456,8 +477,6 @@ fn classify_reference(line: &str, name: &str) -> &'static str {
         }
     } else if import_like {
         "import"
-    } else if line.contains(&member) || line.contains(&format!("::{name}")) {
-        "reference"
     } else {
         "reference"
     }
@@ -481,11 +500,8 @@ pub fn search_references(root: &str, query: &str) -> Result<Vec<SymbolHit>, Code
     if query.len() < 2 || !is_identifier_query(query) {
         return Ok(Vec::new());
     }
-    let word_re = regex::Regex::new(&format!(
-        r"(?m)\b{}\b",
-        regex::escape(query)
-    ))
-    .map_err(|error| CodeIndexError::Message(error.to_string()))?;
+    let word_re = regex::Regex::new(&format!(r"(?m)\b{}\b", regex::escape(query)))
+        .map_err(|error| CodeIndexError::Message(error.to_string()))?;
 
     let mut queue = VecDeque::from([root.clone()]);
     let mut visited = 0_usize;
@@ -719,18 +735,16 @@ export function summarizeSubagentFleet() { return null; }
     #[test]
     fn ignores_tiny_queries() {
         let root = temp_workspace();
-        assert!(search_symbols(root.to_str().unwrap(), "a").unwrap().is_empty());
+        assert!(search_symbols(root.to_str().unwrap(), "a")
+            .unwrap()
+            .is_empty());
         fs::remove_dir_all(&root).ok();
     }
 
     #[test]
     fn persists_definition_cache_under_grok() {
         let root = temp_workspace();
-        fs::write(
-            root.join("src/cache_me.rs"),
-            "pub fn CachedSymbol() {}\n",
-        )
-        .unwrap();
+        fs::write(root.join("src/cache_me.rs"), "pub fn CachedSymbol() {}\n").unwrap();
         let first = search_symbols(root.to_str().unwrap(), "CachedSymbol").unwrap();
         assert!(!first.is_empty());
         let cache = root.join(".grok/cache/symbol-defs-v1.json");
@@ -783,14 +797,20 @@ export function boot() {
         let hits = search_references(root.to_str().unwrap(), "RuntimeAdapter").unwrap();
         fs::remove_dir_all(&root).ok();
         assert!(hits.iter().any(|hit| hit.kind == "call"));
-        assert!(hits.iter().all(|hit| hit.kind != "function" && hit.kind != "trait"));
-        assert!(!hits.iter().any(|hit| hit.snippet.contains("pub fn RuntimeAdapter")));
+        assert!(hits
+            .iter()
+            .all(|hit| hit.kind != "function" && hit.kind != "trait"));
+        assert!(!hits
+            .iter()
+            .any(|hit| hit.snippet.contains("pub fn RuntimeAdapter")));
     }
 
     #[test]
     fn references_reject_non_identifiers() {
         let root = temp_workspace();
-        assert!(search_references(root.to_str().unwrap(), "foo.bar").unwrap().is_empty());
+        assert!(search_references(root.to_str().unwrap(), "foo.bar")
+            .unwrap()
+            .is_empty());
         fs::remove_dir_all(&root).ok();
     }
 }

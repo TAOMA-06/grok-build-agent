@@ -29,11 +29,7 @@ impl GrokAcpAdapter {
         Self::with_id(crate::adapter_registry::GENERIC_ADAPTER_ID, runtime, bus)
     }
 
-    fn with_id(
-        adapter_id: &'static str,
-        runtime: Arc<AcpRuntime>,
-        bus: SharedEventBus,
-    ) -> Self {
+    fn with_id(adapter_id: &'static str, runtime: Arc<AcpRuntime>, bus: SharedEventBus) -> Self {
         Self {
             adapter_id,
             runtime,
@@ -314,10 +310,7 @@ mod tests {
         std::fs::create_dir_all(&workspace).unwrap();
         let executable = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/mock_acp_agent.py");
-        std::env::set_var(
-            crate::adapter_registry::SECONDARY_ACP_ENV,
-            &executable,
-        );
+        std::env::set_var(crate::adapter_registry::SECONDARY_ACP_ENV, &executable);
         let adapter = GrokAcpAdapter::generic(Arc::new(AcpRuntime::new()), Arc::new(NoopEventBus));
         assert_eq!(
             adapter.adapter_id(),
@@ -337,7 +330,10 @@ mod tests {
             .await
             .unwrap();
         std::env::remove_var(crate::adapter_registry::SECONDARY_ACP_ENV);
-        assert_eq!(instance.adapter_id, crate::adapter_registry::GENERIC_ADAPTER_ID);
+        assert_eq!(
+            instance.adapter_id,
+            crate::adapter_registry::GENERIC_ADAPTER_ID
+        );
         let session = instance.session_id.clone().unwrap();
         adapter.cancel(&instance, &session).await.unwrap();
         adapter.shutdown(&instance).await.unwrap();

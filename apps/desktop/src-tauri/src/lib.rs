@@ -56,6 +56,7 @@ fn acquire_instance_lock() -> Result<Option<File>, String> {
         let path = std::path::Path::new(&directory).join("desktop-instance.lock");
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(path)
@@ -1066,13 +1067,7 @@ async fn upsert_job(
     state: State<'_, AppState>,
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, acp::AcpError> {
-    host_request(
-        &state,
-        "jobs.upsert",
-        payload,
-        Some(rpc_meta("jobs", None)),
-    )
-    .await
+    host_request(&state, "jobs.upsert", payload, Some(rpc_meta("jobs", None))).await
 }
 
 #[tauri::command]
@@ -2138,7 +2133,7 @@ pub fn run() {
             // background processes do not keep running after the UI closes.
             if let tauri::RunEvent::Exit = event {
                 let host = app_handle.state::<AppState>().host.clone();
-                let _ = tauri::async_runtime::block_on(async {
+                tauri::async_runtime::block_on(async {
                     // New Hosts stop every connection before exiting. Retain a
                     // backward-compatible active-runtime stop for an older
                     // already-running Host during an in-place upgrade.

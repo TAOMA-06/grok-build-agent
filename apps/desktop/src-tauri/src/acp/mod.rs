@@ -679,8 +679,7 @@ mod tests {
     impl EventBus for CountingBus {
         fn emit_value(&self, event: &str, _payload: serde_json::Value) {
             if event == "acp:session_update" {
-                self.count
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
         }
     }

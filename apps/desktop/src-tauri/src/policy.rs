@@ -30,6 +30,7 @@ pub fn classify_terminal_action(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn classify_terminal_action_with_options(
     request_id: String,
     workspace_id: String,
@@ -499,41 +500,42 @@ fn is_known_safe_project_check(program: &str, args: &[String], strict: bool) -> 
                     | "describe"
             )
         )
-        && !args.iter().any(|a| {
-            matches!(
-                a.as_str(),
-                "--hard" | "-D" | "--force" | "-f" | "--delete"
-            )
-        }));
+        && !args
+            .iter()
+            .any(|a| matches!(a.as_str(), "--hard" | "-D" | "--force" | "-f" | "--delete")));
 
     if strict {
         return pure_inspection
             || (program == "cargo"
-                && matches!(sub, Some("tree" | "metadata" | "version" | "-V" | "--version")));
+                && matches!(
+                    sub,
+                    Some("tree" | "metadata" | "version" | "-V" | "--version")
+                ));
     }
 
     pure_inspection
         || match program {
-            "cargo" => matches!(
-                sub,
-                Some(
-                    "test"
-                        | "check"
-                        | "clippy"
-                        | "build"
-                        | "fmt"
-                        | "tree"
-                        | "metadata"
-                        | "nextest"
-                )
-            ) && !args.iter().any(|a| a == "--" || a.starts_with("--eval")),
-            "git" => matches!(sub, Some("tag" | "remote" | "config"))
-                && !args.iter().any(|a| {
-                    matches!(
-                        a.as_str(),
-                        "--hard" | "-D" | "--force" | "-f" | "--delete"
+            "cargo" => {
+                matches!(
+                    sub,
+                    Some(
+                        "test"
+                            | "check"
+                            | "clippy"
+                            | "build"
+                            | "fmt"
+                            | "tree"
+                            | "metadata"
+                            | "nextest"
                     )
-                }),
+                ) && !args.iter().any(|a| a == "--" || a.starts_with("--eval"))
+            }
+            "git" => {
+                matches!(sub, Some("tag" | "remote" | "config"))
+                    && !args.iter().any(|a| {
+                        matches!(a.as_str(), "--hard" | "-D" | "--force" | "-f" | "--delete")
+                    })
+            }
             "rustc" | "rustfmt" | "clippy-driver" => args.iter().all(|a| {
                 is_metadata_only_flag(a)
                     || a.starts_with("--print")
@@ -542,13 +544,18 @@ fn is_known_safe_project_check(program: &str, args: &[String], strict: bool) -> 
             }),
             "tsc" | "eslint" | "prettier" | "vitest" | "jest" | "mocha" | "pytest" | "pyright"
             | "mypy" | "ruff" | "black" | "go" => match program {
-                "go" => matches!(sub, Some("test" | "vet" | "fmt" | "list" | "env" | "version")),
+                "go" => matches!(
+                    sub,
+                    Some("test" | "vet" | "fmt" | "list" | "env" | "version")
+                ),
                 "vitest" | "jest" | "mocha" | "pytest" => true,
                 "tsc" | "eslint" | "prettier" | "pyright" | "mypy" | "ruff" | "black" => true,
                 _ => false,
             },
-            "swift" => matches!(sub, Some("test" | "build" | "package"))
-                || args.iter().any(|a| a == "--version" || a == "-version"),
+            "swift" => {
+                matches!(sub, Some("test" | "build" | "package"))
+                    || args.iter().any(|a| a == "--version" || a == "-version")
+            }
             "xcodebuild" => args
                 .iter()
                 .all(|a| matches!(a.as_str(), "-version" | "-showsdks" | "-list" | "-help")),

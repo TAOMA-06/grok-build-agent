@@ -439,7 +439,8 @@ pub async fn spawn_connection(
         cmd.arg("--always-approve");
     }
     if !config.disallowed_tools.is_empty() {
-        cmd.arg("--disallowed-tools").arg(config.disallowed_tools.join(","));
+        cmd.arg("--disallowed-tools")
+            .arg(config.disallowed_tools.join(","));
     }
     cmd.arg("stdio");
     cmd.current_dir(&workspace);

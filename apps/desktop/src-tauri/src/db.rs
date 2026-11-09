@@ -3003,10 +3003,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn list_jobs(
-        &self,
-        workspace_id: Option<&str>,
-    ) -> Result<Vec<serde_json::Value>, DbError> {
+    pub fn list_jobs(&self, workspace_id: Option<&str>) -> Result<Vec<serde_json::Value>, DbError> {
         let conn = self.conn.lock();
         let mut stmt = if workspace_id.is_some() {
             conn.prepare(
@@ -3042,11 +3039,13 @@ impl Database {
             stmt.query_map(params![workspace_id], map_row)?
                 .collect::<Result<Vec<_>, _>>()?
         } else {
-            stmt.query_map([], map_row)?.collect::<Result<Vec<_>, _>>()?
+            stmt.query_map([], map_row)?
+                .collect::<Result<Vec<_>, _>>()?
         };
         Ok(rows)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn upsert_job(
         &self,
         job_id: &str,
@@ -4393,9 +4392,7 @@ mod tests {
             reviewed_at: None,
         };
         db.upsert_memory_candidate(&memory).unwrap();
-        let listed = db
-            .list_memory_candidates(Some("/workspace"), None)
-            .unwrap();
+        let listed = db.list_memory_candidates(Some("/workspace"), None).unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].content, "Prefer pnpm");
         assert!(db

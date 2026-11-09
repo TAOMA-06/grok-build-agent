@@ -813,7 +813,6 @@ fn mark_execution_intent_cancelled(state: &HostState, idempotency_key: &str, rea
     );
 }
 
-
 // RPC dispatch table lives in dispatch.rs
 
 fn terminal_execution_root(

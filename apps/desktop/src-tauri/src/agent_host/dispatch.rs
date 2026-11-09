@@ -19,12 +19,12 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
                 | "catalog.sessions.saveUi"
                 | "task.upsert"
                 | "context.save"
-            | "verification.save"
-            | "events.appendCompat"
-            | "events.platform.append"
-            | "memory.upsert"
-            | "memory.review"
-            | "profile.save"
+                | "verification.save"
+                | "events.appendCompat"
+                | "events.platform.append"
+                | "memory.upsert"
+                | "memory.review"
+                | "profile.save"
         )
     {
         return success(request.id, json!({}));
@@ -1205,4 +1205,3 @@ pub(super) async fn dispatch(state: &HostState, request: HostRequest) -> HostRes
     }
     response
 }
-

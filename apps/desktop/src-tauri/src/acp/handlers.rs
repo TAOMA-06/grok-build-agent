@@ -177,7 +177,11 @@ pub async fn handle_server_request(
     if is_terminal_method(&method) {
         let mode = session_id
             .as_deref()
-            .map(|id| conn.session_mode_state(id).current_mode.to_ascii_lowercase())
+            .map(|id| {
+                conn.session_mode_state(id)
+                    .current_mode
+                    .to_ascii_lowercase()
+            })
             .unwrap_or_default();
 
         // Plan mode: refuse PTY input so a previously-started process cannot be
